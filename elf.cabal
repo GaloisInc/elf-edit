@@ -16,10 +16,10 @@ Description:   Parser for ELF object format.
 Data-Files:    tests/empty.elf tests/Test.hs
 
 source-repository head
-  type:     darcs
-  location: http://code.fac9.com/elf/
+  type:     git
+  location: http://github.com/erikcharlebois/elf
 
 library
-    build-depends:   base, bytestring, binary
+    build-depends:   base >= 2 && < 5, bytestring, binary
     hs-source-dirs:  src
     exposed-modules: Data.Elf
