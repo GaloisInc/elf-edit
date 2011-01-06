@@ -4,6 +4,9 @@ module Data.Elf (parseElf
                 , ElfSection(..)
                 , ElfSectionType(..)
                 , ElfSectionFlags(..)
+                , ElfSegment(..)
+                , ElfSegmentType(..)
+                , ElfSegmentFlag(..)
                 , ElfClass(..)
                 , ElfData(..)
                 , ElfOSABI(..)
@@ -30,6 +33,7 @@ data Elf = Elf
     , elfMachine    :: ElfMachine    -- ^ Identifies the target architecture.
     , elfEntry      :: Word64        -- ^ Virtual address of the program entry point. 0 for non-executable Elfs.
     , elfSections   :: [ElfSection]  -- ^ List of sections in the file.
+    , elfSegments   :: [ElfSegment]  -- ^ List of segments in the file.
     } deriving (Eq, Show)
 
 data ElfSection = ElfSection
@@ -432,7 +436,9 @@ getElf_Shdr ei_class er elf_file string_section =
                 , elfSectionData      = B.take (fromIntegral sh_size) $ B.drop (fromIntegral sh_offset) elf_file
                 }
 
-getElf_Ehdr :: Get (Elf, Word64, Word16, Word16, Word16)
+data TableInfo = TableInfo { tableOffset :: Int, entrySize :: Int, entryNum :: Int }
+
+getElf_Ehdr :: Get (Elf, TableInfo, TableInfo, Word16)
 getElf_Ehdr = do
     ei_magic    <- getElfMagic
     ei_class    <- getElfClass
@@ -465,8 +471,11 @@ getElf_Ehdr = do
                         , elfType       = e_type
                         , elfMachine    = e_machine
                         , elfEntry      = e_entry
-                        , elfSections   = [] }
-                   , e_shoff, e_shentsize, e_shnum, e_shstrndx)
+                        , elfSections   = []
+                        , elfSegments   = [] }
+                   , TableInfo { tableOffset = fromIntegral e_phoff, entrySize = fromIntegral e_phentsize, entryNum = fromIntegral e_phnum }
+                   , TableInfo { tableOffset = fromIntegral e_shoff, entrySize = fromIntegral e_shentsize, entryNum = fromIntegral e_shnum }
+                   , e_shstrndx)
         ELFCLASS64 -> do
             e_type      <- getElfType er
             e_machine   <- getElfMachine er
@@ -489,8 +498,11 @@ getElf_Ehdr = do
                         , elfType       = e_type
                         , elfMachine    = e_machine
                         , elfEntry      = e_entry
-                        , elfSections   = [] }
-                   , e_shoff, e_shentsize, e_shnum, e_shstrndx)
+                        , elfSections   = []
+                        , elfSegments   = [] }
+                   , TableInfo { tableOffset = fromIntegral e_phoff, entrySize = fromIntegral e_phentsize, entryNum = fromIntegral e_phnum }
+                   , TableInfo { tableOffset = fromIntegral e_shoff, entrySize = fromIntegral e_shentsize, entryNum = fromIntegral e_shnum }
+                   , e_shstrndx)
 
 data ElfReader = ElfReader
     { getWord16 :: Get Word16
@@ -508,10 +520,93 @@ divide bs s n = let (x,y) = B.splitAt s bs in x : divide y s (n-1)
 -- fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
 parseElf :: B.ByteString -> Elf
 parseElf b =
-    let (e, e_shoff, e_shentsize, e_shnum, e_shstrndx) = runGet getElf_Ehdr $ L.fromChunks [b]
-        sh                                             = B.take (fromIntegral (e_shentsize * e_shnum)) $ B.drop (fromIntegral e_shoff) b
-        (shstroff, shstrsize)                          = runGet (getElf_Shdr_OffsetSize (elfClass e) (elfReader $ elfData e)) $ L.fromChunks [B.drop (fromIntegral (e_shentsize * e_shstrndx)) sh]
+    let ph                                             = table segTab
+        sh                                             = table secTab
+        (shstroff, shstrsize)                          = parseEntry getElf_Shdr_OffsetSize $ head $ drop (fromIntegral e_shstrndx) sh
         sh_str                                         = B.take (fromIntegral shstrsize) $ B.drop (fromIntegral shstroff) b
-        sections                                       = filter (\sec -> elfSectionType sec /= SHT_NULL) $ map (runGet (getElf_Shdr (elfClass e) (elfReader $ elfData e) b sh_str) . (\x -> L.fromChunks [x])) (divide sh (fromIntegral e_shentsize) (fromIntegral e_shnum))
-    in e { elfSections = sections }
+        segments                                       = filter (\seg -> elfSegmentType seg /= PT_NULL)  $ map (parseEntry (\c r -> parseElfSegmentEntry c r b)) ph
+        sections                                       = filter (\sec -> elfSectionType sec /= SHT_NULL) $ map (parseEntry (\c r -> getElf_Shdr c r b sh_str)) sh
+    in e { elfSections = sections, elfSegments = segments }
+
+  where table i                         = divide (B.drop (tableOffset i) b) (entrySize i) (entryNum i)
+        parseEntry p x                  = runGet (p (elfClass e) (elfReader (elfData e))) (L.fromChunks [x])
+        (e, segTab, secTab, e_shstrndx) = runGet getElf_Ehdr $ L.fromChunks [b]
+
+
+data ElfSegment = ElfSegment
+  { elfSegmentType      :: ElfSegmentType   -- ^ Segment type
+  , elfSegmentFlags     :: [ElfSegmentFlag] -- ^ Segment flags
+  , elfSegmentVirtAddr  :: Word64           -- ^ Virtual address for the segment
+  , elfSegmentPhysAddr  :: Word64           -- ^ Physical address for the segment
+  , elfSegmentAlign     :: Word64           -- ^ Segment alignment
+  , elfSegmentData      :: B.ByteString     -- ^ Data for the segment
+  , elfSegmentMemSize   :: Word64           -- ^ Size in memory  (may be larger then the segment's data)
+  } deriving (Eq,Show)
+
+-- | Segment Types.
+data ElfSegmentType
+  = PT_NULL         -- ^ Unused entry
+  | PT_LOAD         -- ^ Loadable segment
+  | PT_DYNAMIC      -- ^ Dynamic linking tables
+  | PT_INTERP       -- ^ Program interpreter path name
+  | PT_NOTE         -- ^ Note sectionks
+  | PT_SHLIB        -- ^ Reserved
+  | PT_PHDR         -- ^ Program header table
+  | PT_Other Word32 -- ^ Some other type
+    deriving (Eq,Show)
+
+parseElfSegmentType :: Word32 -> ElfSegmentType
+parseElfSegmentType x =
+  case x of
+    0 -> PT_NULL
+    1 -> PT_LOAD
+    2 -> PT_DYNAMIC
+    3 -> PT_INTERP
+    4 -> PT_NOTE
+    5 -> PT_SHLIB
+    6 -> PT_PHDR
+    _ -> PT_Other x
+
+
+parseElfSegmentEntry :: ElfClass -> ElfReader -> B.ByteString -> Get ElfSegment
+parseElfSegmentEntry elf_class er elf_file =
+  do p_type   <- parseElfSegmentType  `fmap` getWord32 er
+     p_flags  <- parseElfSegmentFlags `fmap` getWord32 er
+     p_offset <- getWord
+     p_vaddr  <- getWord
+     p_paddr  <- getWord
+     p_filesz <- getWord
+     p_memsz  <- getWord
+     p_align  <- getWord
+     return ElfSegment
+       { elfSegmentType     = p_type
+       , elfSegmentFlags    = p_flags
+       , elfSegmentVirtAddr = p_vaddr
+       , elfSegmentPhysAddr = p_paddr
+       , elfSegmentAlign    = p_align
+       , elfSegmentData     = B.take (fromIntegral p_filesz) $ B.drop (fromIntegral p_offset) elf_file
+       , elfSegmentMemSize  = p_memsz
+       }
+
+  where getWord = case elf_class of
+                    ELFCLASS64 -> getWord64 er
+                    ELFCLASS32 -> fromIntegral `fmap` getWord32 er
+
+
+data ElfSegmentFlag
+  = PF_X        -- ^ Execute permission
+  | PF_W        -- ^ Write permission
+  | PF_R        -- ^ Read permission
+  | PF_Ext Int  -- ^ Some other flag, the Int is the bit number for the flag.
+    deriving (Eq,Show)
+
+parseElfSegmentFlags :: Word32 -> [ElfSegmentFlag]
+parseElfSegmentFlags word = [ cvt bit | bit <- [ 0 .. 31 ], testBit word bit ]
+  where cvt 0 = PF_X
+        cvt 1 = PF_W
+        cvt 2 = PF_R
+        cvt n = PF_Ext n
+
+
+
 
