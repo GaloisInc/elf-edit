@@ -1,5 +1,7 @@
 -- | Data.Elf  is a module for parsing a ByteString of an ELF file into an Elf record.
-module Data.Elf (parseElf
+module Data.Elf ( parseElf
+                , parseSymbolTables
+                , findSymbolDefinition
                 , Elf(..)
                 , ElfSection(..)
                 , ElfSectionType(..)
@@ -11,11 +13,16 @@ module Data.Elf (parseElf
                 , ElfData(..)
                 , ElfOSABI(..)
                 , ElfType(..)
-                , ElfMachine(..)) where
+                , ElfMachine(..)
+                , ElfSymbolTableEntry(..)
+                , ElfSymbolType(..)
+                , ElfSymbolBinding(..)
+                , ElfSectionIndex(..)) where
 
 import Data.Binary
-import Data.Binary.Get
+import Data.Binary.Get as G
 import Data.Bits
+import Data.Maybe
 import Data.Word
 import Numeric
 import Control.Monad
@@ -607,6 +614,201 @@ parseElfSegmentFlags word = [ cvt bit | bit <- [ 0 .. 31 ], testBit word bit ]
         cvt 2 = PF_R
         cvt n = PF_Ext n
 
+-- | The symbol table entries consist of index information to be read from other
+-- parts of the ELF file. Some of this information is automatically retrieved
+-- for your convenience (including symbol name, description of the enclosing
+-- section, and definition).
+data ElfSymbolTableEntry = EST
+    { steName             :: (Word32,Maybe B.ByteString)
+    , steEnclosingSection :: Maybe ElfSection -- ^ Section from steIndex
+    , steType             :: ElfSymbolType
+    , steBind             :: ElfSymbolBinding
+    , steOther            :: Word8
+    , steIndex            :: ElfSectionIndex  -- ^ Section in which the def is held
+    , steValue            :: Word64
+    , steSize             :: Word64
+    } deriving (Eq, Show)
 
+-- | Parse the symbol table section into a list of symbol table entries. If
+-- no symbol table is found then an empty list is returned.
+-- This function does not consult flags to look for SHT_STRTAB (when naming symbols),
+-- it just looks for particular sections of ".strtab" and ".shstrtab".
+parseSymbolTables :: Elf -> [[ElfSymbolTableEntry]]
+parseSymbolTables e =
+    let secs = symbolTableSections e
+    in map (getSymbolTableEntries e) secs
+
+-- | Assumes the given section is a symbol table, type SHT_SYMTAB
+-- (guaranteed by parseSymbolTables).
+getSymbolTableEntries :: Elf -> ElfSection -> [ElfSymbolTableEntry]
+getSymbolTableEntries e s =
+    let link   = elfSectionLink s
+        strtab = lookup (fromIntegral link) (zip [1..] (elfSections e))
+    in runGetMany (getSymbolTableEntry e strtab) (L.fromChunks [elfSectionData s])
+
+-- | Use the symbol offset and size to extract its definition
+-- (in the form of a ByteString).
+-- If the size is zero, or the offset larger than the 'elfSectionData',
+-- then 'Nothing' is returned.
+findSymbolDefinition :: ElfSymbolTableEntry -> Maybe B.ByteString
+findSymbolDefinition e =
+    let enclosingData = fmap elfSectionData (steEnclosingSection e)
+        start = fromIntegral (steValue e)
+        len = fromIntegral (steSize e)
+        def = fmap (B.take len . B.drop start) enclosingData
+    in if def == Just B.empty then Nothing else def
+
+runGetMany :: Get a -> L.ByteString -> [a]
+runGetMany g bs
+    | L.length bs == 0 = []
+    | otherwise        = let (v,bs',_) = runGetState g bs 0 in v: runGetMany g bs'
+
+symbolTableSections :: Elf -> [ElfSection]
+symbolTableSections e = filter ((== SHT_SYMTAB) . elfSectionType) (elfSections e)
+
+-- | Gets a single entry from the symbol table, use with runGetMany.
+getSymbolTableEntry :: Elf -> Maybe ElfSection -> Get ElfSymbolTableEntry
+getSymbolTableEntry e strtlb =
+    if elfClass e == ELFCLASS32 then getSymbolTableEntry32 else getSymbolTableEntry64
+  where
+  strs = fromMaybe B.empty (fmap elfSectionData strtlb)
+  er = elfReader (elfData e)
+  getSymbolTableEntry32 = do
+    nameIdx <- liftM fromIntegral (getWord32 er)
+    value <- liftM fromIntegral (getWord32 er)
+    size  <- liftM fromIntegral (getWord32 er)
+    info  <- getWord8
+    other <- getWord8
+    sTlbIdx <- liftM (toEnum . fromIntegral) (getWord16 er)
+    let name = stringByIndex nameIdx strs
+        (typ,bind) = infoToTypeAndBind info
+        sec = sectionByIndex e sTlbIdx
+    return $ EST (nameIdx,name) sec typ bind other sTlbIdx value size
+  getSymbolTableEntry64 = do
+    nameIdx <- liftM fromIntegral (getWord32 er)
+    info <- getWord8
+    other <- getWord8
+    sTlbIdx <- liftM (toEnum . fromIntegral) (getWord16 er)
+    symVal <- getWord64 er
+    size <- getWord64 er
+    let name = stringByIndex nameIdx strs
+        (typ,bind) = infoToTypeAndBind info
+        sec = sectionByIndex e sTlbIdx
+    return $ EST (nameIdx,name) sec typ bind other sTlbIdx symVal size
+
+sectionByIndex :: Elf -> ElfSectionIndex -> Maybe ElfSection
+sectionByIndex e (SHNIndex i) = lookup i . zip [1..] $ (elfSections e)
+sectionByIndex _ _ = Nothing
+
+infoToTypeAndBind :: Word8 -> (ElfSymbolType,ElfSymbolBinding)
+infoToTypeAndBind i =
+    let t = fromIntegral $ i .&. 0x0F
+        b = fromIntegral $ (i .&. 0xF) `shiftR` 4
+    in (toEnum t, toEnum b)
+
+data ElfSymbolBinding
+    = STBLocal
+    | STBGlobal
+    | STBWeak
+    | STBLoOS
+    | STBHiOS
+    | STBLoProc
+    | STBHiProc
+    deriving (Eq, Ord, Show, Read)
+
+instance Enum ElfSymbolBinding where
+    fromEnum STBLocal  = 0
+    fromEnum STBGlobal = 1
+    fromEnum STBWeak   = 2
+    fromEnum STBLoOS   = 10
+    fromEnum STBHiOS   = 12
+    fromEnum STBLoProc = 13
+    fromEnum STBHiProc = 15
+    toEnum  0 = STBLocal
+    toEnum  1 = STBGlobal
+    toEnum  2 = STBWeak
+    toEnum 10 = STBLoOS
+    toEnum 12 = STBHiOS
+    toEnum 13 = STBLoProc
+    toEnum 15 = STBHiProc
+
+data ElfSymbolType
+    = STTNoType
+    | STTObject
+    | STTFunc
+    | STTSection
+    | STTFile
+    | STTLoOS
+    | STTHiOS
+    | STTLoProc
+    | STTHiProc
+    deriving (Eq, Ord, Show, Read)
+
+instance Enum ElfSymbolType where
+    fromEnum STTNoType  = 0
+    fromEnum STTObject  = 1
+    fromEnum STTFunc    = 2
+    fromEnum STTSection = 3
+    fromEnum STTFile    = 4
+    fromEnum STTLoOS    = 10
+    fromEnum STTHiOS    = 12
+    fromEnum STTLoProc  = 13
+    fromEnum STTHiProc  = 15
+    toEnum  0 = STTNoType
+    toEnum  1 = STTObject
+    toEnum  2 = STTFunc
+    toEnum  3 = STTSection
+    toEnum  4 = STTFile
+    toEnum 10 = STTLoOS
+    toEnum 12 = STTHiOS
+    toEnum 13 = STTLoProc
+    toEnum 15 = STTHiProc
+
+data ElfSectionIndex
+    = SHNUndef
+    | SHNLoProc
+    | SHNCustomProc Word64
+    | SHNHiProc
+    | SHNLoOS
+    | SHNCustomOS Word64
+    | SHNHiOS
+    | SHNAbs
+    | SHNCommon
+    | SHNIndex Word64
+    deriving (Eq, Ord, Show, Read)
+
+instance Enum ElfSectionIndex where
+    fromEnum SHNUndef = 0
+    fromEnum SHNLoProc = 0xFF00
+    fromEnum SHNHiProc = 0xFF1F
+    fromEnum SHNLoOS   = 0xFF20
+    fromEnum SHNHiOS   = 0xFF3F
+    fromEnum SHNAbs    = 0xFFF1
+    fromEnum SHNCommon = 0xFFF2
+    fromEnum (SHNCustomProc x) = fromIntegral x
+    fromEnum (SHNCustomOS x) = fromIntegral x
+    fromEnum (SHNIndex x) = fromIntegral x
+    toEnum 0 = SHNUndef
+    toEnum 0xff00 = SHNLoProc
+    toEnum 0xFF1F = SHNHiProc
+    toEnum 0xFF20 = SHNLoOS
+    toEnum 0xFF3F = SHNHiOS
+    toEnum 0xFFF1 = SHNAbs
+    toEnum 0xFFF2 = SHNCommon
+    toEnum x
+        | x > fromEnum SHNLoProc && x < fromEnum SHNHiProc = SHNCustomProc (fromIntegral x)
+        | x > fromEnum SHNLoOS && x < fromEnum SHNHiOS = SHNCustomOS (fromIntegral x)
+        | x < fromEnum SHNLoProc || x > 0xFFFF = SHNIndex (fromIntegral x)
+        | otherwise = error "Section index number is in a reserved range but we don't recognize the value from any standard."
+
+-- | Given a section name, extract the ElfSection.
+findSectionByName :: String -> Elf -> Maybe ElfSection
+findSectionByName name = listToMaybe . filter ((==) name . elfSectionName) . elfSections
+
+-- Get a string from a strtab ByteString.
+stringByIndex :: Integral n => n -> B.ByteString -> Maybe B.ByteString
+stringByIndex n strtab =
+    let str = (B.takeWhile (/=0) . B.drop (fromIntegral n)) strtab
+    in if B.length str == 0 then Nothing else Just str
 
 
