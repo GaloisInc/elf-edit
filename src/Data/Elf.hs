@@ -531,8 +531,8 @@ parseElf b =
         sh                                             = table secTab
         (shstroff, shstrsize)                          = parseEntry getElf_Shdr_OffsetSize $ head $ drop (fromIntegral e_shstrndx) sh
         sh_str                                         = B.take (fromIntegral shstrsize) $ B.drop (fromIntegral shstroff) b
-        segments                                       = filter (\seg -> elfSegmentType seg /= PT_NULL)  $ map (parseEntry (\c r -> parseElfSegmentEntry c r b)) ph
-        sections                                       = filter (\sec -> elfSectionType sec /= SHT_NULL) $ map (parseEntry (\c r -> getElf_Shdr c r b sh_str)) sh
+        segments                                       = map (parseEntry (\c r -> parseElfSegmentEntry c r b)) ph
+        sections                                       = map (parseEntry (\c r -> getElf_Shdr c r b sh_str)) sh
     in e { elfSections = sections, elfSegments = segments }
 
   where table i                         = divide (B.drop (tableOffset i) b) (entrySize i) (entryNum i)
@@ -643,7 +643,7 @@ parseSymbolTables e =
 getSymbolTableEntries :: Elf -> ElfSection -> [ElfSymbolTableEntry]
 getSymbolTableEntries e s =
     let link   = elfSectionLink s
-        strtab = lookup (fromIntegral link) (zip [1..] (elfSections e))
+        strtab = lookup (fromIntegral link) (zip [0..] (elfSections e))
     in runGetMany (getSymbolTableEntry e strtab) (L.fromChunks [elfSectionData s])
 
 -- | Use the symbol offset and size to extract its definition
