@@ -576,15 +576,16 @@ parseElfSegmentType x =
 
 
 parseElfSegmentEntry :: ElfClass -> ElfReader -> B.ByteString -> Get ElfSegment
-parseElfSegmentEntry elf_class er elf_file =
-  do p_type   <- parseElfSegmentType  `fmap` getWord32 er
+parseElfSegmentEntry elf_class er elf_file = case elf_class of
+  ELFCLASS64 -> do
+     p_type   <- parseElfSegmentType  `fmap` getWord32 er
      p_flags  <- parseElfSegmentFlags `fmap` getWord32 er
-     p_offset <- getWord
-     p_vaddr  <- getWord
-     p_paddr  <- getWord
-     p_filesz <- getWord
-     p_memsz  <- getWord
-     p_align  <- getWord
+     p_offset <- getWord64 er
+     p_vaddr  <- getWord64 er
+     p_paddr  <- getWord64 er
+     p_filesz <- getWord64 er
+     p_memsz  <- getWord64 er
+     p_align  <- getWord64 er
      return ElfSegment
        { elfSegmentType     = p_type
        , elfSegmentFlags    = p_flags
@@ -595,10 +596,24 @@ parseElfSegmentEntry elf_class er elf_file =
        , elfSegmentMemSize  = p_memsz
        }
 
-  where getWord = case elf_class of
-                    ELFCLASS64 -> getWord64 er
-                    ELFCLASS32 -> fromIntegral `fmap` getWord32 er
-
+  ELFCLASS32 -> do
+     p_type   <- parseElfSegmentType  `fmap` getWord32 er
+     p_offset <- fromIntegral `fmap` getWord32 er
+     p_vaddr  <- fromIntegral `fmap` getWord32 er
+     p_paddr  <- fromIntegral `fmap` getWord32 er
+     p_filesz <- fromIntegral `fmap` getWord32 er
+     p_memsz  <- fromIntegral `fmap` getWord32 er
+     p_flags  <- parseElfSegmentFlags `fmap` getWord32 er
+     p_align  <- fromIntegral `fmap` getWord32 er
+     return ElfSegment
+       { elfSegmentType     = p_type
+       , elfSegmentFlags    = p_flags
+       , elfSegmentVirtAddr = p_vaddr
+       , elfSegmentPhysAddr = p_paddr
+       , elfSegmentAlign    = p_align
+       , elfSegmentData     = B.take (fromIntegral p_filesz) $ B.drop (fromIntegral p_offset) elf_file
+       , elfSegmentMemSize  = p_memsz
+       }
 
 data ElfSegmentFlag
   = PF_X        -- ^ Execute permission
