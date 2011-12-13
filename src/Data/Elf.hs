@@ -753,6 +753,8 @@ data ElfSymbolType
     | STTFunc
     | STTSection
     | STTFile
+    | STTCommon
+    | STTTLS
     | STTLoOS
     | STTHiOS
     | STTLoProc
@@ -765,6 +767,8 @@ instance Enum ElfSymbolType where
     fromEnum STTFunc    = 2
     fromEnum STTSection = 3
     fromEnum STTFile    = 4
+    fromEnum STTCommon  = 5
+    fromEnum STTTLS     = 6
     fromEnum STTLoOS    = 10
     fromEnum STTHiOS    = 12
     fromEnum STTLoProc  = 13
@@ -774,6 +778,8 @@ instance Enum ElfSymbolType where
     toEnum  2 = STTFunc
     toEnum  3 = STTSection
     toEnum  4 = STTFile
+    toEnum  5 = STTCommon
+    toEnum  6 = STTTLS
     toEnum 10 = STTLoOS
     toEnum 12 = STTHiOS
     toEnum 13 = STTLoProc
