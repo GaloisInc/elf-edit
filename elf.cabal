@@ -1,5 +1,5 @@
 Name:          elf
-Version:       0.25
+Version:       0.26
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
@@ -8,7 +8,7 @@ Copyright:     Erik Charlebois
 Maintainer:    Erik Charlebois <erikcharlebois@gmail.com>
 Stability:     unstable
 Cabal-Version: >= 1.6
-Homepage:      http://code.fac9.com/elf/
+Homepage:      http://github.com/erikcharlebois/elf
 Build-Depends: base
 Build-Type:    Custom
 Synopsis:      Parser for ELF object format.
