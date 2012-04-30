@@ -80,7 +80,7 @@ as32 w | w >= 2^(32::Word32) = error $ "Word is too large to be treated as a 32-
        | otherwise = fromIntegral w
 
 -- | Shows a bitwise combination of flags
-showFlags :: (Bits w, Integral w) => V.Vector String -> Int -> w -> ShowS
+showFlags :: (Show w, Bits w, Integral w) => V.Vector String -> Int -> w -> ShowS
 showFlags names d w = 
   case l of                              
         [] -> showString "pf_none"
