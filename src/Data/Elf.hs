@@ -97,13 +97,6 @@ showFlags names d w =
 tryParse :: Monad m => String -> (a -> Maybe b) -> a -> m b
 tryParse desc toFn = maybe (fail ("Invalid " ++ desc)) return . toFn
 
--- | Returns null-terminated string at given index in bytestring.
-lookupString :: Int -> B.ByteString -> String
-lookupString o b
-  = B.toString 
-  $ B.takeWhile (/= 0) 
-  $ B.drop o b
-
 data Elf = Elf
     { elfClass      :: ElfClass      -- ^ Identifies the class of the object file.
     , elfData       :: ElfData       -- ^ Identifies the data encoding of the object file.
@@ -385,6 +378,7 @@ shstrtab = ".shstrtab"
 
 type StringTable = (Map.Map B.ByteString Word32, Builder)
 
+-- | Insert bytestring in list of strings.
 insertString :: StringTable -> B.ByteString -> StringTable
 insertString a@(m,b) bs 
     | Map.member bs m = a
@@ -399,7 +393,9 @@ stringTable :: [String] -> (B.ByteString, Map.Map String Word32)
 stringTable strings = (res, stringMap)
   where res = B.concat $ L.toChunks (U.toLazyByteString b)
         empty_table = (Map.empty, mempty)
+        -- Get list of strings as bytestrings.
         bsl = map B.fromString strings
+        -- | Reverses individual bytestrings in list.
         revl = map B.reverse
         -- Compress entries by removing a string if it is the suffix of
         -- another string.
@@ -415,11 +411,9 @@ stringTable strings = (res, stringMap)
                       Nothing -> error $ "Can't find " ++ show bs ++ " in " ++ show m ++ "\n" ++ show strings
         stringMap = Map.fromList $ strings `zip` map myFind bsl
 
--- Get a string from a strtab ByteString.
-stringByIndex :: Integral n => n -> B.ByteString -> Maybe B.ByteString
-stringByIndex n strtab =
-    let str = (B.takeWhile (/=0) . B.drop (fromIntegral n)) strtab
-    in if B.length str == 0 then Nothing else Just str
+-- | Returns null-terminated string at given index in bytestring.
+lookupString :: Word32 -> B.ByteString -> B.ByteString
+lookupString o b = B.takeWhile (/= 0) $ B.drop (fromIntegral o) b
 
 -- | Create a section for the section name table from the data.
 elfNameTableSection :: B.ByteString -> ElfSection
@@ -446,6 +440,28 @@ elfSections e = r
           where (t,_) = stringTable (map elfSectionName r) 
         impl (ElfDataSection s) = [s]
         impl _ = []
+
+-- | Given a section name, extract the ElfSection.
+findSectionByName :: String -> Elf -> Maybe ElfSection
+findSectionByName name = listToMaybe . filter ((==) name . elfSectionName) . elfSections
+
+-- | Update sections in elf file.  
+updateSections :: (ElfSection -> Maybe ElfSection) -> Elf -> Elf
+updateSections fn e = e { elfFileData = mapMaybe impl (elfFileData e) }
+  where (t,_) = stringTable $ map elfSectionName (elfSections e)
+        norm s | elfSectionName s == shstrtab = ElfDataSectionNameTable
+               | otherwise = ElfDataSection s
+        impl (ElfDataSegment s) = Just (ElfDataSegment s')
+          where s' = s { elfSegmentData = mapMaybe impl (elfSegmentData s) }
+        impl ElfDataSectionNameTable = norm <$> fn (elfNameTableSection t)
+        impl (ElfDataSection s) = norm <$> fn s
+        impl d = Just d
+        
+-- | Remove section with given name.
+removeSectionByName :: String -> Elf -> Elf
+removeSectionByName nm = updateSections fn
+  where fn s | elfSectionName s == nm = Nothing
+             | otherwise = Just s
 
 -- | List of segments in the file.
 elfSegments :: Elf -> [ElfSegment]  
@@ -486,7 +502,7 @@ getShdr32 d file string_section = do
   sh_name      <- getWord32 d
   sh_type      <- toElfSectionType    <$> getWord32 d
   sh_flags     <- ElfSectionFlags <$> getWord32As64 d
-  sh_addr      <- getWord32 d
+  sh_addr      <- fromIntegral <$> getWord32 d
   sh_offset    <- fromIntegral <$> getWord32 d
   sh_size      <- getWord32As64 d
   sh_link      <- getWord32 d
@@ -494,10 +510,10 @@ getShdr32 d file string_section = do
   sh_addralign <- fromIntegral <$> getWord32 d
   sh_entsize   <- fromIntegral <$> getWord32 d
   let s = ElfSection
-           { elfSectionName      = lookupString (fromIntegral sh_name) string_section
+           { elfSectionName      = B.toString $ lookupString sh_name string_section
            , elfSectionType      = sh_type
            , elfSectionFlags     = sh_flags
-           , elfSectionAddr      = fromIntegral sh_addr
+           , elfSectionAddr      = sh_addr
            , elfSectionSize      = sh_size
            , elfSectionLink      = sh_link
            , elfSectionInfo      = sh_info
@@ -511,16 +527,16 @@ getShdr64 :: ElfData -> GetShdrFn
 getShdr64 er file string_section = do
   sh_name      <- getWord32 er
   sh_type      <- toElfSectionType <$> getWord32 er
-  sh_flags     <- ElfSectionFlags <$> getWord64 er
+  sh_flags     <- ElfSectionFlags  <$> getWord64 er
   sh_addr      <- getWord64 er
-  sh_offset    <- fromIntegral <$> getWord64 er
+  sh_offset    <- fromIntegral     <$> getWord64 er
   sh_size      <- getWord64 er
   sh_link      <- getWord32 er
   sh_info      <- getWord32 er
   sh_addralign <- getWord64 er
   sh_entsize   <- getWord64 er
   let s = ElfSection 
-           { elfSectionName      = lookupString (fromIntegral sh_name) string_section
+           { elfSectionName      = B.toString $ lookupString sh_name string_section
            , elfSectionType      = sh_type
            , elfSectionFlags     = sh_flags
            , elfSectionAddr      = sh_addr
@@ -581,6 +597,9 @@ data TableLayout =
               , entrySize :: Int
               , entryNum :: Word16 
               }
+  
+mkTableLayout :: Int -> Word16 -> Word16 -> TableLayout
+mkTableLayout o s n = TableLayout o (fromIntegral s) n
 
 -- | Returns offset of entry in table.
 tableEntry :: TableLayout -> Word16 -> B.ByteString -> L.ByteString
@@ -639,29 +658,27 @@ insertSpecialRegion sizeOf r n = insertAtOffset sizeOf r fn
           | c <= B.length b = n : insertRawRegion (B.drop c b) l
         fn _ = error "Illegal special insertion"               
 
--- | Inserts a segment into the head of a list of regions after collecting
--- all the regions that it contains.
-gatherSegmentData :: RegionSizeFn
-                  -> ElfSegmentF Range
-                  -> RegionPrefixFn
-gatherSegmentData sizeOf d = impl (snd (elfSegmentData d)) [] 
-  where impl 0 l r = ElfDataSegment (fmap (\_ -> reverse l) d):r
-        impl cnt l (p:r) | fromIntegral (sizeOf p) <= cnt = impl (cnt - fromIntegral (sizeOf p)) (p:l) r
-        impl cnt l (ElfDataRaw b:r) =
-            ElfDataSegment (d `setElfSegmentData` (reverse l ++ insertRawRegion pre [])) :
-              insertRawRegion post r  
-          where pre = B.take cnt b
-                post = B.drop cnt b
-        impl _ _ (_:_) = error "gatherSegmentData: Data overlaps unexpectedly"
-        impl _ _ []    = error "gatherSegmentData: Data ended before completion"
 
 insertSegment :: RegionSizeFn
               -> ElfSegmentF Range
               -> RegionPrefixFn
-insertSegment sizeOf d r = insertAtOffset sizeOf (elfSegmentData d) fn r
-  where (_,szd) = elfSegmentData d
-        d' = d { elfSegmentData = (0,szd) }
-        fn = gatherSegmentData sizeOf d'
+insertSegment sizeOf d = insertAtOffset sizeOf rng (gather szd [])
+  where rng@(_,szd) = elfSegmentData d
+        -- | @gather@ inserts new segment into head of list after collecting existings 
+        -- data it contains.
+        gather :: Int -> [ElfDataRegion] -> RegionPrefixFn
+        gather 0 l r = ElfDataSegment (d `setElfSegmentData` reverse l):r
+        gather cnt l (p:r)
+          | fromIntegral (sizeOf p) <= cnt
+          = gather (cnt - fromIntegral (sizeOf p)) (p:l) r
+        gather cnt l (ElfDataRaw b:r) =
+            ElfDataSegment d' : insertRawRegion post r  
+          where pre = B.take cnt b
+                post = B.drop cnt b
+                newData = reverse l ++ insertRawRegion pre []
+                d' = d `setElfSegmentData` newData
+        gather _ _ (_:_) = error "insertSegment: Data overlaps unexpectedly"
+        gather _ _ []    = error "insertSegment: Data ended before completion"
 
 -- | Contains information needed to parse elf files.
 data ElfParseInfo = ElfParseInfo {
@@ -701,7 +718,7 @@ parseElfRegions epi file = final
   where getSection i = runGet (getShdr epi file names) 
                               (tableEntry (shdrTable epi) i file)
         nameRange = fst $ getSection (shdrNameIdx epi)
-        sizeOf = regionSize epi (fromIntegral (snd nameRange))
+        sizeOf = regionSize epi (snd nameRange)
         names = slice nameRange file
         -- Define table with special data regions. 
         headers = [ ((0, ehdrSize epi), ElfDataElfHeader)
@@ -763,10 +780,10 @@ parseElf b = flip runGet (L.fromChunks [b]) $ do
       e_shstrndx  <- getWord16 d
       let epi = ElfParseInfo {
                     ehdrSize = fromIntegral e_ehsize
-                  , phdrTable = TableLayout e_phoff (fromIntegral e_phentsize) e_phnum
+                  , phdrTable = mkTableLayout e_phoff e_phentsize e_phnum
                   , getPhdr = getPhdr32 d
                   , shdrNameIdx = e_shstrndx
-                  , shdrTable = TableLayout e_shoff (fromIntegral e_shentsize) e_shnum
+                  , shdrTable = mkTableLayout e_shoff e_shentsize e_shnum
                   , getShdr = getShdr32 d
                   }
       return Elf { elfClass      = ei_class
@@ -798,10 +815,10 @@ parseElf b = flip runGet (L.fromChunks [b]) $ do
       e_shstrndx  <- getWord16 d
       let epi = ElfParseInfo {
                     ehdrSize = fromIntegral e_ehsize
-                  , phdrTable = TableLayout e_phoff (fromIntegral e_phentsize) e_phnum
+                  , phdrTable = mkTableLayout e_phoff e_phentsize e_phnum
                   , getPhdr = getPhdr64 d
                   , shdrNameIdx = e_shstrndx
-                  , shdrTable = TableLayout e_shoff (fromIntegral e_shentsize) e_shnum
+                  , shdrTable = mkTableLayout e_shoff e_shentsize e_shnum
                   , getShdr = getShdr64 d
                   }
       return Elf { elfClass      = ei_class
@@ -986,6 +1003,7 @@ data ElfLayout w = ElfLayout {
       , shdrs :: [Builder]
       }
 
+-- | Return total size of output.
 outputSize :: ElfLayout w -> Int64
 outputSize = U.length . elfOutput
 
@@ -1118,6 +1136,11 @@ runGetMany g bs
 symbolTableSections :: Elf -> [ElfSection]
 symbolTableSections e = filter ((== SHT_SYMTAB) . elfSectionType) (elfSections e)
 
+-- Get a string from a strtab ByteString.
+stringByIndex :: Word32 -> B.ByteString -> Maybe B.ByteString
+stringByIndex n strtab = if B.length str == 0 then Nothing else Just str
+  where str = lookupString n strtab
+
 -- | Gets a single entry from the symbol table, use with runGetMany.
 getSymbolTableEntry :: Elf -> Maybe ElfSection -> Get ElfSymbolTableEntry
 getSymbolTableEntry e strtlb =
@@ -1127,8 +1150,8 @@ getSymbolTableEntry e strtlb =
   er = elfData e
   getSymbolTableEntry32 = do
     nameIdx <- getWord32 er
-    value <- liftM fromIntegral (getWord32 er)
-    size  <- liftM fromIntegral (getWord32 er)
+    value <- fromIntegral <$> getWord32 er
+    size  <- fromIntegral <$> getWord32 er
     info  <- getWord8
     other <- getWord8
     sTlbIdx <- liftM (toEnum . fromIntegral) (getWord16 er)
@@ -1262,23 +1285,3 @@ instance Enum ElfSectionIndex where
         | x > fromEnum SHNLoOS && x < fromEnum SHNHiOS = SHNCustomOS (fromIntegral x)
         | x < fromEnum SHNLoProc || x > 0xFFFF = SHNIndex (fromIntegral x)
         | otherwise = error "Section index number is in a reserved range but we don't recognize the value from any standard."
-
--- | Given a section name, extract the ElfSection.
-findSectionByName :: String -> Elf -> Maybe ElfSection
-findSectionByName name = listToMaybe . filter ((==) name . elfSectionName) . elfSections
-
-updateSections :: (ElfSection -> Maybe ElfSection) -> Elf -> Elf
-updateSections fn e = e { elfFileData = mapMaybe impl (elfFileData e) }
-  where (t,_) = stringTable $ map elfSectionName (elfSections e)
-        norm s | elfSectionName s == shstrtab = ElfDataSectionNameTable
-               | otherwise = ElfDataSection s
-        impl (ElfDataSegment s) = Just (ElfDataSegment s')
-          where s' = s { elfSegmentData = mapMaybe impl (elfSegmentData s) }
-        impl ElfDataSectionNameTable = norm <$> fn (elfNameTableSection t)
-        impl (ElfDataSection s) = norm <$> fn s
-        impl d = Just d
-        
-removeSectionByName :: String -> Elf -> Elf
-removeSectionByName nm = updateSections fn
-  where fn s | elfSectionName s == nm = Nothing
-             | otherwise = Just s
