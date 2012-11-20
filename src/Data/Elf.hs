@@ -618,36 +618,42 @@ tableRange l = (fromIntegral $ tableOffset l, tableSize l)
 -- | Returns size of region.
 type RegionSizeFn = ElfDataRegion -> Int
 
--- | Function that inserts a regions to begining of list.
+-- | Function that transforms list of regions into new list.
 type RegionPrefixFn = [ElfDataRegion] -> [ElfDataRegion]
 
--- | Create a singleton list with a raw data region if one 
--- exists
+-- | Create a singleton list with a raw data region if one exists
 insertRawRegion :: B.ByteString -> RegionPrefixFn
 insertRawRegion b r | B.length b == 0 = r
                     | otherwise = ElfDataRaw b : r
 
--- Insert an elf data region at a given offset.
-insertAtOffset :: RegionSizeFn 
+-- | Insert an elf data region at a given offset.
+insertAtOffset :: RegionSizeFn   -- ^ Returns size of region.
                -> Range
                -> RegionPrefixFn -- ^ Insert function
                -> RegionPrefixFn
--- | If new region is contained inside existing segment, then insert inside segment.
 insertAtOffset sizeOf (o,c) fn (p:r)
+    -- Go to next segment if offset to insert is after p.
   | o >= sz = p:insertAtOffset sizeOf (o-sz,c) fn r
+    -- Recurse inside segment if p is a segment that contains region to insert.
   | o + c <= sz 
   , ElfDataSegment s <- p = -- New region ends before p ends and p is a segment.
       let d' = insertAtOffset sizeOf (o,c) fn (elfSegmentData s)
-        in ElfDataSegment s { elfSegmentData = d' } : r    
+       in ElfDataSegment s { elfSegmentData = d' } : r
+    -- Insert into current region is offset is 0.
   | o == 0 = fn (p:r)
+    -- Split a raw segment into prefix and post.
   | ElfDataRaw b <- p =
-      let (pre,post) = B.splitAt o b
-       in insertRawRegion pre $ fn $ insertRawRegion post r
-  | otherwise = error $ "Attempt to insert overlapping Elf region"
+      -- We know offset is less than length of bytestring as otherwise we would
+      -- have gone to next segment
+      assert (o < B.length b) $ do
+        let (pre,post) = B.splitAt o b
+        insertRawRegion pre $ fn $ insertRawRegion post r
+  | otherwise = error "Attempt to insert overlapping Elf region"
   where sz = fromIntegral $ sizeOf p
 insertAtOffset _ (0,0) fn [] = fn []
-insertAtOffset _ _ _ [] = error $ "Invalid region"
+insertAtOffset _ _ _ [] = error "Invalid region"
 
+-- | Insert a leaf region into the region.
 insertSpecialRegion :: RegionSizeFn -- ^ Returns size of region.
                     -> Range
                     -> ElfDataRegion  -- ^ New region
@@ -659,7 +665,6 @@ insertSpecialRegion sizeOf r n = insertAtOffset sizeOf r fn
           | c <= B.length b = n : insertRawRegion (B.drop c b) l
         fn _ = error $ "Elf file contained a non-empty header that overlapped with another.\n"
                        ++ "  This is not supported by the Elf parser"
-
 
 insertSegment :: RegionSizeFn
               -> ElfSegmentF Range
