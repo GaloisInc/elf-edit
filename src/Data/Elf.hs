@@ -653,10 +653,12 @@ insertSpecialRegion :: RegionSizeFn -- ^ Returns size of region.
                     -> ElfDataRegion  -- ^ New region
                     -> RegionPrefixFn 
 insertSpecialRegion sizeOf r n = insertAtOffset sizeOf r fn
-  where c = snd r 
+  where c = snd r
+        fn l | c == 0 = n : l     
         fn (ElfDataRaw b:l)
           | c <= B.length b = n : insertRawRegion (B.drop c b) l
-        fn _ = error "Illegal special insertion"               
+        fn _ = error $ "Elf file contained a non-empty header that overlapped with another.\n"
+                       ++ "  This is not supported by the Elf parser"
 
 
 insertSegment :: RegionSizeFn
