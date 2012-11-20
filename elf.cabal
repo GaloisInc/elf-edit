@@ -29,6 +29,8 @@ library
       template-haskell,
       utf8-string,
       vector
+    build-tools:
+      alex>= 3.0
     ghc-options : -Wall
     hs-source-dirs:  src
     exposed-modules: Data.Elf
