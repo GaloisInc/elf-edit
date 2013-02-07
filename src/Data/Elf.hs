@@ -47,6 +47,7 @@ import qualified Data.Vector as V
 import Numeric
 import Control.Applicative ((<$>))
 import Control.Monad
+import Control.Exception ( assert )
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as L
 import qualified Data.ByteString.UTF8 as B (fromString, toString)
