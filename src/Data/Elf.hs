@@ -39,7 +39,7 @@ import Data.Binary
 import Data.Binary.Get as G
 import Data.Bits
 import Data.Int (Int64)
-import Data.List (intercalate, sort)
+import Data.List (intercalate, sort, find)
 import qualified Data.Map as Map
 import Data.Maybe
 import Data.Monoid
@@ -443,8 +443,9 @@ elfSections e = r
         impl _ = []
 
 -- | Given a section name, extract the ElfSection.
-findSectionByName :: String -> Elf -> Maybe ElfSection
-findSectionByName name = listToMaybe . filter ((==) name . elfSectionName) . elfSections
+findSectionByName      :: String -> Elf -> Maybe ElfSection
+findSectionByName name  = find byName . elfSections
+  where byName section  = elfSectionName section == name
 
 -- | Update sections in elf file.  
 updateSections :: (ElfSection -> Maybe ElfSection) -> Elf -> Elf
