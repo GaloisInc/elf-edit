@@ -1,5 +1,5 @@
-Name:          elf
-Version:       0.27
+Name:          elf-galois
+Version:       0.28
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
@@ -26,6 +26,8 @@ library
       bytestring,
       binary,
       containers,
+      lens,
+      mtl,
       template-haskell,
       utf8-string,
       vector

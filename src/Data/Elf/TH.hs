@@ -94,7 +94,8 @@ quoteEnumDec msg = do
   toDec <- enumToDec d
   return $ enumDataDec d : toDec ++ enumFromDec d
     
-  
+-- | The enum quasiquoter provides a mechanism for declaring datatypes that
+-- correspond with C enums in a typesafe way.
 enum :: QuasiQuoter
 enum = QuasiQuoter {
            quoteExp = unsupported

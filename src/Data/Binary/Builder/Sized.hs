@@ -5,6 +5,7 @@ module Data.Binary.Builder.Sized
   ( -- * The Builder type
     Builder
   , toLazyByteString
+  , toStrictByteString
   , length
     -- * Constructing Builders
   , empty
@@ -38,9 +39,12 @@ import Foreign.Storable
 import Prelude hiding (length)
 
 data Builder = SB !Int64 U.Builder
-               
+
 toLazyByteString :: Builder -> L.ByteString
 toLazyByteString (SB _ b) = U.toLazyByteString b
+
+toStrictByteString :: Builder -> B.ByteString
+toStrictByteString = B.concat . L.toChunks . toLazyByteString
 
 -- | Returns the number of length of the underlying ByteString.
 --
