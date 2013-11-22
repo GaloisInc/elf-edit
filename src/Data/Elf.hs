@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE TemplateHaskell #-}
 -- | Data.Elf provides an interface for querying and manipulating Elf files.
 module Data.Elf ( SomeElf(..)
@@ -64,7 +65,7 @@ import Data.Binary
 import Data.Binary.Get as G
 import Data.Bits
 import qualified Data.Foldable as F
-import Data.List (intercalate, sort)
+import Data.List (genericDrop, intercalate, sort)
 import qualified Data.Map as Map
 import Data.Maybe
 import Data.Monoid
@@ -458,7 +459,8 @@ elfNameTableSection name_data =
 
 -- | Given a section name, extract the ElfSection.
 findSectionByName :: Num w => String -> Elf w -> Maybe (ElfSection w)
-findSectionByName name = listToMaybe . filter ((==) name . elfSectionName) . toListOf elfSections
+findSectionByName name  = findOf elfSections byName
+  where byName section  = elfSectionName section == name
 
 -- | Traverse Elf sections
 elfSections :: Num w => Simple Traversal (Elf w) (ElfSection w)
@@ -1256,7 +1258,8 @@ instance ElfWidth Word64 where
     return $ EST (nameIdx,name) sec typ bind other sTlbIdx symVal size
 
 sectionByIndex :: Num w => Elf w -> ElfSectionIndex -> Maybe (ElfSection w)
-sectionByIndex e (SHNIndex i) = lookup i . zip [1..] $ (toListOf elfSections e)
+sectionByIndex e (SHNIndex i) | i > 0 = 
+  listToMaybe $ genericDrop (i-1) (e^..elfSections)
 sectionByIndex _ _ = Nothing
 
 infoToTypeAndBind :: Word8 -> (ElfSymbolType,ElfSymbolBinding)
