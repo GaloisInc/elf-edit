@@ -20,11 +20,11 @@ source-repository head
   location: http://github.com/erikcharlebois/elf
 
 library
-    build-depends:   
+    build-depends:
       array,
       base >= 2 && < 5,
       bytestring,
-      binary,
+      binary >= 0.6.0.0,
       containers,
       template-haskell,
       utf8-string,
