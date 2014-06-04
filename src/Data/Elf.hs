@@ -1202,9 +1202,12 @@ findSymbolDefinition e =
     in if def == Just B.empty then Nothing else def
 
 runGetMany :: Get a -> L.ByteString -> [a]
-runGetMany g bs
-    | L.length bs == 0 = []
-    | otherwise        = let (v,bs',_) = runGetState g bs 0 in v: runGetMany g bs'
+runGetMany g0 bs0 = go g0 (L.toChunks bs0) (runGetIncremental g0)
+  where go :: Get a -> [B.ByteString] -> Decoder a -> [a]
+        go _ _ (Fail _ _ msg)  = error msg
+        go g [] (Partial f)    = go g [] (f Nothing)
+        go g (h:r) (Partial f) = go g r (f (Just h))
+        go g l (Done bs _ v)   = v : go g (bs:l) (runGetIncremental g)
 
 symbolTableSections :: Num w => Elf w -> [ElfSection w]
 symbolTableSections = toListOf $ elfSections.filtered ((== SHT_SYMTAB) . elfSectionType)
