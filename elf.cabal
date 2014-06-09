@@ -23,14 +23,15 @@ library
     build-depends:
       base >= 2 && < 5,
       array,
-      bytestring,
       binary >= 0.6.0.0,
+      bytestring,
       containers,
       lens,
       mtl,
       template-haskell,
       utf8-string,
-      vector
+      vector,
+      wl-pprint
     build-tools:
       alex>= 3.0
     ghc-options : -Wall

@@ -25,13 +25,14 @@ $digit = [0-9]
 $idchar = [$alpha $digit \_]
 @bool_ops = "&&" | "||"
 @punct = "::" | ";" | "|" | "=" | "==" | "/=" |  "<=" | "<" | ">= " | ">" | @bool_ops
-
+$hex = [$digit A-F a-f]
 
 tokens :-
 $white+      ;
 "--"[^\n]*\n ;
 [$alpha \_] $idchar* { \_ -> TSym }
 $digit+              { \_ -> TNum . read }
+"0x"$hex+            { \_ -> TNum . read }
 @punct               { \_ -> TOp } 
 \" (\\\"|[^\"])+ \"  { \_ -> TLit . read }
 
