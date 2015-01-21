@@ -9,7 +9,6 @@ Maintainer:    Erik Charlebois <erikcharlebois@gmail.com>
 Stability:     unstable
 Cabal-Version: >= 1.6
 Homepage:      http://github.com/erikcharlebois/elf
-Build-Depends: base
 Build-Type:    Custom
 Synopsis:      Parser for ELF object format.
 Description:   Parser for ELF object format.

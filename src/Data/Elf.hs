@@ -1,5 +1,8 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DoAndIfThenElse #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE Rank2Types #-}
@@ -40,6 +43,8 @@ module Data.Elf ( SomeElf(..)
 
                 , ElfSegmentFlags
                 , pf_none, pf_x, pf_w, pf_r
+                , hasPermissions
+
                 , elfSegmentFlags
 
                 , elfSegmentVirtAddr
@@ -52,6 +57,7 @@ module Data.Elf ( SomeElf(..)
                 , renderedElfSegments
 
                 , ElfSymbolTableEntry(..)
+                , ppSymbolTableEntries
                 , ElfSymbolType(..)
                 , fromElfSymbolType
                 , toElfSymbolType
@@ -59,6 +65,13 @@ module Data.Elf ( SomeElf(..)
                 , ElfSectionIndex(..)
                 , parseSymbolTables
                 , findSymbolDefinition
+                , elfInterpreter
+                , RelaEntry
+                , ppRelaEntries
+                , I386_RelocationType
+                , X86_64_RelocationType
+                , DynamicSection(..)
+                , dynamicEntries
                 ) where
 
 import Control.Applicative
@@ -73,9 +86,11 @@ import Data.Binary.Get as G
 import Data.Bits
 import qualified Data.ByteString      as B
 import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy.UTF8 as L (toString)
 import qualified Data.ByteString.UTF8 as B (fromString, toString)
 import qualified Data.Foldable as F
-import Data.List (genericDrop, intercalate, sort)
+import Data.Int
+import Data.List (genericDrop, foldl', intercalate, sort, transpose)
 import qualified Data.Map as Map
 import Data.Maybe
 import Data.Monoid
@@ -86,14 +101,23 @@ import Text.PrettyPrint.Leijen hiding ((<>), (<$>))
 
 import Data.Elf.TH
 
+import Debug.Trace
+
+------------------------------------------------------------------------
+-- Utilities
+
 enumCnt :: (Enum e, Real r) => e -> r -> [e]
 enumCnt e x = if x > 0 then e : enumCnt (succ e) (x-1) else []
 
--- | A range contains a starting index and a byte count.
-type Range w = (w,w)
+ppShow :: Show v => v -> Doc
+ppShow = text . show
 
-slice :: Integral w => Range w -> B.ByteString -> B.ByteString
-slice (i,c) = B.take (fromIntegral c) . B.drop (fromIntegral i)
+ppHex :: (Bits a, Integral a, Show a) => a -> String
+ppHex v = "0x" ++ fixLength (bitSizeMaybe v) (showHex v "")
+  where fixLength (Just n) s | r == 0 && w > l = replicate (w - l) '0' ++ s
+          where (w,r) = n `quotRem` 4
+                l = length s
+        fixLength _ s = s
 
 -- | @fixAlignment v a@ returns the smallest multiple of @a@
 -- that is not less than @v@.
@@ -123,6 +147,36 @@ showFlags names d w =
 -- and calls @fail@ otherwise.
 tryParse :: Monad m => String -> (a -> Maybe b) -> a -> m b
 tryParse desc toFn = maybe (fail ("Invalid " ++ desc)) return . toFn
+
+runGetMany :: Get a -> L.ByteString -> [a]
+runGetMany g0 bs0 = start g0 (L.toChunks bs0)
+  where go :: Get a -> [B.ByteString] -> Decoder a -> [a]
+        go _ _ (Fail _ _ msg)  = error $ "runGetMany: " ++ msg
+        go g [] (Partial f)    = go g [] (f Nothing)
+        go g (h:r) (Partial f) = go g r (f (Just h))
+        go g l (Done bs _ v)   = v : start g (bs:l)
+
+        start _ [] = []
+        start g (h:r) | B.null h = start g r
+        start g l = go g l (runGetIncremental g)
+
+------------------------------------------------------------------------
+-- Range
+
+-- | A range contains a starting index and a byte count.
+type Range w = (w,w)
+
+inRange :: (Ord w, Num w) => w -> Range w -> Bool
+inRange w (s,c) = s <= w && (w-s) < c
+
+slice :: Integral w => Range w -> B.ByteString -> B.ByteString
+slice (i,c) = B.take (fromIntegral c) . B.drop (fromIntegral i)
+
+sliceL :: Integral w => Range w -> L.ByteString -> L.ByteString
+sliceL (i,c) = L.take (fromIntegral c) . L.drop (fromIntegral i)
+
+------------------------------------------------------------------------
+-- Elf
 
 data Elf w = Elf
     { elfData       :: ElfData       -- ^ Identifies the data encoding of the object file.
@@ -280,6 +334,9 @@ elfFileData = lens _elfFileData (\s v -> s { _elfFileData = v })
  EM_SEP         108 -- ^ Sharp embedded microprocessor
  EM_ARCA        109 -- ^ Arca RISC Microprocessor
  EM_UNICORE     110 -- ^ Microprocessor series from PKU-Unity Ltd. and MPRC of Peking University
+ EM_TI_C6000	140 -- Texas Instruments TMS320C6000 DSP family
+ EM_L1OM        180 -- Intel L10M
+ EM_K1OM        181 -- Intel K10M
  EM_EXT           _  -- ^ Other
 |]
 
@@ -424,22 +481,16 @@ data ElfSegmentF w v = ElfSegment
   , _elfSegmentData     :: v               -- ^ Identifies data in the segment.
   } deriving (Functor)
 
-ppShow :: Show v => v -> Doc
-ppShow = text . show
-
-ppHex :: (Bits a, Integral a, Show a) => a -> Doc
-ppHex v = text ("0x" ++ fixLength (bitSizeMaybe v) (showHex v ""))
-  where fixLength (Just n) s | r == 0 && w > l = replicate (w - l) '0' ++ s
-          where (w,r) = n `quotRem` 4
-                l = length s
-        fixLength _ s = s
+-- | Return true if segment has given type.
+hasSegmentType :: ElfSegmentType -> ElfSegmentF w v -> Bool
+hasSegmentType tp s = elfSegmentType s == tp
 
 ppSegment :: (Bits w, Integral w, Show w, Show v) => ElfSegmentF w v -> Doc
 ppSegment s =
     text "type: " <+> ppShow (elfSegmentType s) <$$>
     text "flags:" <+> ppShow (elfSegmentFlags s) <$$>
-    text "vaddr:" <+> ppHex (elfSegmentVirtAddr s) <$$>
-    text "paddr:" <+> ppHex (elfSegmentPhysAddr s) <$$>
+    text "vaddr:" <+> text (ppHex (elfSegmentVirtAddr s)) <$$>
+    text "paddr:" <+> text (ppHex (elfSegmentPhysAddr s)) <$$>
     text "align:" <+> ppShow (elfSegmentAlign s) <$$>
     text "msize:" <+> ppShow (elfSegmentMemSize s) <$$>
     text "data:" <+> ppShow (elfSegmentMemSize s)
@@ -465,7 +516,7 @@ elfSegmentData = lens _elfSegmentData (\s v -> s { _elfSegmentData = v })
  PT_GNU_STACK    0x6474e551 -- ^ Indicates if stack should be executable.
  PT_GNU_RELRO    0x6474e552 -- ^ GNU segment with relocation that may be read-only.
  PT_Other   _ -- ^ Some other type
-|]
+ |]
 
 newtype ElfSegmentFlags  = ElfSegmentFlags { fromElfSegmentFlags :: Word32 }
   deriving (Eq, Num, Bits)
@@ -489,6 +540,10 @@ pf_w = 2
 -- | Read permission
 pf_r :: ElfSegmentFlags
 pf_r = 4
+
+-- | @hasPermissions p req@ returns @True@ if @p@ has permissions @req@.
+hasPermissions :: ElfSegmentFlags -> ElfSegmentFlags -> Bool
+hasPermissions p req = (p .&. req) == req
 
 -- | Name of shstrtab (used to reduce spelling errors).
 shstrtab :: String
@@ -533,6 +588,10 @@ stringTable strings = (res, stringMap)
 -- | Returns null-terminated string at given index in bytestring.
 lookupString :: Word32 -> B.ByteString -> B.ByteString
 lookupString o b = B.takeWhile (/= 0) $ B.drop (fromIntegral o) b
+
+-- | Returns null-terminated string at given index in bytestring.
+lookupStringL :: Int64 -> L.ByteString -> L.ByteString
+lookupStringL o b = L.takeWhile (/= 0) $ L.drop o b
 
 -- | Create a section for the section name table from the data.
 elfNameTableSection :: Num w => B.ByteString -> ElfSection w
@@ -719,8 +778,11 @@ getPhdr64 d = do
 -- | Defines the layout of a table with elements of a fixed size.
 data TableLayout w =
   TableLayout { tableOffset :: w
+                -- ^ Offset where table starts relative to start of file.
               , entrySize :: Word16
+                -- ^ Size of entries in bytes.
               , entryNum :: Word16
+                -- ^ Number of entries in bytes.
               }
 
 mkTableLayout :: w -> Word16 -> Word16 -> TableLayout w
@@ -753,8 +815,8 @@ insertRawRegion b r | B.length b == 0 = r
 
 -- | Insert an elf data region at a given offset.
 insertAtOffset :: Integral w
-               => RegionSizeFn w  -- ^ Function for getting size of a region.
-               -> Range w          -- Register to insert in.
+               => RegionSizeFn w   -- ^ Function for getting size of a region.
+               -> Range w          -- ^ Range to insert in.
                -> RegionPrefixFn w -- ^ Insert function
                -> RegionPrefixFn w
 insertAtOffset sizeOf (o,c) fn (p:r)
@@ -879,6 +941,7 @@ rawSegments epi = segmentByIndex epi <$> enumCnt 0 (entryNum (phdrTable epi))
 isRelroSegment :: ElfSegmentF w r -> Bool
 isRelroSegment s = elfSegmentType s == PT_GNU_RELRO
 
+-- | Extract relro information.
 asRelroInfo :: [ElfSegmentF w (Range w)] -> Maybe (Range w)
 asRelroInfo l =
   case filter isRelroSegment l of
@@ -915,14 +978,12 @@ parseElfRegions epi segments = final
                          (headers ++ sections)
         final = foldr (insertSegment sizeOf) initial
               $ filter (not . isRelroSegment) segments
---              $ segments
 
+-- | Either a 32-bit or 64-bit elf file.
 data SomeElf
    = Elf32 (Elf Word32)
    | Elf64 (Elf Word64)
 
-
--- | Resolve
 parseElfResult :: Either (L.ByteString, ByteOffset, String) (L.ByteString, ByteOffset, a)
                -> Either (ByteOffset,String) a
 parseElfResult (Left (_,o,e)) = Left (o,e)
@@ -998,6 +1059,7 @@ parseElf32 d ei_version ei_osabi ei_abiver b = do
              , elfRelroRange = asRelroInfo segments
              }
 
+-- | Parse a 32-bit elf.
 parseElf64 :: ElfData -> Word8 -> ElfOSABI -> Word8 -> B.ByteString -> Get (Elf Word64)
 parseElf64 d ei_version ei_osabi ei_abiver b = do
   e_type      <- toElfType    <$> getWord16 d
@@ -1037,12 +1099,14 @@ parseElf64 d ei_version ei_osabi ei_abiver b = do
              , elfRelroRange = asRelroInfo segments
              }
 
+-- | A component in the field as written.
 data ElfField v
   = EFBS Word16 (v -> Builder)
   | EFWord16 (v -> Word16)
   | EFWord32 (v -> Word32)
   | EFWord64 (v -> Word64)
 
+-- | A record to be written to the Elf file.
 type ElfRecord v = [(String, ElfField v)]
 
 sizeOfField :: ElfField v -> Word16
@@ -1082,8 +1146,12 @@ class (Bits w, Integral w, Show w) => ElfWidth w where
   phdrFields :: ElfRecord (Phdr w)
   shdrFields :: ElfRecord (Shdr w)
 
+  symbolTableEntrySize :: w
+
   getSymbolTableEntry :: Elf w
-                      -> Maybe (ElfSection w)
+                      -> (Word32 -> String)
+                         -- ^ Function for mapping offset in string table
+                         -- to bytestring.
                       -> Get (ElfSymbolTableEntry w)
 
 -- | Write elf file out to bytestring.
@@ -1227,12 +1295,13 @@ data ElfLayout w = ElfLayout {
       , _phdrs :: Seq.Seq (Phdr w)
         -- | Offset to section header table.
       , _shdrTableOffset :: w
-        -- Index of string table.
+        -- | Index of section for string table.
       , _shstrndx :: Word16
         -- | List of section headers found so far.
       , _shdrs :: Seq.Seq Builder
       }
 
+-- | Lens containing all data for an Elf file.
 elfOutput :: Simple Lens (ElfLayout w) Builder
 elfOutput = lens _elfOutput (\s v -> s { _elfOutput = v })
 
@@ -1347,13 +1416,46 @@ addSectionToLayout d name_map l s =
         pad = U.fromByteString (B.replicate (fromIntegral (o - base)) 0)
         fn  = U.fromByteString (elfSectionData s)
 
+------------------------------------------------------------------------
+-- ElfSymbolVisibility
+
+-- | Visibility for elf symbol
+newtype ElfSymbolVisibility = ElfSymbolVisibility { visAsWord :: Word8 }
+
+-- | Visibility is specified by binding type
+stv_default :: ElfSymbolVisibility
+stv_default = ElfSymbolVisibility 0
+
+-- | OS specific version of STV_HIDDEN.
+stv_internal :: ElfSymbolVisibility
+stv_internal = ElfSymbolVisibility 1
+
+-- | Can only be seen inside currect component.
+stv_hidden :: ElfSymbolVisibility
+stv_hidden = ElfSymbolVisibility 2
+
+-- | Can only be seen inside currect component.
+stv_protected :: ElfSymbolVisibility
+stv_protected = ElfSymbolVisibility 3
+
+instance Show ElfSymbolVisibility where
+  show (ElfSymbolVisibility w) =
+    case w of
+      0 -> "DEFAULT"
+      1 -> "INTERNAL"
+      2 -> "HIDDEN"
+      3 -> "PROTECTED"
+      _ -> "BadVis"
+
+------------------------------------------------------------------------
+-- ElfSymbolTableEntry
+
 -- | The symbol table entries consist of index information to be read from other
 -- parts of the ELF file. Some of this information is automatically retrieved
 -- for your convenience (including symbol name, description of the enclosing
 -- section, and definition).
 data ElfSymbolTableEntry w = EST
-    { steName             :: (Word32,Maybe B.ByteString)
-    , steEnclosingSection :: Maybe (ElfSection w) -- ^ Section from steIndex
+    { steName             :: String
     , steType             :: ElfSymbolType
     , steBind             :: ElfSymbolBinding
     , steOther            :: Word8
@@ -1362,6 +1464,56 @@ data ElfSymbolTableEntry w = EST
     , steSize             :: w
     } deriving (Eq, Show)
 
+steEnclosingSection :: ElfWidth w => Elf w -> ElfSymbolTableEntry w -> Maybe (ElfSection w)
+steEnclosingSection e s = sectionByIndex e (steIndex s)
+
+steVisibility :: ElfSymbolTableEntry w -> ElfSymbolVisibility
+steVisibility e = ElfSymbolVisibility (steOther e .&. 0x3)
+
+alignLeft :: Int -> [String] -> [String]
+alignLeft minw l = ar <$> l
+  where w = maximum $ minw : (length <$> l)
+        ar s = s ++ replicate (w-n) ' '
+          where n = length s
+
+alignRight :: Int -> [String] -> [String]
+alignRight minw l = ar <$> l
+  where w = maximum $ minw : (length <$> l)
+        ar s = replicate (w-n) ' ' ++ s 
+          where n = length s
+
+norm :: [[String] -> [String]] -> [[String]] -> Doc
+norm colFns rows = vcat (hsep . fmap text <$> fixed_rows) 
+  where cols = transpose rows
+        fixed_cols = zipWith ($) colFns cols
+        fixed_rows = transpose fixed_cols
+
+-- | Pretty print symbol table entries in format used by readelf.
+ppSymbolTableEntries :: ElfWidth w => [ElfSymbolTableEntry w] -> Doc
+ppSymbolTableEntries l = norm (snd <$> cols) (fmap fst cols : entries)
+  where entries = zipWith ppSymbolTableEntry [0..] l
+        cols = [ ("Num:",     alignRight 6)
+               , ("   Value", alignLeft 0)
+               , ("Size",     alignRight 5)
+               , ("Type",     alignLeft  7)
+               , ("Bind",     alignLeft  6)
+               , ("Vis",      alignLeft 8)
+               , ("Ndx",      alignLeft 3)
+               , ("Name", id)
+               ]
+
+ppSymbolTableEntry :: ElfWidth w => Int -> ElfSymbolTableEntry w -> [String]
+ppSymbolTableEntry i e =
+  [ show i ++ ":"
+  , ppHex (steValue e)
+  , show (steSize e)
+  , ppElfSymbolType (steType e)
+  , ppElfSymbolBinding (steBind e)
+  , show (steVisibility e)
+    -- Ndx
+  , show (steIndex e)
+  , steName e
+  ]
 
 -- | Parse the symbol table section into a list of symbol table entries. If
 -- no symbol table is found then an empty list is returned.
@@ -1376,30 +1528,27 @@ getSymbolTableEntries :: ElfWidth w => Elf w -> ElfSection w -> [ElfSymbolTableE
 getSymbolTableEntries e s =
   let link   = elfSectionLink s
       strtab = lookup link (zip [0..] (toListOf elfSections e))
-   in runGetMany (getSymbolTableEntry e strtab) (L.fromChunks [elfSectionData s])
+      strs = fromMaybe B.empty (elfSectionData <$> strtab)
+      nameFn idx = B.toString (lookupString idx strs)
+   in runGetMany (getSymbolTableEntry e nameFn) (L.fromChunks [elfSectionData s])
 
 -- | Use the symbol offset and size to extract its definition
 -- (in the form of a ByteString).
 -- If the size is zero, or the offset larger than the 'elfSectionData',
 -- then 'Nothing' is returned.
-findSymbolDefinition :: Integral w => ElfSymbolTableEntry w -> Maybe B.ByteString
-findSymbolDefinition e =
-    let enclosingData = elfSectionData <$> steEnclosingSection e
+findSymbolDefinition :: ElfWidth w => Elf w -> ElfSymbolTableEntry w -> Maybe B.ByteString
+findSymbolDefinition elf e =
+    let enclosingData = elfSectionData <$> steEnclosingSection elf e
         start = steValue e
         len = steSize e
         def = slice (start, len) <$> enclosingData
     in if def == Just B.empty then Nothing else def
 
-runGetMany :: Get a -> L.ByteString -> [a]
-runGetMany g0 bs0 = go g0 (L.toChunks bs0) (runGetIncremental g0)
-  where go :: Get a -> [B.ByteString] -> Decoder a -> [a]
-        go _ _ (Fail _ _ msg)  = error msg
-        go g [] (Partial f)    = go g [] (f Nothing)
-        go g (h:r) (Partial f) = go g r (f (Just h))
-        go g l (Done bs _ v)   = v : go g (bs:l) (runGetIncremental g)
+hasSectionType :: ElfSectionType -> ElfSection w -> Bool
+hasSectionType tp s = elfSectionType s == tp
 
 symbolTableSections :: ElfWidth w => Elf w -> [ElfSection w]
-symbolTableSections = toListOf $ elfSections.filtered ((== SHT_SYMTAB) . elfSectionType)
+symbolTableSections = toListOf $ elfSections.filtered (hasSectionType SHT_SYMTAB)
 
 -- Get a string from a strtab ByteString.
 stringByIndex :: Word32 -> B.ByteString -> Maybe B.ByteString
@@ -1413,19 +1562,25 @@ instance ElfWidth Word32 where
   phdrFields = phdr32Fields
   shdrFields = shdr32Fields
 
-  getSymbolTableEntry e strtlb = do
-    let strs = fromMaybe B.empty (elfSectionData <$> strtlb)
-    let er = elfData e
-    nameIdx <- getWord32 er
-    value <- getWord32 er
-    size  <- getWord32 er
+  symbolTableEntrySize = 16
+  getSymbolTableEntry e nameFn = do
+    let d = elfData e
+    nameIdx <- getWord32 d
+    value <- getWord32 d
+    size  <- getWord32 d
     info  <- getWord8
     other <- getWord8
-    sTlbIdx <- liftM (toEnum . fromIntegral) (getWord16 er)
-    let name = stringByIndex nameIdx strs
-        (typ,bind) = infoToTypeAndBind info
-        sec = sectionByIndex e sTlbIdx
-    return $ EST (nameIdx,name) sec typ bind other sTlbIdx value size
+    sTlbIdx <- ElfSectionIndex <$> getWord16 d
+    let (typ,bind) = infoToTypeAndBind info
+    return $ EST { steName = nameFn nameIdx
+                 , steType  = typ
+                 , steBind  = bind
+                 , steOther = other
+                 , steIndex = sTlbIdx
+                 , steValue = value
+                 , steSize  = size
+                 }
+
 
 -- | Gets a single entry from the symbol table, use with runGetMany.
 instance ElfWidth Word64 where
@@ -1435,114 +1590,882 @@ instance ElfWidth Word64 where
   phdrFields = phdr64Fields
   shdrFields = shdr64Fields
 
-  getSymbolTableEntry e strtlb = do
-    let strs = fromMaybe B.empty (elfSectionData <$> strtlb)
+  symbolTableEntrySize = 24
+  getSymbolTableEntry e nameFn = do
     let er = elfData e
     nameIdx <- getWord32 er
     info <- getWord8
     other <- getWord8
-    sTlbIdx <- liftM (toEnum . fromIntegral) (getWord16 er)
+    sTlbIdx <- ElfSectionIndex <$> getWord16 er
     symVal <- getWord64 er
     size <- getWord64 er
-    let name = stringByIndex nameIdx strs
-        (typ,bind) = infoToTypeAndBind info
-        sec = sectionByIndex e sTlbIdx
-    return $ EST (nameIdx,name) sec typ bind other sTlbIdx symVal size
+    let (typ,bind) = infoToTypeAndBind info
+    return $ EST { steName = nameFn nameIdx
+                 , steType = typ
+                 , steBind = bind
+                 , steOther = other
+                 , steIndex = sTlbIdx
+                 , steValue = symVal
+                 , steSize = size
+                 }
 
 sectionByIndex :: ElfWidth w
                => Elf w
                -> ElfSectionIndex
                -> Maybe (ElfSection w)
-sectionByIndex e (SHNIndex i) | i > 0 =
-  listToMaybe $ genericDrop (i-1) (e^..elfSections)
-sectionByIndex _ _ = Nothing
+sectionByIndex e si = do
+  i <- asSectionIndex si
+  listToMaybe $ genericDrop i (e^..elfSections)
+
+------------------------------------------------------------------------
+-- Dynamic information
+
+[enum|
+ ElfDynamicArrayTag :: Word32
+ DT_NULL          0
+ DT_NEEDED        1
+ DT_PLTRELSZ      2
+ DT_PLTGOT        3
+ DT_HASH          4
+ DT_STRTAB        5
+ DT_SYMTAB        6
+ DT_RELA          7
+ DT_RELASZ        8
+ DT_RELAENT       9
+ DT_STRSZ        10
+ DT_SYMENT       11
+ DT_INIT         12
+ DT_FINI         13
+ DT_SONAME       14
+ DT_RPATH        15
+ DT_SYMBOLIC     16
+ DT_REL          17
+ DT_RELSZ        18
+ DT_RELENT       19
+ DT_PLTREL       20
+ DT_DEBUG        21
+ DT_TEXTREL      22
+ DT_JMPREL       23
+ DT_BIND_NOW     24
+ DT_INIT_ARRAY   25
+ DT_FINI_ARRAY   26
+ DT_INIT_ARRAYSZ    27
+ DT_FINI_ARRAYSZ    28
+ DT_RUNPATH         29 -- Library search path
+ DT_FLAGS           30 -- Flags for the object being loaded
+ DT_PREINIT_ARRAY   32 -- Start of encoded range (also DT_PREINIT_ARRAY)
+ DT_PREINIT_ARRAYSZ 33 -- Size in bytes of DT_PREINIT_ARRAY
+
+ -- DT_LOOS   0x60000000
+ -- DT_VALRNGLO    0x6ffffd00
+ DT_GNU_PRELINKED  0x6ffffdf5 -- Prelinking timestamp
+ DT_GNU_CONFLICTSZ 0x6ffffdf6 -- Size of conflict section.
+ DT_GNU_LIBLISTSZ  0x6ffffdf7 -- Size of lbirary list
+ DT_CHECKSUM       0x6ffffdf8
+ DT_PLTPADSZ       0x6ffffdf9
+ DT_MOVEENT        0x6ffffdfa
+ DT_MOVESZ         0x6ffffdfb
+ DT_FEATURE_1      0x6ffffdfc -- Feature selection (DTF_*).
+ DT_POSFLAG_1      0x6ffffdfd -- Flags for DT_* entries, effecting the following DT_* entry.
+ DT_SYMINSZ        0x6ffffdfe -- Size of syminfo table (in bytes)
+ DT_SYMINENT       0x6ffffdff -- Entry size of syminfo
+ -- DT_VALRNGHI    0x6ffffdff
+
+
+-- DT_* entries between DT_ADDRRNGHI & DT_ADDRRNGLO use the
+-- d_ptr field
+ -- DT_ADDRRNGLO   0x6ffffe00
+ DT_GNU_HASH       0x6ffffef5 -- GNU-style hash table.
+ DT_TLSDESC_PLT	   0x6ffffef6
+ DT_TLSDESC_GOT	   0x6ffffef7
+ DT_GNU_CONFLICT   0x6ffffef8 -- Start of conflict section
+ DT_GNU_LIBLIST	   0x6ffffef9 -- Library list
+ DT_CONFIG	   0x6ffffefa -- Configuration information
+ DT_DEPAUDIT       0x6ffffefb -- Dependency auditing
+ DT_AUDIT          0x6ffffefc -- Object auditing
+ DT_PLTPAD         0x6ffffefd -- PLT padding
+ DT_MOVETAB        0x6ffffefe -- Move table
+ DT_SYMINFO        0x6ffffeff -- Syminfo table
+  -- DT_ADDRRNGHI  0x6ffffeff
+
+ DT_VERSYM         0x6ffffff0
+ DT_RELACOUNT      0x6ffffff9
+ DT_RELCOUNT       0x6ffffffa
+ DT_FLAGS_1        0x6ffffffb -- State flags
+ DT_VERDEF         0x6ffffffc -- Address of version definition.
+ DT_VERDEFNUM      0x6ffffffd
+ DT_VERNEED        0x6ffffffe
+ DT_VERNEEDNUM     0x6fffffff -- Number of needed versions.
+ -- DT_HIOS        0x6FFFFFFF
+
+ -- DT_LOPROC 0x70000000
+ -- DT_HIPROC 0x7FFFFFFF
+ DT_Other         _
+|]
+
+-- | Dynamic array entry
+data Dynamic w 
+   = Dynamic { dynamicTag :: !ElfDynamicArrayTag
+             , dynamicVal :: !w
+             }
+  deriving (Show)
+
+class ElfWidth w => DynamicWidth w where
+  getDynamic :: ElfData -> Get (Dynamic w)
+
+  -- | Size of one relocation entry.
+  relaEntSize :: w
+ 
+  -- | Convert info paramter to relocation sym.
+  relaSym :: w -> Word32
+
+  -- | Get relocation entry element.
+  getRelaEntryElt :: ElfData -> Get w
+
+instance DynamicWidth Word32 where
+  getDynamic d = do
+    tag <- toElfDynamicArrayTag <$> getWord32 d
+    v <- getWord32 d
+    return (Dynamic tag v)
+
+  relaEntSize = 12
+  relaSym info = info `shiftR` 8
+  getRelaEntryElt = getWord32
+
+
+instance DynamicWidth Word64 where
+  getDynamic d = do
+    tag <- toElfDynamicArrayTag . fromIntegral <$> getWord64 d
+    v <- getWord64 d
+    return (Dynamic tag v)
+
+  relaEntSize = 24
+  relaSym info = fromIntegral (info `shiftR` 32)
+  getRelaEntryElt = getWord64
+
+dynamicList :: DynamicWidth w => ElfData -> Get [Dynamic w]
+dynamicList d = go []
+  where go l = do
+          done <- isEmpty
+          if done then
+            return l
+          else do
+            e <- getDynamic d
+            case dynamicTag e of
+              DT_NULL -> return (reverse l)
+              _ -> go (e:l)
+
+type DynamicMap w = Map.Map ElfDynamicArrayTag [w]
+
+insertDynamic :: Dynamic w -> DynamicMap w -> DynamicMap w
+insertDynamic (Dynamic tag v) = Map.insertWith (++) tag [v]
+
+dynamicEntry :: ElfDynamicArrayTag -> DynamicMap w -> [w]
+dynamicEntry tag m = fromMaybe [] (Map.lookup tag m)
+
+-- | Get the mandatory entry with the given tag from the map.
+-- It is required that there is exactly one tag with this type.
+optionalDynamicEntry :: Monad m => ElfDynamicArrayTag -> DynamicMap w -> m (Maybe w)
+optionalDynamicEntry tag m =
+  case dynamicEntry tag m of
+    [w] -> return (Just w)
+    [] -> return Nothing
+    _ -> fail $ "Dynamic information contains multiple " ++ show tag ++ " entries."
+
+-- | Get the mandatory entry with the given tag from the map.
+-- It is required that there is exactly one tag with this type.
+mandatoryDynamicEntry :: Monad m => ElfDynamicArrayTag -> DynamicMap w -> m w 
+mandatoryDynamicEntry tag m =
+  case dynamicEntry tag m of
+    [w] -> return w
+    [] -> fail $ "Dynamic information missing " ++ show tag
+    _ -> fail $ "Dynamic information contains multiple " ++ show tag ++ " entries."
+
+-- | Return ranges in file containing the given address range.
+-- In a well-formed file, the list should contain at most one element.
+fileOffsetOfAddr :: (Ord w, Num w) => w -> ElfLayout w -> [Range w] 
+fileOffsetOfAddr w l =
+  [ (dta + offset, n-offset)
+  | seg <- F.toList (l^.phdrs)
+  , elfSegmentType seg == PT_LOAD
+  , let base = elfSegmentVirtAddr seg
+  , let (dta, n) = seg^.elfSegmentData
+  , inRange w (base, n)
+  , let offset = w - base
+  ]
+
+addressToFile :: (Integral w, Monad m)
+                   => ElfLayout w -- ^ Layout of Elf file
+                   -> L.ByteString -- ^ Bytestring with contents.
+                   -> String
+                   -> w -- ^ Address in memory.
+                   -> m L.ByteString
+addressToFile l b nm w =
+  case fileOffsetOfAddr w l of
+    [] -> fail $ "Could not find " ++ nm ++ "."
+    [r] -> return (sliceL r b)
+    _ -> fail $ "Multiple overlapping segments containing " ++ nm ++ "."
+
+-- | Return  ranges in file containing the given address range.
+-- In a well-formed file, the list should contain at most one element.
+fileOffsetOfRange :: (Ord w, Num w) => Range w -> ElfLayout w -> [Range w] 
+fileOffsetOfRange (w,sz) l =
+  [ (dta + offset, sz)
+  | seg <- F.toList (l^.phdrs)
+  , elfSegmentType seg == PT_LOAD
+  , let base = elfSegmentVirtAddr seg
+  , let (dta, n) = seg^.elfSegmentData
+  , inRange w (base, n)
+  , let offset = w - base
+  , n-offset >= sz
+  ]
+
+addressRangeToFile :: (Integral w, Monad m)
+                   => ElfLayout w -- ^ Layout of Elf file
+                   -> L.ByteString -- ^ Bytestring with contents.
+                   -> String
+                   -> Range w
+                   -> m L.ByteString
+addressRangeToFile l b nm rMem =
+  case fileOffsetOfRange rMem l of
+    [] -> fail $ "Could not find " ++ nm ++ "."
+    [r] -> return (sliceL r b)
+    _ -> fail $ "Multiple overlapping segments containing " ++ nm ++ "."
+
+-- | Return contents of dynamic string tab.
+dynStrTab :: (DynamicWidth w, Monad m)
+          => ElfLayout w -> L.ByteString -> DynamicMap w -> m L.ByteString
+dynStrTab l b m = do
+  w <-  mandatoryDynamicEntry DT_STRTAB m
+  sz <- mandatoryDynamicEntry DT_STRSZ m
+  addressRangeToFile l b "dynamic string table" (w,sz)
+
+getDynNeeded :: Integral w => L.ByteString -> DynamicMap w -> [FilePath]
+getDynNeeded strTab m =
+  let entries = dynamicEntry DT_NEEDED m
+      getName w = L.toString $ lookupStringL (fromIntegral w) strTab
+   in getName <$> entries
+
+nameFromIndex :: L.ByteString -> Int64 -> String
+nameFromIndex strTab o = L.toString $ lookupStringL o strTab
+
+
+
+-- | Get string from strTab read by 32-bit offset.
+getOffsetString :: ElfData -> L.ByteString -> Get String
+getOffsetString d strTab = do
+  nameFromIndex strTab . fromIntegral <$> getWord32 d
+
+gnuLinkedList :: Monad m
+              => (L.ByteString -> Get a) -- ^ Function for reading.
+              -> ElfData
+              -> Int -- ^ Number of entries expected.
+              -> L.ByteString -- ^ Buffer to read.
+              -> m [a]
+gnuLinkedList readFn d cnt0 b0 = do
+  let readNextVal b = (,) <$> readFn b <*> getWord32 d
+  let go 0 _ prev = return (reverse prev)
+      go cnt b prev = do
+        case runGetOrFail (readNextVal b) b of
+          Left (_,_,msg) -> fail msg
+          Right (_,_,(d,next)) -> do
+            go (cnt-1) (L.drop (fromIntegral next) b) (d:prev)
+  go cnt0 b0 []
+
+dynSymTab :: (DynamicWidth w, Monad m)
+          => Elf w
+          -> ElfLayout w
+          -> L.ByteString
+          -> DynamicMap w
+          -> m [ElfSymbolTableEntry w]
+dynSymTab e l file m = do
+  -- Get string table.
+  strTab <- dynStrTab l file m
+
+  sym_off <- mandatoryDynamicEntry DT_SYMTAB m
+  -- According to a comment in GNU Libc 2.19 (dl-fptr.c:175), you get the
+  -- size of the dynamic symbol table by assuming that the string table follows
+  -- immediately afterwards. 
+  str_off <- mandatoryDynamicEntry DT_STRTAB m
+  when (str_off < sym_off) $ do
+    fail $ "The string table offset is before the symbol table offset."  
+  -- Size of each symbol table entry.
+  syment <- mandatoryDynamicEntry DT_SYMENT m
+  when (syment /= symbolTableEntrySize) $ do
+    fail "Unexpected symbol table entry size"
+  let sym_sz = str_off - sym_off
+  symtab <- addressRangeToFile l file "dynamic symbol table" (sym_off,sym_sz)
+  let nameFn idx = L.toString $ lookupStringL (fromIntegral idx) strTab
+  return $ runGetMany (getSymbolTableEntry e nameFn) symtab
+
+class Show s => IsData s where
+  getData :: ElfData -> Get s
+  
+instance IsData Int32 where
+  getData d = fromIntegral <$> getWord32 d
+
+instance IsData Int64 where
+  getData d = fromIntegral <$> getWord64 d
+
+instance IsData Word32 where
+  getData = getWord32
+
+instance IsData Word64 where
+  getData = getWord64
+
+class (DynamicWidth u, IsData u, IsData s, Show tp)
+   => RelocationType u s tp | tp -> u, tp -> s where
+
+  -- | Convert unsigned value to type.
+  relaType :: u -> Maybe tp
+
+  -- | Return true if this is a relative relocation type.
+  isRelative :: tp -> Bool
+
+data RelaEntry u s tp  = Rela { r_offset :: !u
+                              , r_sym    :: !Word32
+                              , r_type   :: !tp
+                              , r_addend :: !s
+                              } deriving (Show)
+
+-- | Return true if this is a relative relocation entry.
+isRelativeRelaEntry :: RelocationType u s tp => RelaEntry u s tp -> Bool
+isRelativeRelaEntry r = isRelative (r_type r)
+
+ppRelaEntries :: RelocationType u s tp => [RelaEntry u s tp] -> Doc
+ppRelaEntries l = norm (snd <$> cols) (fmap fst cols : entries)
+  where entries = zipWith ppRelaEntry [0..] l
+        cols = [ ("Num", alignRight 0)
+               , ("Offset", alignLeft 0)
+               , ("Symbol", alignLeft 0)
+               , ("Type", alignLeft 0)
+               , ("Addend", alignLeft 0)
+               ]
+
+ppRelaEntry :: RelocationType u s tp => Int -> RelaEntry u s tp -> [String]
+ppRelaEntry i e =
+  [ shows i ":" 
+  , ppHex (r_offset e)
+  , show (r_sym e)
+  , show (r_type e)
+  , show (r_addend e)
+  ]
+
+-- | Read a relocation entry.
+getRelaEntry :: RelocationType u s tp => ElfData -> Get (RelaEntry u s tp) 
+getRelaEntry d = do
+  offset <- getData d
+  info   <- getData d
+  addend <- getData d
+  let msg = "Could not parse relocation type: " ++ showHex info ""
+  tp <- maybe (fail msg) return $ relaType info
+  return Rela { r_offset = offset
+              , r_sym = relaSym info
+              , r_type = tp
+              , r_addend = addend
+              }
+
+checkPLTREL :: (Integral u, Monad m) => DynamicMap u -> m ()
+checkPLTREL dm = do
+  mw <- optionalDynamicEntry DT_PLTREL dm
+  case mw of
+    Nothing -> return ()
+    Just w -> do
+      when (fromIntegral w /= fromElfDynamicArrayTag DT_RELA) $ do
+        fail $ "Only DT_RELA entries are supported."
+
+-- | Return range for ".rela.plt" from DT_JMPREL and DT_PLTRELSZ if
+-- defined.
+dynRelaPLT :: Monad m => DynamicMap u -> m (Maybe (Range u))
+dynRelaPLT dm = do
+  mrelaplt <- optionalDynamicEntry DT_JMPREL dm
+  case mrelaplt of
+    Nothing -> return Nothing
+    Just relaplt -> do
+      sz <- mandatoryDynamicEntry DT_PLTRELSZ dm
+      return $ Just (relaplt, sz)
+
+dynRelaArray :: (RelocationType u s tp, Monad m)
+             => ElfData
+             -> ElfLayout u
+             -> L.ByteString
+             -> DynamicMap u
+             -> m [RelaEntry u s tp]
+dynRelaArray d l file dm = do
+  checkPLTREL dm
+  mrela_offset <- optionalDynamicEntry DT_RELA dm
+  case mrela_offset of
+    Nothing -> return []
+    Just rela_offset -> do
+      --cnt <- mandatoryDynamicEntry DT_RELACOUNT dm
+      ent <- mandatoryDynamicEntry DT_RELAENT dm
+      sz  <- mandatoryDynamicEntry DT_RELASZ dm
+      --when (cnt * ent /= sz) $ do
+      --  fail $ "Unexpected size of relocation array:" ++ show (cnt,ent,sz)
+      when (ent /= relaEntSize) $ fail "Unexpected size for relocation entry."
+      rela <- addressRangeToFile l file "relocation array" (rela_offset,sz)
+      return $ runGetMany (getRelaEntry d) rela
+
+checkRelaCount :: (RelocationType u s tp, Monad m)
+               => [RelaEntry u s tp]
+               -> DynamicMap u
+               -> m ()
+checkRelaCount relocations dm = do
+  let relaCount = length (filter isRelativeRelaEntry relocations)
+  mexpRelaCount <- optionalDynamicEntry DT_RELACOUNT dm
+  let correctCount = case mexpRelaCount of
+                       Just c -> c == fromIntegral relaCount
+                       Nothing -> True
+  when (not correctCount) $ do
+    fail $ "Incorrect DT_RELACOUNT"
+
+[enum|
+  I386_RelocationType :: Word32
+  R_386_NONE      0
+  R_386_32        1
+  R_386_PC32      2
+  R_386_GOT32     3
+  R_386_PLT32     4
+  R_386_COPY      5
+  R_386_GLOB_DAT  6
+  R_386_JMP_SLOT  7
+  R_386_RELATIVE  8
+  R_386_GOTOFF    9
+  R_386_GOTPC    10 
+|]
+
+instance RelocationType Word32 Int32 I386_RelocationType where
+  relaType = toI386_RelocationType
+
+  isRelative R_386_RELATIVE = True
+  isRelative _ = False
+
+[enum|
+ X86_64_RelocationType :: Word32
+ R_X86_64_NONE           0  -- No reloc
+ R_X86_64_64             1  -- Direct 64 bit
+ R_X86_64_PC32           2  -- PC relative 32 bit signed
+ R_X86_64_GOT32          3  -- 32 bit GOT entry
+ R_X86_64_PLT32          4  -- 32 bit PLT address
+ R_X86_64_COPY           5  -- Copy symbol at runtime
+ R_X86_64_GLOB_DAT       6  -- Create GOT entry
+ R_X86_64_JUMP_SLOT      7  -- Create PLT entry
+ R_X86_64_RELATIVE       8  -- Adjust by program base
+ R_X86_64_GOTPCREL       9  -- 32 bit signed pc relative offset to GOT
+ R_X86_64_32             10 -- Direct 32 bit zero extended
+ R_X86_64_32S            11 -- Direct 32 bit sign extended
+ R_X86_64_16             12 -- Direct 16 bit zero extended
+ R_X86_64_PC16           13 -- 16 bit sign extended pc relative
+ R_X86_64_8              14 -- Direct 8 bit sign extended
+ R_X86_64_PC8            15 -- 8 bit sign extended pc relative
+|]
+
+instance RelocationType Word64 Int64 X86_64_RelocationType where
+  relaType = toX86_64_RelocationType . fromIntegral
+
+  isRelative R_X86_64_RELATIVE = True
+  isRelative _ = False
+
+-- | Version definition 
+data VersionDef = VersionDef { vd_flags :: !Word16
+                               -- ^ Version information flags bitmask.
+                             , vd_ndx  :: !Word16
+                               -- ^ Index in SHT_GNU_versym section of this version.
+                             , vd_hash :: !Word32
+                               -- ^ Version name hash value.
+                             , vd_aux  :: ![String]
+                               -- ^ Version or dependency names.
+                             } deriving (Show)
+
+gnuVersionDefs :: (Integral w, Show w, Monad m)
+               => ElfData
+               -> ElfLayout w
+               -> L.ByteString
+                  -- ^ Contents of file.
+               -> L.ByteString
+                  -- ^ Dynamic string table.
+               -> DynamicMap w
+               -> m [VersionDef]
+gnuVersionDefs d l file strTab dm = do
+  mvd <- optionalDynamicEntry DT_VERDEF dm
+  case mvd of
+    Nothing -> return []
+    Just vd -> do
+      vdnum <- mandatoryDynamicEntry DT_VERDEFNUM dm
+      def_buffer <- addressToFile l file "symbol version definitions" vd
+      gnuLinkedList (readVersionDef d strTab) d (fromIntegral vdnum) def_buffer
+
+readVersionDef :: ElfData -> L.ByteString -> L.ByteString -> Get VersionDef
+readVersionDef d strTab b = do
+  ver   <- getWord16 d
+  when (ver /= 1) $
+    fail $ "Unexpected version definition version: " ++ show ver
+  flags <- getWord16 d
+  ndx   <- getWord16 d
+  cnt   <- getWord16 d
+  hash  <- getWord32 d
+  aux   <- getWord32 d
+  let entry_cnt = fromIntegral cnt
+  let entry_buffer = L.drop (fromIntegral aux) b
+  entries <- gnuLinkedList (\_ -> getOffsetString d strTab) d entry_cnt entry_buffer
+  return VersionDef { vd_flags = flags
+                    , vd_ndx   = ndx
+                    , vd_hash  = hash
+                    , vd_aux   = entries
+                    }
+  
+-- | Version requirement informaito.nx
+data VersionReq = VersionReq { vn_file :: String
+                             , vn_aux :: [VersionReqAux]
+                             } deriving (Show)
+
+readVersionReq :: ElfData -> L.ByteString -> L.ByteString -> Get VersionReq
+readVersionReq d strTab b = do
+  ver <- getWord16 d
+  when (ver /= 1) $ do
+    fail $ "Unexpected version need version: " ++ show ver
+  cnt  <- getWord16 d
+  file <- getOffsetString d strTab
+  aux  <- getWord32 d
+  let entry_buffer = L.drop (fromIntegral aux) b
+  entries <- gnuLinkedList (readVersionReqAux d strTab) d (fromIntegral cnt) entry_buffer
+  return VersionReq { vn_file = file
+                    , vn_aux = entries
+                    }
+
+-- | Version requirement information.
+data VersionReqAux = VersionReqAux { vna_hash :: !Word32
+                                   , vna_flags :: !Word16
+                                   , vna_other :: !Word16
+                                   , vna_name :: !String
+                                   } deriving (Show)
+
+readVersionReqAux :: ElfData -> L.ByteString -> L.ByteString -> Get VersionReqAux
+readVersionReqAux d strTab _ = do
+  hash <- getWord32 d
+  flags <- getWord16 d
+  other   <- getWord16 d
+  name <- getOffsetString d strTab
+  return VersionReqAux { vna_hash  = hash
+                       , vna_flags = flags
+                       , vna_other = other
+                       , vna_name  = name
+                       }
+
+gnuVersionReqs :: (Integral w, Show w, Monad m)
+               => ElfData
+               -> ElfLayout w
+               -> L.ByteString
+                  -- ^ Contents of file.
+               -> L.ByteString
+                  -- ^ Dynamic string table.
+               -> DynamicMap w
+               -> m [VersionReq]
+gnuVersionReqs d l file strTab dm = do
+  mvn <- optionalDynamicEntry DT_VERNEED dm
+  case mvn of
+    Nothing -> return []
+    Just vn -> do
+      vnnum <- mandatoryDynamicEntry DT_VERNEEDNUM dm
+      req_buffer <- addressToFile l file "symbol version requirements" vn
+      gnuLinkedList (readVersionReq d strTab) d (fromIntegral vnnum) req_buffer
+
+data DynamicSection u s tp 
+   = DynSection { dynNeeded :: ![FilePath]
+                , dynSOName :: Maybe String
+                , dynInit :: [u]
+                , dynFini :: [u]
+                , dynSymbols :: [ElfSymbolTableEntry u]
+                , dynRelocations :: ![RelaEntry u s tp]
+                , dynSymVersionTable :: ![Word16]
+                , dynVersionDefs :: ![VersionDef]
+                , dynVersionReqs :: ![VersionReq]
+                  -- | Address of GNU Hash address.
+                , dynGNUHASH_Addr :: !(Maybe u)
+                  -- | Address of PLT in memory.
+                , dynPLTAddr :: !(Maybe u)
+                , dynRelaPLTRange :: !(Maybe (Range u))
+                  -- | Value of DT_DEBUG.
+                , dynDebug :: !(Maybe u)
+                , dynUnparsed :: !(DynamicMap u)
+                }
+  deriving (Show)
+
+gnuSymVersionTable :: (DynamicWidth w, Monad m)
+                   => ElfData
+                   -> ElfLayout w
+                   -> L.ByteString
+                   -> DynamicMap w
+                   -> Int -- ^ Number of symbols
+                   -> m [Word16]
+gnuSymVersionTable d l file dm symcnt = do
+  mvs <- optionalDynamicEntry DT_VERSYM dm
+  case mvs of
+    Nothing -> return []
+    Just vs -> do
+      buffer <- addressToFile l file "symbol version requirements" vs
+      return $ runGet (replicateM symcnt (getWord16 d)) buffer
+
+parsed_dyntags :: [ElfDynamicArrayTag]
+parsed_dyntags =
+  [ DT_NEEDED
+  , DT_PLTRELSZ
+  , DT_PLTGOT
+
+  , DT_STRTAB
+  , DT_SYMTAB
+  , DT_RELA
+  , DT_RELASZ
+  , DT_RELAENT
+  , DT_STRSZ
+  , DT_SYMENT
+  , DT_INIT
+  , DT_FINI
+  , DT_SONAME
+    
+  , DT_PLTREL
+  , DT_DEBUG
+
+  , DT_JMPREL
+  
+  , DT_GNU_HASH
+
+  , DT_VERSYM
+  , DT_RELACOUNT
+
+  , DT_VERDEF
+  , DT_VERDEFNUM
+  , DT_VERNEED
+  , DT_VERNEEDNUM
+  ]
+
+dynamicEntries :: (RelocationType u s tp, Monad m)
+               => Elf u
+               -> m (Maybe (DynamicSection u s tp))
+dynamicEntries e = do
+  let l = elfLayout e
+  let file = U.toLazyByteString $ l^.elfOutput
+  case filter (hasSegmentType PT_DYNAMIC) (F.toList (l^.phdrs)) of
+    [] -> return Nothing
+    [sec] -> do
+      let p = sec^.elfSegmentData
+      let elts = runGet (dynamicList (elfData e)) (sliceL p file)
+      let m = foldl' (flip insertDynamic) Map.empty elts
+    
+      strTab <- dynStrTab l file m
+
+      mnm_index <- optionalDynamicEntry DT_SONAME m
+      let mnm = nameFromIndex strTab . fromIntegral <$> mnm_index
+
+      symbols <- dynSymTab e l file m
+
+      let isUnparsed tag _ = not (tag `elem` parsed_dyntags)
+      sym_versions <- gnuSymVersionTable (elfData e) l file m (length symbols)
+      version_defs <- gnuVersionDefs (elfData e) l file strTab m
+      version_reqs <- gnuVersionReqs (elfData e) l file strTab m
+
+      relocations <- dynRelaArray (elfData e) l file m
+      checkRelaCount relocations m
+
+      gnuhashAddr <- optionalDynamicEntry DT_GNU_HASH m
+      pltAddr     <- optionalDynamicEntry DT_PLTGOT m
+      relaPLTRange <- dynRelaPLT m
+      mdebug <- optionalDynamicEntry DT_DEBUG m
+
+      return $ Just DynSection { dynNeeded = getDynNeeded strTab m
+                               , dynSOName = mnm
+                               , dynInit = dynamicEntry DT_INIT m
+                               , dynFini = dynamicEntry DT_FINI m
+                               , dynSymbols = symbols
+                               , dynRelocations = relocations
+                               , dynSymVersionTable = sym_versions
+                               , dynVersionDefs = version_defs
+                               , dynVersionReqs = version_reqs
+                               , dynGNUHASH_Addr = gnuhashAddr
+                               , dynPLTAddr = pltAddr
+                               , dynRelaPLTRange = relaPLTRange
+                               , dynDebug = mdebug
+                               , dynUnparsed = Map.filterWithKey isUnparsed m
+                               }
+    _ -> fail "Multiple dynamic segments."
+
+
+------------------------------------------------------------------------
+-- Elf symbol information
+
+[enum|
+  ElfSymbolBinding :: Word8
+  STB_LOCAL 0 -- Symbol not visible outside obj
+  STB_GLOBAL 1 -- Symbol visible outside obj
+  STB_WEAK 2 -- Like globals, lower precedence
+  STB_GNU_UNIQUE 10 --Symbol is unique in namespace
+  STB_Other w
+|]
+
+ppElfSymbolBinding :: ElfSymbolBinding -> String
+ppElfSymbolBinding b =
+  case b of
+    STB_LOCAL -> "LOCAL"
+    STB_GLOBAL -> "GLOBAL"
+    STB_WEAK   -> "WEAK"
+    STB_GNU_UNIQUE -> "UNIQUE"
+    STB_Other w | 11 <= w && w <= 12 -> "<OS specific>: " ++ show w
+                | 13 <= w && w <= 15 -> "<processor specific>: " ++ show w
+                | otherwise -> "<unknown>: " ++ show w
 
 infoToTypeAndBind :: Word8 -> (ElfSymbolType,ElfSymbolBinding)
 infoToTypeAndBind i =
-    let Just tp = toElfSymbolType (i .&. 0x0F)
-        b = (i .&. 0xF) `shiftR` 4
-    in (tp, toEnum (fromIntegral b))
-
-data ElfSymbolBinding
-    = STBLocal
-    | STBGlobal
-    | STBWeak
-    | STBLoOS
-    | STBHiOS
-    | STBLoProc
-    | STBHiProc
-    deriving (Eq, Ord, Show, Read)
-
-instance Enum ElfSymbolBinding where
-    fromEnum STBLocal  = 0
-    fromEnum STBGlobal = 1
-    fromEnum STBWeak   = 2
-    fromEnum STBLoOS   = 10
-    fromEnum STBHiOS   = 12
-    fromEnum STBLoProc = 13
-    fromEnum STBHiProc = 15
-    toEnum  0 = STBLocal
-    toEnum  1 = STBGlobal
-    toEnum  2 = STBWeak
-    toEnum 10 = STBLoOS
-    toEnum 12 = STBHiOS
-    toEnum 13 = STBLoProc
-    toEnum 15 = STBHiProc
-    toEnum _  = error "toEnum ElfSymbolBinding given invalid index"
+  let tp = toElfSymbolType (i .&. 0x0F)
+      b = (i `shiftR` 4) .&. 0xF 
+   in (tp, toElfSymbolBinding b)
 
 [enum|
  ElfSymbolType :: Word8
- STTNoType  0
- STTObject  1
- STTFunc    2
- STTSection 3
- STTFile    4
- STTCommon  5
- STTTLS     6
- STTLoOS    10
- STTHiOS    12
- STTLoProc  13
- STTHiProc  15
+ STT_NOTYPE     0 -- Symbol type is unspecified
+ STT_OBJECT     1 -- Symbol is a data object
+ STT_FUNC       2 -- Symbol is a code object
+ STT_SECTION    3 -- Symbol associated with a section.
+ STT_FILE       4 -- Symbol gives a file name.
+ STT_COMMON     5 -- An uninitialised common block.
+ STT_TLS        6 -- Thread local data object.
+ STT_RELC       8 -- Complex relocation expression.
+ STT_SRELC      9 -- Signed Complex relocation expression.
+ STT_GNU_IFUNC 10 -- Symbol is an indirect code object.
+ STT_Other      _
 |]
 
-instance Enum ElfSymbolType where
-  toEnum = fromMaybe (error "toEnum ElfSymbolType given invalid value.")
-         . toElfSymbolType . fromIntegral
-  fromEnum = fromIntegral . fromElfSymbolType
+isOSSpecificSymbolType :: ElfSymbolType -> Bool
+isOSSpecificSymbolType tp =
+  case tp of
+    STT_GNU_IFUNC -> True
+    STT_Other w | 10 <= w && w <= 12 -> True
+    _ -> False
 
-data ElfSectionIndex
-    = SHNUndef
-    | SHNLoProc
-    | SHNCustomProc Word64
-    | SHNHiProc
-    | SHNLoOS
-    | SHNCustomOS Word64
-    | SHNHiOS
-    | SHNAbs
-    | SHNCommon
-    | SHNIndex Word64
-    deriving (Eq, Ord, Show, Read)
+isProcSpecificSymbolType :: ElfSymbolType -> Bool
+isProcSpecificSymbolType tp =
+  case tp of
+    STT_Other w | 13 <= w && w <= 15 -> True
+    _ -> False
 
-instance Enum ElfSectionIndex where
-    fromEnum SHNUndef = 0
-    fromEnum SHNLoProc = 0xFF00
-    fromEnum SHNHiProc = 0xFF1F
-    fromEnum SHNLoOS   = 0xFF20
-    fromEnum SHNHiOS   = 0xFF3F
-    fromEnum SHNAbs    = 0xFFF1
-    fromEnum SHNCommon = 0xFFF2
-    fromEnum (SHNCustomProc x) = fromIntegral x
-    fromEnum (SHNCustomOS x) = fromIntegral x
-    fromEnum (SHNIndex x) = fromIntegral x
-    toEnum 0 = SHNUndef
-    toEnum 0xff00 = SHNLoProc
-    toEnum 0xFF1F = SHNHiProc
-    toEnum 0xFF20 = SHNLoOS
-    toEnum 0xFF3F = SHNHiOS
-    toEnum 0xFFF1 = SHNAbs
-    toEnum 0xFFF2 = SHNCommon
-    toEnum x
-        | x > fromEnum SHNLoProc && x < fromEnum SHNHiProc = SHNCustomProc (fromIntegral x)
-        | x > fromEnum SHNLoOS && x < fromEnum SHNHiOS = SHNCustomOS (fromIntegral x)
-        | x < fromEnum SHNLoProc || x > 0xFFFF = SHNIndex (fromIntegral x)
-        | otherwise = error "Section index number is in a reserved range but we don't recognize the value from any standard."
+ppElfSymbolType :: ElfSymbolType -> String
+ppElfSymbolType tp =
+  case tp of
+    STT_NOTYPE  -> "NOTYPE"
+    STT_OBJECT  -> "OBJECT"
+    STT_FUNC    -> "FUNC"
+    STT_SECTION -> "SECTION"
+    STT_FILE    -> "FILE"
+    STT_COMMON  -> "COMMON"
+    STT_TLS     -> "TLS"
+    STT_RELC    -> "RELC"
+    STT_SRELC   -> "SRELC"
+    STT_GNU_IFUNC -> "IFUNC"
+    STT_Other w | isOSSpecificSymbolType tp -> "<OS specific>: " ++ show w
+                | isProcSpecificSymbolType tp -> "<processor specific>: " ++ show w
+                | otherwise -> "<unknown>: " ++ show w
+
+
+newtype ElfSectionIndex = ElfSectionIndex Word16
+  deriving (Eq, Ord)
+
+asSectionIndex :: ElfSectionIndex -> Maybe Word16
+asSectionIndex si@(ElfSectionIndex w)
+  | shn_undef < si && si < shn_loreserve = Just (w-1)
+  | otherwise = Nothing
+
+-- | Undefined section
+shn_undef :: ElfSectionIndex
+shn_undef = ElfSectionIndex 0
+
+-- | Associated symbol is absolute.
+shn_abs :: ElfSectionIndex
+shn_abs = ElfSectionIndex 0xfff1
+
+-- | Associated symbol is common.
+shn_common :: ElfSectionIndex
+shn_common = ElfSectionIndex 0xfff2
+
+-- | Start of reserved indices.
+shn_loreserve :: ElfSectionIndex
+shn_loreserve = ElfSectionIndex 0xff00
+
+-- | Start of processor specific.
+shn_loproc :: ElfSectionIndex
+shn_loproc = shn_loreserve
+
+-- | Like SHN_COMMON but symbol in .lbss
+shn_x86_64_lcommon :: ElfSectionIndex
+shn_x86_64_lcommon = ElfSectionIndex 0xff02
+
+-- | Only used by HP-UX, because HP linker gives
+-- weak symbols precdence over regular common symbols.
+shn_ia_64_ansi_common :: ElfSectionIndex
+shn_ia_64_ansi_common = shn_loreserve
+
+-- | Small common symbols
+shn_mips_scommon :: ElfSectionIndex
+shn_mips_scommon = ElfSectionIndex 0xff03
+
+-- | Small undefined symbols
+shn_mips_sundefined  :: ElfSectionIndex
+shn_mips_sundefined = ElfSectionIndex 0xff04
+
+-- | Small data area common symbol.
+shn_tic6x_scommon :: ElfSectionIndex
+shn_tic6x_scommon = shn_loreserve
+
+-- | End of processor specific.
+shn_hiproc :: ElfSectionIndex
+shn_hiproc = ElfSectionIndex 0xff1f
+
+-- | Start of OS-specific.
+shn_loos :: ElfSectionIndex
+shn_loos = ElfSectionIndex 0xff20
+
+-- | End of OS-specific.
+shn_hios :: ElfSectionIndex
+shn_hios = ElfSectionIndex 0xff3f
+
+instance Show ElfSectionIndex where
+  show i = ppElfSectionIndex EM_NONE ELFOSABI_SYSV maxBound i
+
+ppElfSectionIndex :: ElfMachine
+                  -> ElfOSABI
+                  -> Word16 -- ^ Number of sections.
+                  -> ElfSectionIndex
+                  -> String
+ppElfSectionIndex m abi shnum tp@(ElfSectionIndex w)
+  | tp == shn_undef  = "UND"
+  | tp == shn_abs    = "ABS"
+  | tp == shn_common = "COM"
+  | tp == shn_ia_64_ansi_common
+  , m == EM_IA_64
+  , abi == ELFOSABI_HPUX = "ANSI_COM"
+  | tp == shn_x86_64_lcommon
+  , m `elem` [ EM_X86_64, EM_L1OM, EM_K1OM]
+  = "LARGE_COM"
+  | (tp,m) == (shn_mips_scommon, EM_MIPS)
+    || (tp,m) == (shn_tic6x_scommon, EM_TI_C6000)
+  = "SCOM"
+  | (tp,m) == (shn_mips_sundefined, EM_MIPS)
+  = "SUND"
+  | tp >= shn_loproc && tp <= shn_hiproc
+  = "PRC[0x" ++ showHex w "]"
+  | tp >= shn_loos && tp <= shn_hios
+  = "OS [0x" ++ showHex w "]"
+  | tp >= shn_loreserve
+  = "RSV[0x" ++ showHex w "]"
+  | w >= shnum = "bad section index[" ++ show w ++ "]"
+  | otherwise = show w
+
+-- | Return elf interpreter in a PT_INTERP section if one exists, or Nothing is no interpreter
+-- is defined.  This will call the Monad fail operation if the contents of the data cannot be
+-- parsed.
+elfInterpreter :: Monad m => Elf w -> m (Maybe FilePath)
+elfInterpreter e =
+  case filter (hasSegmentType PT_INTERP) (elfSegments e) of
+    [] -> return Nothing
+    seg:_ -> do
+      case seg^.elfSegmentData of
+        [ElfDataSection s] -> return (Just (B.toString (elfSectionData s)))
+        _ -> fail "Could not parse elf section."
