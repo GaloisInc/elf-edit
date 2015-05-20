@@ -1,6 +1,5 @@
 {
 module Data.Elf.Parser  where
-
 import Data.Elf.Lexer
 
 }
@@ -10,12 +9,12 @@ import Data.Elf.Lexer
 %tokentype { (Pos,Token) }
 %error { parseError }
 
-%token 
+%token
 '::'    { (_, TOp "::") }
 '='     { (_, TOp "=") }
 ';'     { (_, TOp ";") }
 '|'     { (_, TOp "|") }
-var     { (_, TSym _) } 
+var     { (_, TSym _) }
 str     { (_, TLit _) }
 int     { (_, TNum _) }
 '=='    { (_, TOp "==") }
@@ -42,12 +41,12 @@ EnumValList :: { [EnumVal] }
 EnumValList : RevEnumValList { reverse $1 }
 
 RevEnumValList :: { [EnumVal] }
-RevEnumValList 
+RevEnumValList
   : {- empty -} { [] }
   | RevEnumValList EnumVal { $2 : $1 }
 
 EnumVal :: { EnumVal }
-EnumVal 
+EnumVal
   : var int          { EnumCns (sv $1) (iv $2) }
   | var var          { EnumPred (sv $1) (sv $2) Nothing }
   | var var '|' Expr { EnumPred (sv $1) (sv $2) (Just $4) }
@@ -68,6 +67,7 @@ Expr
   | var             { PosF (fst $1) (Var (sv $1)) }
 
 {
+
 -- | Return string value associated with token.
 sv :: (Pos,Token) -> String
 sv (_,TLit v) = v
@@ -91,7 +91,7 @@ data ExprF e
   | And e e
   | Or  e e
   | ConstBool Bool
-  | ConstInt Integer  
+  | ConstInt Integer
   | Var String
   deriving (Show)
 
@@ -102,19 +102,19 @@ class ShowFoldable f where
   fshows x = (fshow x ++)
 
 instance ShowFoldable ExprF where
-  fshows e = shows e 
+  fshows e = shows e
 
 data PosF f = PosF { pos :: Pos, val :: f (PosF f)  }
 
 instance ShowFoldable app => Show (PosF app) where
   showsPrec _ (PosF p v) s = "PosF " ++ shows p (' ' : fshows v s)
 
-type PosExpr = PosF ExprF 
+type PosExpr = PosF ExprF
 
 newtype Expr = Expr (ExprF Expr)
 
 data EnumVal
-  = EnumCns String Integer 
+  = EnumCns String Integer
   | EnumPred String String (Maybe PosExpr)
   deriving (Show)
 

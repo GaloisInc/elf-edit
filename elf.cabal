@@ -21,6 +21,7 @@ source-repository head
 library
     build-depends:
       base >= 2 && < 5,
+      ansi-wl-pprint,
       array,
       binary >= 0.6.0.0,
       bytestring,
@@ -29,8 +30,7 @@ library
       mtl,
       template-haskell,
       utf8-string,
-      vector,
-      wl-pprint
+      vector
     build-tools:
       alex>= 3.0
     ghc-options : -Wall

@@ -97,7 +97,7 @@ import Data.Monoid
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
 import Numeric
-import Text.PrettyPrint.Leijen hiding ((<>), (<$>))
+import Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import Data.Elf.TH
 
@@ -1479,11 +1479,11 @@ alignLeft minw l = ar <$> l
 alignRight :: Int -> [String] -> [String]
 alignRight minw l = ar <$> l
   where w = maximum $ minw : (length <$> l)
-        ar s = replicate (w-n) ' ' ++ s 
+        ar s = replicate (w-n) ' ' ++ s
           where n = length s
 
 norm :: [[String] -> [String]] -> [[String]] -> Doc
-norm colFns rows = vcat (hsep . fmap text <$> fixed_rows) 
+norm colFns rows = vcat (hsep . fmap text <$> fixed_rows)
   where cols = transpose rows
         fixed_cols = zipWith ($) colFns cols
         fixed_rows = transpose fixed_cols
@@ -1704,7 +1704,7 @@ sectionByIndex e si = do
 |]
 
 -- | Dynamic array entry
-data Dynamic w 
+data Dynamic w
    = Dynamic { dynamicTag :: !ElfDynamicArrayTag
              , dynamicVal :: !w
              }
@@ -1715,7 +1715,7 @@ class ElfWidth w => DynamicWidth w where
 
   -- | Size of one relocation entry.
   relaEntSize :: w
- 
+
   -- | Convert info paramter to relocation sym.
   relaSym :: w -> Word32
 
@@ -1774,7 +1774,7 @@ optionalDynamicEntry tag m =
 
 -- | Get the mandatory entry with the given tag from the map.
 -- It is required that there is exactly one tag with this type.
-mandatoryDynamicEntry :: Monad m => ElfDynamicArrayTag -> DynamicMap w -> m w 
+mandatoryDynamicEntry :: Monad m => ElfDynamicArrayTag -> DynamicMap w -> m w
 mandatoryDynamicEntry tag m =
   case dynamicEntry tag m of
     [w] -> return w
@@ -1783,7 +1783,7 @@ mandatoryDynamicEntry tag m =
 
 -- | Return ranges in file containing the given address range.
 -- In a well-formed file, the list should contain at most one element.
-fileOffsetOfAddr :: (Ord w, Num w) => w -> ElfLayout w -> [Range w] 
+fileOffsetOfAddr :: (Ord w, Num w) => w -> ElfLayout w -> [Range w]
 fileOffsetOfAddr w l =
   [ (dta + offset, n-offset)
   | seg <- F.toList (l^.phdrs)
@@ -1808,7 +1808,7 @@ addressToFile l b nm w =
 
 -- | Return  ranges in file containing the given address range.
 -- In a well-formed file, the list should contain at most one element.
-fileOffsetOfRange :: (Ord w, Num w) => Range w -> ElfLayout w -> [Range w] 
+fileOffsetOfRange :: (Ord w, Num w) => Range w -> ElfLayout w -> [Range w]
 fileOffsetOfRange (w,sz) l =
   [ (dta + offset, sz)
   | seg <- F.toList (l^.phdrs)
@@ -1885,10 +1885,10 @@ dynSymTab e l file m = do
   sym_off <- mandatoryDynamicEntry DT_SYMTAB m
   -- According to a comment in GNU Libc 2.19 (dl-fptr.c:175), you get the
   -- size of the dynamic symbol table by assuming that the string table follows
-  -- immediately afterwards. 
+  -- immediately afterwards.
   str_off <- mandatoryDynamicEntry DT_STRTAB m
   when (str_off < sym_off) $ do
-    fail $ "The string table offset is before the symbol table offset."  
+    fail $ "The string table offset is before the symbol table offset."
   -- Size of each symbol table entry.
   syment <- mandatoryDynamicEntry DT_SYMENT m
   when (syment /= symbolTableEntrySize) $ do
@@ -1900,7 +1900,7 @@ dynSymTab e l file m = do
 
 class Show s => IsData s where
   getData :: ElfData -> Get s
-  
+
 instance IsData Int32 where
   getData d = fromIntegral <$> getWord32 d
 
@@ -1944,7 +1944,7 @@ ppRelaEntries l = norm (snd <$> cols) (fmap fst cols : entries)
 
 ppRelaEntry :: RelocationType u s tp => Int -> RelaEntry u s tp -> [String]
 ppRelaEntry i e =
-  [ shows i ":" 
+  [ shows i ":"
   , ppHex (r_offset e)
   , show (r_sym e)
   , show (r_type e)
@@ -1952,7 +1952,7 @@ ppRelaEntry i e =
   ]
 
 -- | Read a relocation entry.
-getRelaEntry :: RelocationType u s tp => ElfData -> Get (RelaEntry u s tp) 
+getRelaEntry :: RelocationType u s tp => ElfData -> Get (RelaEntry u s tp)
 getRelaEntry d = do
   offset <- getData d
   info   <- getData d
@@ -2031,7 +2031,7 @@ checkRelaCount relocations dm = do
   R_386_JMP_SLOT  7
   R_386_RELATIVE  8
   R_386_GOTOFF    9
-  R_386_GOTPC    10 
+  R_386_GOTPC    10
 |]
 
 instance RelocationType Word32 Int32 I386_RelocationType where
@@ -2066,7 +2066,7 @@ instance RelocationType Word64 Int64 X86_64_RelocationType where
   isRelative R_X86_64_RELATIVE = True
   isRelative _ = False
 
--- | Version definition 
+-- | Version definition
 data VersionDef = VersionDef { vd_flags :: !Word16
                                -- ^ Version information flags bitmask.
                              , vd_ndx  :: !Word16
@@ -2113,7 +2113,7 @@ readVersionDef d strTab b = do
                     , vd_hash  = hash
                     , vd_aux   = entries
                     }
-  
+
 -- | Version requirement informaito.nx
 data VersionReq = VersionReq { vn_file :: String
                              , vn_aux :: [VersionReqAux]
@@ -2170,7 +2170,7 @@ gnuVersionReqs d l file strTab dm = do
       req_buffer <- addressToFile l file "symbol version requirements" vn
       gnuLinkedList (readVersionReq d strTab) d (fromIntegral vnnum) req_buffer
 
-data DynamicSection u s tp 
+data DynamicSection u s tp
    = DynSection { dynNeeded :: ![FilePath]
                 , dynSOName :: Maybe String
                 , dynInit :: [u]
@@ -2222,12 +2222,12 @@ parsed_dyntags =
   , DT_INIT
   , DT_FINI
   , DT_SONAME
-    
+
   , DT_PLTREL
   , DT_DEBUG
 
   , DT_JMPREL
-  
+
   , DT_GNU_HASH
 
   , DT_VERSYM
@@ -2251,7 +2251,7 @@ dynamicEntries e = do
       let p = sec^.elfSegmentData
       let elts = runGet (dynamicList (elfData e)) (sliceL p file)
       let m = foldl' (flip insertDynamic) Map.empty elts
-    
+
       strTab <- dynStrTab l file m
 
       mnm_index <- optionalDynamicEntry DT_SONAME m
@@ -2316,7 +2316,7 @@ ppElfSymbolBinding b =
 infoToTypeAndBind :: Word8 -> (ElfSymbolType,ElfSymbolBinding)
 infoToTypeAndBind i =
   let tp = toElfSymbolType (i .&. 0x0F)
-      b = (i `shiftR` 4) .&. 0xF 
+      b = (i `shiftR` 4) .&. 0xF
    in (tp, toElfSymbolBinding b)
 
 [enum|
