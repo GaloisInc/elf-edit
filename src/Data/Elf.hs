@@ -10,54 +10,53 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- | Data.Elf provides an interface for querying and manipulating Elf files.
 module Data.Elf ( SomeElf(..)
-                , ElfWidth
                 , Elf(..)
+                , ElfWidth
                 , ElfClass(..)
                 , ElfData(..)
                 , ElfOSABI(..)
                 , ElfType(..)
                 , ElfMachine(..)
                 , ElfDataRegion(..)
+                , elfInterpreter
+                , renderElf
                 , hasElfMagic
                 , parseElf
-
-                , renderElf
-
+                  -- * Sections
                 , elfSections
-                , updateSections
-                , findSectionByName
-                , removeSectionByName
-
-                , elfSegments
                 , ElfSection(..)
                 , ElfSectionType(..)
                 , ElfSectionFlags
                 , shf_none, shf_write, shf_alloc, shf_execinstr
-
+                , updateSections
+                , findSectionByName
+                , removeSectionByName
                   -- * Segment operations.
+                , elfSegments
                 , ElfSegment
                 , ElfSegmentF
-
                 , ElfSegmentType(..)
                 , elfSegmentType
-
                 , ElfSegmentFlags
                 , pf_none, pf_x, pf_w, pf_r
                 , hasPermissions
-
                 , elfSegmentFlags
-
                 , elfSegmentVirtAddr
                 , elfSegmentPhysAddr
                 , elfSegmentAlign
                 , elfSegmentMemSize
                 , elfSegmentData
-
                 , RenderedElfSegment
                 , renderedElfSegments
-
+                  -- * Symbol table entries.
                 , ElfSymbolTableEntry(..)
                 , ppSymbolTableEntries
+                , steVisibility
+                , ElfSymbolVisibility
+                , stv_default
+                , stv_internal
+                , stv_hidden
+                , stv_protected
                 , ElfSymbolType(..)
                 , fromElfSymbolType
                 , toElfSymbolType
@@ -65,13 +64,13 @@ module Data.Elf ( SomeElf(..)
                 , ElfSectionIndex(..)
                 , parseSymbolTables
                 , findSymbolDefinition
-                , elfInterpreter
+                  -- * Dynamic symbol table and relocations
+                , DynamicSection(..)
+                , dynamicEntries
                 , RelaEntry
                 , ppRelaEntries
                 , I386_RelocationType
                 , X86_64_RelocationType
-                , DynamicSection(..)
-                , dynamicEntries
                 ) where
 
 import Control.Applicative
@@ -100,8 +99,6 @@ import Numeric
 import Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import Data.Elf.TH
-
-import Debug.Trace
 
 ------------------------------------------------------------------------
 -- Utilities
@@ -1420,7 +1417,7 @@ addSectionToLayout d name_map l s =
 -- ElfSymbolVisibility
 
 -- | Visibility for elf symbol
-newtype ElfSymbolVisibility = ElfSymbolVisibility { visAsWord :: Word8 }
+newtype ElfSymbolVisibility = ElfSymbolVisibility { _visAsWord :: Word8 }
 
 -- | Visibility is specified by binding type
 stv_default :: ElfSymbolVisibility
@@ -1470,27 +1467,34 @@ steEnclosingSection e s = sectionByIndex e (steIndex s)
 steVisibility :: ElfSymbolTableEntry w -> ElfSymbolVisibility
 steVisibility e = ElfSymbolVisibility (steOther e .&. 0x3)
 
-alignLeft :: Int -> [String] -> [String]
+type ColumnAlignmentFn = [String] -> [String]
+
+alignLeft :: Int -> ColumnAlignmentFn
 alignLeft minw l = ar <$> l
   where w = maximum $ minw : (length <$> l)
         ar s = s ++ replicate (w-n) ' '
           where n = length s
 
-alignRight :: Int -> [String] -> [String]
+alignRight :: Int -> ColumnAlignmentFn
 alignRight minw l = ar <$> l
   where w = maximum $ minw : (length <$> l)
         ar s = replicate (w-n) ' ' ++ s
           where n = length s
 
-norm :: [[String] -> [String]] -> [[String]] -> Doc
-norm colFns rows = vcat (hsep . fmap text <$> fixed_rows)
+-- | Function for pretty printing a row of tables according to
+-- rules for each column.
+fix_table_columns :: [ColumnAlignmentFn]
+                     -- ^ Functions for modifying each column
+                  -> [[String]]
+                  -> Doc
+fix_table_columns colFns rows = vcat (hsep . fmap text <$> fixed_rows)
   where cols = transpose rows
         fixed_cols = zipWith ($) colFns cols
         fixed_rows = transpose fixed_cols
 
 -- | Pretty print symbol table entries in format used by readelf.
 ppSymbolTableEntries :: ElfWidth w => [ElfSymbolTableEntry w] -> Doc
-ppSymbolTableEntries l = norm (snd <$> cols) (fmap fst cols : entries)
+ppSymbolTableEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
   where entries = zipWith ppSymbolTableEntry [0..] l
         cols = [ ("Num:",     alignRight 6)
                , ("   Value", alignLeft 0)
@@ -1549,11 +1553,6 @@ hasSectionType tp s = elfSectionType s == tp
 
 symbolTableSections :: ElfWidth w => Elf w -> [ElfSection w]
 symbolTableSections = toListOf $ elfSections.filtered (hasSectionType SHT_SYMTAB)
-
--- Get a string from a strtab ByteString.
-stringByIndex :: Word32 -> B.ByteString -> Maybe B.ByteString
-stringByIndex n strtab = if B.length str == 0 then Nothing else Just str
-  where str = lookupString n strtab
 
 instance ElfWidth Word32 where
   elfClass _ = ELFCLASS32
@@ -1706,7 +1705,7 @@ sectionByIndex e si = do
 -- | Dynamic array entry
 data Dynamic w
    = Dynamic { dynamicTag :: !ElfDynamicArrayTag
-             , dynamicVal :: !w
+             , _dynamicVal :: !w
              }
   deriving (Show)
 
@@ -1868,8 +1867,8 @@ gnuLinkedList readFn d cnt0 b0 = do
       go cnt b prev = do
         case runGetOrFail (readNextVal b) b of
           Left (_,_,msg) -> fail msg
-          Right (_,_,(d,next)) -> do
-            go (cnt-1) (L.drop (fromIntegral next) b) (d:prev)
+          Right (_,_,(d',next)) -> do
+            go (cnt-1) (L.drop (fromIntegral next) b) (d':prev)
   go cnt0 b0 []
 
 dynSymTab :: (DynamicWidth w, Monad m)
@@ -1933,7 +1932,7 @@ isRelativeRelaEntry :: RelocationType u s tp => RelaEntry u s tp -> Bool
 isRelativeRelaEntry r = isRelative (r_type r)
 
 ppRelaEntries :: RelocationType u s tp => [RelaEntry u s tp] -> Doc
-ppRelaEntries l = norm (snd <$> cols) (fmap fst cols : entries)
+ppRelaEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
   where entries = zipWith ppRelaEntry [0..] l
         cols = [ ("Num", alignRight 0)
                , ("Offset", alignLeft 0)
@@ -2434,7 +2433,7 @@ ppElfSectionIndex :: ElfMachine
                   -> Word16 -- ^ Number of sections.
                   -> ElfSectionIndex
                   -> String
-ppElfSectionIndex m abi shnum tp@(ElfSectionIndex w)
+ppElfSectionIndex m abi this_shnum tp@(ElfSectionIndex w)
   | tp == shn_undef  = "UND"
   | tp == shn_abs    = "ABS"
   | tp == shn_common = "COM"
@@ -2455,7 +2454,7 @@ ppElfSectionIndex m abi shnum tp@(ElfSectionIndex w)
   = "OS [0x" ++ showHex w "]"
   | tp >= shn_loreserve
   = "RSV[0x" ++ showHex w "]"
-  | w >= shnum = "bad section index[" ++ show w ++ "]"
+  | w >= this_shnum = "bad section index[" ++ show w ++ "]"
   | otherwise = show w
 
 -- | Return elf interpreter in a PT_INTERP section if one exists, or Nothing is no interpreter
@@ -2469,3 +2468,7 @@ elfInterpreter e =
       case seg^.elfSegmentData of
         [ElfDataSection s] -> return (Just (B.toString (elfSectionData s)))
         _ -> fail "Could not parse elf section."
+
+
+_unused :: a
+_unused = undefined fromElfSymbolBinding fromI386_RelocationType fromX86_64_RelocationType
