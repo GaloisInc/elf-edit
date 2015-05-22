@@ -405,7 +405,9 @@ data ElfSection w = ElfSection
     , elfSectionAddr      :: w
       -- ^ The virtual address of the beginning of the section in memory.
       -- 0 for sections that are not loaded into target memory.
-    , elfSectionSize      :: w                 -- ^ The size of the section. Except for SHT_NOBITS sections, this is the size of elfSectionData.
+    , elfSectionSize      :: w
+      -- ^ The size of the section. Except for SHT_NOBITS sections, this is the
+      -- size of elfSectionData.
     , elfSectionLink      :: Word32            -- ^ Contains a section index of an associated section, depending on section type.
     , elfSectionInfo      :: Word32            -- ^ Contains extra information for the index, depending on type.
     , elfSectionAddrAlign :: w                 -- ^ Contains the required alignment of the section. Must be a power of two.
@@ -539,8 +541,9 @@ pf_r :: ElfSegmentFlags
 pf_r = 4
 
 -- | @hasPermissions p req@ returns @True@ if @p@ has permissions @req@.
-hasPermissions :: ElfSegmentFlags -> ElfSegmentFlags -> Bool
+hasPermissions :: Bits b => b -> b -> Bool
 hasPermissions p req = (p .&. req) == req
+{-# INLINE hasPermissions #-}
 
 -- | Name of shstrtab (used to reduce spelling errors).
 shstrtab :: String
