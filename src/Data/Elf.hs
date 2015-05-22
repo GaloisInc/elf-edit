@@ -12,12 +12,14 @@
 module Data.Elf ( SomeElf(..)
                 , Elf(..)
                 , ElfWidth
-                , ElfClass(..)
+                --, ElfClass(..)
                 , ElfData(..)
                 , ElfOSABI(..)
                 , ElfType(..)
                 , ElfMachine(..)
                 , ElfDataRegion(..)
+                , ElfGOT
+                , Range
                 , elfInterpreter
                 , renderElf
                 , hasElfMagic
@@ -66,8 +68,14 @@ module Data.Elf ( SomeElf(..)
                 , findSymbolDefinition
                   -- * Dynamic symbol table and relocations
                 , DynamicSection(..)
+                , VersionDef(..)
+                , VersionReq(..)
+                , VersionReqAux
+                , DynamicMap
+                , ElfDynamicArrayTag
+                , IsRelocationType
                 , dynamicEntries
-                , RelaEntry
+                , RelaEntry(..)
                 , ppRelaEntries
                 , I386_RelocationType
                 , X86_64_RelocationType
@@ -173,13 +181,47 @@ sliceL :: Integral w => Range w -> L.ByteString -> L.ByteString
 sliceL (i,c) = L.take (fromIntegral c) . L.drop (fromIntegral i)
 
 ------------------------------------------------------------------------
+-- ElfData
+
+-- | A flag indicating whether data is stored in 32 or 64-bit form.
+[enum|
+ ElfData :: Word8
+ ELFDATA2LSB 1
+ ELFDATA2MSB 2
+|]
+
+-- | @IsElfData s@ indicates that @s@ is a type that can be read from an
+-- Elf file given its endianess
+class Show s => IsElfData s where
+  getData :: ElfData -> Get s
+
+instance IsElfData Int32 where
+  getData d = fromIntegral <$> getWord32 d
+
+instance IsElfData Int64 where
+  getData d = fromIntegral <$> getWord64 d
+
+instance IsElfData Word32 where
+  getData = getWord32
+
+instance IsElfData Word64 where
+  getData = getWord64
+
+
+------------------------------------------------------------------------
 -- Elf
 
+-- | The contents of an Elf file.  Many operations require that the
+-- width parameter is either @Word32@ or @Word64@ dependings on whether
+-- this is a 32-bit or 64-bit file.
 data Elf w = Elf
     { elfData       :: ElfData       -- ^ Identifies the data encoding of the object file.
-    , elfVersion    :: Word8         -- ^ Identifies the version of the object file format.
-    , elfOSABI      :: ElfOSABI      -- ^ Identifies the operating system and ABI for which the object is prepared.
-    , elfABIVersion :: Word8         -- ^ Identifies the ABI version for which the object is prepared.
+    , elfVersion    :: Word8
+      -- ^ Identifies the version of the object file format.
+    , elfOSABI      :: ElfOSABI
+      -- ^ Identifies the operating system and ABI for which the object is prepared.
+    , elfABIVersion :: Word8
+      -- ^ Identifies the ABI version for which the object is prepared.
     , elfType       :: ElfType       -- ^ Identifies the object file type.
     , elfMachine    :: ElfMachine    -- ^ Identifies the target architecture.
     , elfEntry      :: w              -- ^ Virtual address of the program entry point. 0 for non-executable Elfs.
@@ -193,18 +235,14 @@ data Elf w = Elf
 elfFileData :: Simple Lens (Elf w) [ElfDataRegion w]
 elfFileData = lens _elfFileData (\s v -> s { _elfFileData = v })
 
+-- | A flag indicating whether Elf is
 [enum|
  ElfClass :: Word8
  ELFCLASS32  1
  ELFCLASS64  2
 |]
 
-[enum|
- ElfData :: Word8
- ELFDATA2LSB 1
- ELFDATA2MSB 2
-|]
-
+-- | A flag identifying the OS or ABI specific Elf extensions used.
 [enum|
  ElfOSABI :: Word8
  ELFOSABI_SYSV         0 -- ^ No extensions or unspecified
@@ -351,7 +389,7 @@ data ElfDataRegion w
   | ElfDataSectionNameTable
     -- | A global offset table.
   | ElfDataGOT (ElfGOT w)
-    -- | Uninterpreted sections.
+    -- | A section that has no special interpretation.
   | ElfDataSection (ElfSection w)
     -- | Identifies an uninterpreted array of bytes.
   | ElfDataRaw B.ByteString
@@ -1137,9 +1175,9 @@ type Phdr w = ElfSegmentF w (Range w)
 -- | Contains Elf section data, name offset, and data offset.
 type Shdr w = (ElfSection w, Word32, w)
 
-class (Bits w, Integral w, Show w) => ElfWidth w where
-  -- | Returns elf class associated with width.
-  -- Argument is not evaluated
+-- | @ElfWidth w@ is used to capture the constraint that Elf files are
+-- either 32 or 64 bit.  It is not meant to be implemented by others.
+class (Bits w, Integral w, Show w, IsElfData w) => ElfWidth w where
   elfClass :: Elf w -> ElfClass
 
   ehdrFields :: ElfRecord (Ehdr w)
@@ -1153,6 +1191,16 @@ class (Bits w, Integral w, Show w) => ElfWidth w where
                          -- ^ Function for mapping offset in string table
                          -- to bytestring.
                       -> Get (ElfSymbolTableEntry w)
+
+  -- | Size of one relocation entry.
+  relaEntSize :: w
+
+  -- | Convert info paramter to relocation sym.
+  relaSym :: w -> Word32
+
+  -- | Get relocation entry element.
+  getRelaEntryElt :: ElfData -> Get w
+
 
 -- | Write elf file out to bytestring.
 renderElf :: ElfWidth w => Elf w -> L.ByteString
@@ -1582,6 +1630,9 @@ instance ElfWidth Word32 where
                  , steValue = value
                  , steSize  = size
                  }
+  relaEntSize = 12
+  relaSym info = info `shiftR` 8
+  getRelaEntryElt = getWord32
 
 
 -- | Gets a single entry from the symbol table, use with runGetMany.
@@ -1610,6 +1661,9 @@ instance ElfWidth Word64 where
                  , steValue = symVal
                  , steSize = size
                  }
+  relaEntSize = 24
+  relaSym info = fromIntegral (info `shiftR` 32)
+  getRelaEntryElt = getWord64
 
 sectionByIndex :: ElfWidth w
                => Elf w
@@ -1712,40 +1766,15 @@ data Dynamic w
              }
   deriving (Show)
 
-class ElfWidth w => DynamicWidth w where
-  getDynamic :: ElfData -> Get (Dynamic w)
-
-  -- | Size of one relocation entry.
-  relaEntSize :: w
-
-  -- | Convert info paramter to relocation sym.
-  relaSym :: w -> Word32
-
-  -- | Get relocation entry element.
-  getRelaEntryElt :: ElfData -> Get w
-
-instance DynamicWidth Word32 where
-  getDynamic d = do
-    tag <- toElfDynamicArrayTag <$> getWord32 d
-    v <- getWord32 d
-    return (Dynamic tag v)
-
-  relaEntSize = 12
-  relaSym info = info `shiftR` 8
-  getRelaEntryElt = getWord32
+-- | Read dynamci array entry.
+getDynamic :: forall w . ElfWidth w => ElfData -> Get (Dynamic w)
+getDynamic d = do
+  tag <- getData d :: Get w
+  v <- getData d
+  return $! Dynamic (toElfDynamicArrayTag (fromIntegral tag)) v
 
 
-instance DynamicWidth Word64 where
-  getDynamic d = do
-    tag <- toElfDynamicArrayTag . fromIntegral <$> getWord64 d
-    v <- getWord64 d
-    return (Dynamic tag v)
-
-  relaEntSize = 24
-  relaSym info = fromIntegral (info `shiftR` 32)
-  getRelaEntryElt = getWord64
-
-dynamicList :: DynamicWidth w => ElfData -> Get [Dynamic w]
+dynamicList :: ElfWidth w => ElfData -> Get [Dynamic w]
 dynamicList d = go []
   where go l = do
           done <- isEmpty
@@ -1835,7 +1864,7 @@ addressRangeToFile l b nm rMem =
     _ -> fail $ "Multiple overlapping segments containing " ++ nm ++ "."
 
 -- | Return contents of dynamic string tab.
-dynStrTab :: (DynamicWidth w, Monad m)
+dynStrTab :: (ElfWidth w, Monad m)
           => ElfLayout w -> L.ByteString -> DynamicMap w -> m L.ByteString
 dynStrTab l b m = do
   w <-  mandatoryDynamicEntry DT_STRTAB m
@@ -1874,7 +1903,7 @@ gnuLinkedList readFn d cnt0 b0 = do
             go (cnt-1) (L.drop (fromIntegral next) b) (d':prev)
   go cnt0 b0 []
 
-dynSymTab :: (DynamicWidth w, Monad m)
+dynSymTab :: (ElfWidth w, Monad m)
           => Elf w
           -> ElfLayout w
           -> L.ByteString
@@ -1900,23 +1929,11 @@ dynSymTab e l file m = do
   let nameFn idx = L.toString $ lookupStringL (fromIntegral idx) strTab
   return $ runGetMany (getSymbolTableEntry e nameFn) symtab
 
-class Show s => IsData s where
-  getData :: ElfData -> Get s
-
-instance IsData Int32 where
-  getData d = fromIntegral <$> getWord32 d
-
-instance IsData Int64 where
-  getData d = fromIntegral <$> getWord64 d
-
-instance IsData Word32 where
-  getData = getWord32
-
-instance IsData Word64 where
-  getData = getWord64
-
-class (DynamicWidth u, IsData u, IsData s, Show tp)
-   => RelocationType u s tp | tp -> u, tp -> s where
+-- | @IsRelocationType u s tp@ indicates that @tp@ is a tagged union of
+-- relocation entries that encodes signed values as type @s@ and unsigned
+-- values as type @u@.
+class (ElfWidth u, IsElfData u, IsElfData s, Show tp)
+   => IsRelocationType u s tp | tp -> u, tp -> s where
 
   -- | Convert unsigned value to type.
   relaType :: u -> Maybe tp
@@ -1924,6 +1941,7 @@ class (DynamicWidth u, IsData u, IsData s, Show tp)
   -- | Return true if this is a relative relocation type.
   isRelative :: tp -> Bool
 
+-- | A relocation entry
 data RelaEntry u s tp  = Rela { r_offset :: !u
                               , r_sym    :: !Word32
                               , r_type   :: !tp
@@ -1931,10 +1949,11 @@ data RelaEntry u s tp  = Rela { r_offset :: !u
                               } deriving (Show)
 
 -- | Return true if this is a relative relocation entry.
-isRelativeRelaEntry :: RelocationType u s tp => RelaEntry u s tp -> Bool
+isRelativeRelaEntry :: IsRelocationType u s tp => RelaEntry u s tp -> Bool
 isRelativeRelaEntry r = isRelative (r_type r)
 
-ppRelaEntries :: RelocationType u s tp => [RelaEntry u s tp] -> Doc
+-- | Pretty-print a table of relocation entries.
+ppRelaEntries :: IsRelocationType u s tp => [RelaEntry u s tp] -> Doc
 ppRelaEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
   where entries = zipWith ppRelaEntry [0..] l
         cols = [ ("Num", alignRight 0)
@@ -1944,7 +1963,7 @@ ppRelaEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
                , ("Addend", alignLeft 0)
                ]
 
-ppRelaEntry :: RelocationType u s tp => Int -> RelaEntry u s tp -> [String]
+ppRelaEntry :: IsRelocationType u s tp => Int -> RelaEntry u s tp -> [String]
 ppRelaEntry i e =
   [ shows i ":"
   , ppHex (r_offset e)
@@ -1954,7 +1973,7 @@ ppRelaEntry i e =
   ]
 
 -- | Read a relocation entry.
-getRelaEntry :: RelocationType u s tp => ElfData -> Get (RelaEntry u s tp)
+getRelaEntry :: IsRelocationType u s tp => ElfData -> Get (RelaEntry u s tp)
 getRelaEntry d = do
   offset <- getData d
   info   <- getData d
@@ -1987,7 +2006,7 @@ dynRelaPLT dm = do
       sz <- mandatoryDynamicEntry DT_PLTRELSZ dm
       return $ Just (relaplt, sz)
 
-dynRelaArray :: (RelocationType u s tp, Monad m)
+dynRelaArray :: (IsRelocationType u s tp, Monad m)
              => ElfData
              -> ElfLayout u
              -> L.ByteString
@@ -2008,7 +2027,7 @@ dynRelaArray d l file dm = do
       rela <- addressRangeToFile l file "relocation array" (rela_offset,sz)
       return $ runGetMany (getRelaEntry d) rela
 
-checkRelaCount :: (RelocationType u s tp, Monad m)
+checkRelaCount :: (IsRelocationType u s tp, Monad m)
                => [RelaEntry u s tp]
                -> DynamicMap u
                -> m ()
@@ -2036,7 +2055,7 @@ checkRelaCount relocations dm = do
   R_386_GOTPC    10
 |]
 
-instance RelocationType Word32 Int32 I386_RelocationType where
+instance IsRelocationType Word32 Int32 I386_RelocationType where
   relaType = toI386_RelocationType
 
   isRelative R_386_RELATIVE = True
@@ -2062,7 +2081,7 @@ instance RelocationType Word32 Int32 I386_RelocationType where
  R_X86_64_PC8            15 -- 8 bit sign extended pc relative
 |]
 
-instance RelocationType Word64 Int64 X86_64_RelocationType where
+instance IsRelocationType Word64 Int64 X86_64_RelocationType where
   relaType = toX86_64_RelocationType . fromIntegral
 
   isRelative R_X86_64_RELATIVE = True
@@ -2193,7 +2212,7 @@ data DynamicSection u s tp
                 }
   deriving (Show)
 
-gnuSymVersionTable :: (DynamicWidth w, Monad m)
+gnuSymVersionTable :: (ElfWidth w, Monad m)
                    => ElfData
                    -> ElfLayout w
                    -> L.ByteString
@@ -2241,7 +2260,7 @@ parsed_dyntags =
   , DT_VERNEEDNUM
   ]
 
-dynamicEntries :: (RelocationType u s tp, Monad m)
+dynamicEntries :: (IsRelocationType u s tp, Monad m)
                => Elf u
                -> m (Maybe (DynamicSection u s tp))
 dynamicEntries e = do
