@@ -32,7 +32,8 @@ library
       utf8-string,
       vector
     build-tools:
-      alex>= 3.0
+      alex>= 3.0,
+      happy
     ghc-options : -Wall
     hs-source-dirs:  src
     exposed-modules: Data.Elf
