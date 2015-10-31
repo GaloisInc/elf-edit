@@ -1,5 +1,13 @@
 {
-module Data.Elf.Parser  where
+module Data.Elf.Parser
+    ( ExprF(..)
+    , EnumVal(..)
+    , EnumDec(..)
+    , PosF(..)
+    , PosExpr
+    , parseEnum
+    ) where
+
 import Data.Elf.Lexer
 
 }

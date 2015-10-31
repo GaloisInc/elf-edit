@@ -89,8 +89,8 @@ import           Control.Exception ( assert )
 import           Control.Lens hiding (enum)
 import           Control.Monad
 import           Data.Binary
-import           Data.Binary.Builder.Sized (Builder)
-import qualified Data.Binary.Builder.Sized as U
+import           Data.Elf.SizedBuilder (Builder)
+import qualified Data.Elf.SizedBuilder as U
 import           Data.Binary.Get as G
 import           Data.Bits
 import qualified Data.ByteString as B
@@ -105,7 +105,7 @@ import           Data.Maybe
 import           Data.Monoid
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
-import           Numeric
+import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.Elf.TH

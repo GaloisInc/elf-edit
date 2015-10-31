@@ -1,7 +1,7 @@
 -- | Provides an interface similar to Data.Binary.Builder that
 -- permits computing the length of the bytes without
 -- evaluating the underling ByteString values.
-module Data.Binary.Builder.Sized
+module Data.Elf.SizedBuilder
   ( -- * The Builder type
     Builder
   , toLazyByteString

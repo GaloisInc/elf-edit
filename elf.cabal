@@ -19,28 +19,28 @@ source-repository head
   location: http://github.com/erikcharlebois/elf
 
 library
-    build-depends:
-      base >= 2 && < 5,
-      ansi-wl-pprint,
-      array,
-      binary >= 0.6.0.0,
-      bytestring,
-      containers,
-      lens,
-      template-haskell,
-      utf8-string,
-      vector
-    build-tools:
-      alex>= 3.0,
-      happy
-    ghc-options : -Wall -Werror
-    hs-source-dirs:  src
-    exposed-modules: Data.Elf
-    other-modules:
-      Data.Elf.Lexer
-      Data.Elf.Parser
-      Data.Elf.TH
-      Data.Binary.Builder.Sized
+  build-depends:
+    base >= 2 && < 5,
+    ansi-wl-pprint,
+    array,
+    binary >= 0.6.0.0,
+    bytestring,
+    containers,
+    lens,
+    template-haskell,
+    utf8-string,
+    vector
+  build-tools:
+    alex>= 3.0,
+    happy
+  ghc-options : -Wall -Werror
+  hs-source-dirs:  src
+  exposed-modules: Data.Elf
+  other-modules:
+    Data.Elf.Lexer
+    Data.Elf.Parser
+    Data.Elf.SizedBuilder
+    Data.Elf.TH
 
 test-suite test-elf
   type: exitcode-stdio-1.0
