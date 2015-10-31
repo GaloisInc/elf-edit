@@ -21,22 +21,22 @@ module Data.Binary.Builder.Sized
     -- ** Little-endian writes
   , putWord16le
   , putWord32le
-  , putWord64le  
+  , putWord64le
     -- ** Host-endian, unaligned writes
   , putWordhost
   , putWord16host
   , putWord32host
   , putWord64host
-  ) where 
+  ) where
 
 import qualified Data.Binary.Builder as U
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
-import Data.Int (Int64)
-import Data.Word
-import Data.Monoid
-import Foreign.Storable
-import Prelude hiding (length)
+import           Data.Int (Int64)
+import           Data.Monoid
+import           Data.Word
+import           Foreign.Storable
+import           Prelude hiding (length)
 
 data Builder = SB !Int64 U.Builder
 
@@ -48,7 +48,7 @@ toStrictByteString = B.concat . L.toChunks . toLazyByteString
 
 -- | Returns the number of length of the underlying ByteString.
 --
---  * @'length' ('toLazyByteString' b) = 'length' b@ 
+--  * @'length' ('toLazyByteString' b) = 'length' b@
 length :: Builder -> Int64
 length (SB w _) = w
 
@@ -62,7 +62,7 @@ singleton :: Word8 -> Builder
 singleton w = SB 1 (U.singleton w)
 
 append :: Builder -> Builder -> Builder
-append (SB sx bx) (SB sy by) = SB (sx + sy) (bx `U.append` by) 
+append (SB sx bx) (SB sy by) = SB (sx + sy) (bx `U.append` by)
 
 instance Monoid Builder where
   mempty = empty
@@ -93,7 +93,7 @@ putWord64le :: Word64 -> Builder
 putWord64le w = SB 8 (U.putWord64le w)
 
 putWordhost :: Word -> Builder
-putWordhost = SB sz . U.putWordhost 
+putWordhost = SB sz . U.putWordhost
   where sz = fromIntegral $ sizeOf (undefined :: Word)
 
 putWord16host :: Word16 -> Builder

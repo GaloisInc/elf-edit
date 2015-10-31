@@ -7,19 +7,19 @@ import Language.Haskell.TH.Quote
 
 sconT :: String -> Type
 sconT = ConT . mkName
-        
+
 sconE :: String -> Exp
 sconE = ConE . mkName
 
 enumDataDec :: EnumDec -> Dec
 enumDataDec (EnumDec  nm bt args) = DataD [] (mkName nm) [] con cl
-  where con = map enumValCtor args   
+  where con = map enumValCtor args
         enumValCtor (EnumCns cnm _) = NormalC (mkName cnm) []
-        enumValCtor (EnumPred cnm _ _) = NormalC (mkName cnm) [(IsStrict, sconT bt)] 
+        enumValCtor (EnumPred cnm _ _) = NormalC (mkName cnm) [(IsStrict, sconT bt)]
         cl = [mkName "Eq", mkName "Ord", mkName "Show"]
 
 parseExp :: PosExpr -> Exp
-parseExp (PosF _ e) = 
+parseExp (PosF _ e) =
   case e of
     Eq x y  -> app2 "==" (parseExp x) (parseExp y)
     Ne x y  -> app2 "/=" (parseExp x) (parseExp y)
@@ -33,7 +33,7 @@ parseExp (PosF _ e) =
     ConstBool False -> ConE (mkName "False")
     ConstInt v -> LitE (IntegerL v)
     Var nm -> VarE (mkName nm)
-  where app2 op x y = (VarE (mkName op) `AppE` x) `AppE` y 
+  where app2 op x y = (VarE (mkName op) `AppE` x) `AppE` y
 
 valMatchesAny :: EnumVal -> Bool
 valMatchesAny (EnumPred _ _ Nothing) = True
@@ -49,7 +49,7 @@ enumValToClause resFn (EnumPred nm _var Nothing) = do
 enumValToClause resFn (EnumPred nm var (Just c)) = do
   let vName = mkName var
   let res = resFn (AppE (sconE nm) (VarE vName))
-  let body = GuardedB [(NormalG (parseExp c), res)]             
+  let body = GuardedB [(NormalG (parseExp c), res)]
   return $ Clause [VarP (mkName var)] body []
 
 enumValFromClause :: EnumVal -> Clause
@@ -60,19 +60,19 @@ enumValFromClause (EnumPred nm _ _) =
   where xv = mkName "x"
 
 enumToDec :: EnumDec -> Q [Dec]
-enumToDec (EnumDec nm tp args) 
+enumToDec (EnumDec nm tp args)
     | any valMatchesAny args = do
       cll <- mapM (enumValToClause id) args
       return [ SigD toFn (sconT tp `arrT` sconT nm)
              , FunD toFn cll
              ]
     | otherwise = do
-      cll <- mapM (enumValToClause (AppE (sconE "Just"))) args      
+      cll <- mapM (enumValToClause (AppE (sconE "Just"))) args
       return [ SigD toFn $
                  sconT tp `arrT` (AppT (sconT "Maybe") (sconT nm))
              , FunD toFn $ cll ++ [Clause [WildP] (NormalB (sconE "Nothing")) []]
              ]
-  where arrT x y = AppT (ArrowT `AppT` x) y 
+  where arrT x y = AppT (ArrowT `AppT` x) y
         toFn = mkName ("to" ++ nm)
 
 enumFromDec :: EnumDec -> [Dec]
@@ -93,7 +93,7 @@ quoteEnumDec msg = do
   let d = parseEnum tokens
   toDec <- enumToDec d
   return $ enumDataDec d : toDec ++ enumFromDec d
-    
+
 -- | The enum quasiquoter provides a mechanism for declaring datatypes that
 -- correspond with C enums in a typesafe way.
 enum :: QuasiQuoter
@@ -101,6 +101,6 @@ enum = QuasiQuoter {
            quoteExp = unsupported
          , quotePat = unsupported
          , quoteType = unsupported
-         , quoteDec = quoteEnumDec            
+         , quoteDec = quoteEnumDec
          }
   where unsupported _ = fail "enum quasiquote must appear as declaration."

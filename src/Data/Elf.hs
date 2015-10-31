@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DoAndIfThenElse #-}
 {-# LANGUAGE FunctionalDependencies #-}
@@ -81,32 +82,33 @@ module Data.Elf ( SomeElf(..)
                 , X86_64_RelocationType
                 ) where
 
-import Control.Applicative
-import Control.Exception ( assert )
-import Control.Lens hiding (enum)
-import Control.Monad
-import Control.Monad.Error
-import Data.Binary
-import Data.Binary.Builder.Sized (Builder)
+#if !MIN_VERSION_base(4,8,0)
+import           Control.Applicative
+#endif
+import           Control.Exception ( assert )
+import           Control.Lens hiding (enum)
+import           Control.Monad
+import           Data.Binary
+import           Data.Binary.Builder.Sized (Builder)
 import qualified Data.Binary.Builder.Sized as U
-import Data.Binary.Get as G
-import Data.Bits
-import qualified Data.ByteString      as B
+import           Data.Binary.Get as G
+import           Data.Bits
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L (toString)
 import qualified Data.ByteString.UTF8 as B (fromString, toString)
 import qualified Data.Foldable as F
-import Data.Int
-import Data.List (genericDrop, foldl', intercalate, sort, transpose)
+import           Data.Int
+import           Data.List (genericDrop, foldl', intercalate, sort, transpose)
 import qualified Data.Map as Map
-import Data.Maybe
-import Data.Monoid
+import           Data.Maybe
+import           Data.Monoid
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
-import Numeric
-import Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
+import           Numeric
+import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
-import Data.Elf.TH
+import           Data.Elf.TH
 
 ------------------------------------------------------------------------
 -- Utilities
@@ -484,22 +486,22 @@ elfGotSection g =
              }
 
 -- | Attempt to convert a section to a GOT.
-elfSectionAsGOT :: (Monad m, Bits w, Num w)
+elfSectionAsGOT :: (Bits w, Num w)
                 => ElfSection w
-                -> m (ElfGOT w)
+                -> Either String (ElfGOT w)
 elfSectionAsGOT s = do
   -- TODO: Perform checks
   when (elfSectionType s /= SHT_PROGBITS) $ do
-    fail "Unexpected type"
+    Left "Unexpected type"
   when (elfSectionFlags s /= elfGotSectionFlags) $ do
-    fail "Unexpected type"
+    Left "Unexpected type"
   let d = elfSectionData s
   when (elfSectionSize s /= fromIntegral (B.length d)) $ do
-    fail "Section size does not match data length."
+    Left "Section size does not match data length."
   when (elfSectionLink s /= 0) $ do
-    fail "Unexpected section length"
+    Left "Unexpected section length"
   when (elfSectionInfo s /= 0) $ do
-    fail "Unexpected section info"
+    Left "Unexpected section info"
   return ElfGOT { elfGotName = elfSectionName s
                 , elfGotAddr = elfSectionAddr s
                 , elfGotAddrAlign = elfSectionAddrAlign s
@@ -667,7 +669,7 @@ updateSections fn e0 = elfFileData (updateList impl) e0
         norm s
           | elfSectionName s == shstrtab = ElfDataSectionNameTable
           | elfSectionName s `elem` [".got", ".got.plt"] =
-            case runIdentity (runErrorT (elfSectionAsGOT s)) of
+            case elfSectionAsGOT s of
               Left e -> error $ "Error in Data.Elf.updateSections: " ++ e
               Right v -> ElfDataGOT v
           | otherwise = ElfDataSection s
@@ -771,6 +773,7 @@ getShdr64 er file string_section = do
     }
   return ((sh_offset, sectionFileLen sh_type sh_size), s)
 
+-- | Type for reading a elf segment from binary data.
 type GetPhdrFn w = Get (ElfSegmentF w (Range w))
 
 getPhdr32 :: ElfData -> GetPhdrFn Word32
@@ -937,12 +940,15 @@ data ElfParseInfo w = ElfParseInfo {
        ehdrSize :: !Word16
        -- | Layout of segment header table.
      , phdrTable :: !(TableLayout w)
+       -- | Function for reading elf segments.
      , getPhdr :: !(GetPhdrFn w)
        -- | Index of section for storing section names.
      , shdrNameIdx :: !Word16
        -- | Layout of section header table.
      , shdrTable :: !(TableLayout w)
+       -- | Function for reading elf sections.
      , getShdr   :: !(GetShdrFn w)
+       -- | Contents of file as a bytestring.
      , fileContents :: !B.ByteString
      }
 
@@ -1645,13 +1651,13 @@ instance ElfWidth Word64 where
 
   symbolTableEntrySize = 24
   getSymbolTableEntry e nameFn = do
-    let er = elfData e
-    nameIdx <- getWord32 er
+    let d = elfData e
+    nameIdx <- getWord32 d
     info <- getWord8
     other <- getWord8
-    sTlbIdx <- ElfSectionIndex <$> getWord16 er
-    symVal <- getWord64 er
-    size <- getWord64 er
+    sTlbIdx <- ElfSectionIndex <$> getWord16 d
+    symVal <- getWord64 d
+    size <- getWord64 d
     let (typ,bind) = infoToTypeAndBind info
     return $ EST { steName = nameFn nameIdx
                  , steType = typ

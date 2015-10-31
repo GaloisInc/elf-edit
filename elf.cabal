@@ -7,9 +7,9 @@ Author:        Erik Charlebois
 Copyright:     Erik Charlebois
 Maintainer:    Erik Charlebois <erikcharlebois@gmail.com>
 Stability:     unstable
-Cabal-Version: >= 1.6
+Cabal-Version: >= 1.8
 Homepage:      http://github.com/erikcharlebois/elf
-Build-Type:    Custom
+Build-Type:    Simple
 Synopsis:      Parser for ELF object format.
 Description:   Parser for ELF object format.
 Data-Files:    tests/empty.elf tests/Test.hs
@@ -27,14 +27,13 @@ library
       bytestring,
       containers,
       lens,
-      mtl,
       template-haskell,
       utf8-string,
       vector
     build-tools:
       alex>= 3.0,
       happy
-    ghc-options : -Wall
+    ghc-options : -Wall -Werror
     hs-source-dirs:  src
     exposed-modules: Data.Elf
     other-modules:
@@ -42,3 +41,12 @@ library
       Data.Elf.Parser
       Data.Elf.TH
       Data.Binary.Builder.Sized
+
+test-suite test-elf
+  type: exitcode-stdio-1.0
+  main-is: tests/Test.hs
+  build-depends:
+    base,
+    bytestring,
+    elf,
+    HUnit

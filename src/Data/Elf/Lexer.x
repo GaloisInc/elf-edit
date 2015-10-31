@@ -6,7 +6,8 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 {-# OPTIONS_GHC -fno-warn-unused-binds #-}
-module Data.Elf.Lexer 
+{-# OPTIONS_GHC -fno-warn-tabs #-}
+module Data.Elf.Lexer
   ( Pos(..)
   , ppPos
   , Token(..)
@@ -33,7 +34,7 @@ $white+      ;
 [$alpha \_] $idchar* { \_ -> TSym }
 $digit+              { \_ -> TNum . read }
 "0x"$hex+            { \_ -> TNum . read }
-@punct               { \_ -> TOp } 
+@punct               { \_ -> TOp }
 \" (\\\"|[^\"])+ \"  { \_ -> TLit . read }
 
 
@@ -54,7 +55,7 @@ alexMove (Pos f l c) _    = Pos f l (c+1)
 -}
 
 data Token
-  = TSym String 
+  = TSym String
   | TNum Integer
   | TOp  String
   | TLit String -- ^ String literal
