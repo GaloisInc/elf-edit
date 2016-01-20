@@ -19,11 +19,8 @@ import Data.Elf.Lexer
 
 %token
 '::'    { (_, TOp "::") }
-'='     { (_, TOp "=") }
-';'     { (_, TOp ";") }
 '|'     { (_, TOp "|") }
 var     { (_, TSym _) }
-str     { (_, TLit _) }
 int     { (_, TNum _) }
 '=='    { (_, TOp "==") }
 '/='    { (_, TOp "/=") }

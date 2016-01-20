@@ -33,7 +33,7 @@ library
   build-tools:
     alex>= 3.0,
     happy
-  ghc-options : -Wall -Werror
+  ghc-options : -Wall
   hs-source-dirs:  src
   exposed-modules: Data.Elf
   other-modules:

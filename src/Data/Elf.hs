@@ -380,22 +380,32 @@ elfFileData = lens _elfFileData (\s v -> s { _elfFileData = v })
 -- | Describes a block of data in the file.
 data ElfDataRegion w
     -- | Identifies the elf header (should appear 1st in an in-order traversal of the file).
-  = ElfDataElfHeader
-    -- | Identifies the program header table.
-  | ElfDataSegmentHeaders
-    -- | A segment that contains other segments.
-  | ElfDataSegment (ElfSegment w)
-    -- | Identifies the section header table.
-  | ElfDataSectionHeaders
-    -- | The section for storing the section names.
-  | ElfDataSectionNameTable
-    -- | A global offset table.
-  | ElfDataGOT (ElfGOT w)
-    -- | A section that has no special interpretation.
-  | ElfDataSection (ElfSection w)
-    -- | Identifies an uninterpreted array of bytes.
-  | ElfDataRaw B.ByteString
+   = ElfDataElfHeader
+     -- | Identifies the program header table.
+   | ElfDataSegmentHeaders
+     -- | A segment that contains other segments.
+   | ElfDataSegment (ElfSegment w)
+     -- | Identifies the section header table.
+   | ElfDataSectionHeaders
+     -- | The section for storing the section names.
+   | ElfDataSectionNameTable
+     -- | A global offset table.
+   | ElfDataGOT (ElfGOT w)
+     -- | A section that has no special interpretation.
+   | ElfDataSection (ElfSection w)
+     -- | Identifies an uninterpreted array of bytes.
+   | ElfDataRaw B.ByteString
   deriving (Show)
+
+elfDataRegionName :: ElfDataRegion w -> String
+elfDataRegionName ElfDataElfHeader = "elf header"
+elfDataRegionName ElfDataSegmentHeaders = "phdr table"
+elfDataRegionName (ElfDataSegment s) = show (elfSegmentType s) ++ " segment"
+elfDataRegionName ElfDataSectionHeaders = "shdr table"
+elfDataRegionName ElfDataSectionNameTable = "section name table"
+elfDataRegionName (ElfDataGOT g) = elfGotName g
+elfDataRegionName (ElfDataSection s) = elfSectionName s
+elfDataRegionName (ElfDataRaw _) = "elf raw"
 
 [enum|
  ElfSectionType :: Word32
@@ -439,20 +449,28 @@ shf_execinstr = 4
 
 -- | A section in the Elf file.
 data ElfSection w = ElfSection
-    { elfSectionName      :: String            -- ^ Identifies the name of the section.
-    , elfSectionType      :: ElfSectionType    -- ^ Identifies the type of the section.
-    , elfSectionFlags     :: ElfSectionFlags w -- ^ Identifies the attributes of the section.
-    , elfSectionAddr      :: w
+    { elfSectionName      :: !String
+      -- ^ Identifies the name of the section.
+    , elfSectionType      :: !ElfSectionType
+      -- ^ Identifies the type of the section.
+    , elfSectionFlags     :: !(ElfSectionFlags w)
+      -- ^ Identifies the attributes of the section.
+    , elfSectionAddr      :: !w
       -- ^ The virtual address of the beginning of the section in memory.
       -- 0 for sections that are not loaded into target memory.
-    , elfSectionSize      :: w
+    , elfSectionSize      :: !w
       -- ^ The size of the section. Except for SHT_NOBITS sections, this is the
       -- size of elfSectionData.
-    , elfSectionLink      :: Word32            -- ^ Contains a section index of an associated section, depending on section type.
-    , elfSectionInfo      :: Word32            -- ^ Contains extra information for the index, depending on type.
-    , elfSectionAddrAlign :: w                 -- ^ Contains the required alignment of the section. Must be a power of two.
-    , elfSectionEntSize   :: w                 -- ^ Size of entries if section has a table.
-    , elfSectionData      :: B.ByteString      -- ^ Data in section.
+    , elfSectionLink      :: !Word32
+      -- ^ Contains a section index of an associated section, depending on section type.
+    , elfSectionInfo      :: !Word32
+      -- ^ Contains extra information for the index, depending on type.
+    , elfSectionAddrAlign :: !w
+      -- ^ Contains the required alignment of the section. Must be a power of two.
+    , elfSectionEntSize   :: !w
+      -- ^ Size of entries if section has a table.
+    , elfSectionData      :: !B.ByteString
+      -- ^ Data in section.
     } deriving (Eq, Show)
 
 -- | A global offset table section.
@@ -649,10 +667,12 @@ elfNameTableSection name_data =
     , elfSectionData = name_data
     }
 
--- | Given a section name, extract the ElfSection.
-findSectionByName :: ElfWidth w => String -> Elf w -> Maybe (ElfSection w)
-findSectionByName name  = findOf elfSections byName
-  where byName section  = elfSectionName section == name
+-- | Given a section name, returns sections matching that name.
+--
+-- Section names in elf are not necessarily unique.
+findSectionByName :: ElfWidth w => String -> Elf w -> [ElfSection w]
+findSectionByName name e  = e^..elfSections.filtered byName
+  where byName section = elfSectionName section == name
 
 -- | Traverse elements in a list and modify or delete them.
 updateList :: Traversal [a] [b] a (Maybe b)
@@ -854,33 +874,39 @@ insertRawRegion :: B.ByteString -> RegionPrefixFn w
 insertRawRegion b r | B.length b == 0 = r
                     | otherwise = ElfDataRaw b : r
 
+data InsertError w
+   = OverlapSegment (ElfDataRegion w)
+   | OutOfRange
+
 -- | Insert an elf data region at a given offset.
 insertAtOffset :: Integral w
                => RegionSizeFn w   -- ^ Function for getting size of a region.
                -> Range w          -- ^ Range to insert in.
                -> RegionPrefixFn w -- ^ Insert function
-               -> RegionPrefixFn w
+               -> [ElfDataRegion w]
+               -> Either (InsertError w) [ElfDataRegion w]
 insertAtOffset sizeOf (o,c) fn (p:r)
     -- Go to next segment if offset to insert is after p.
-  | o >= sz = p:insertAtOffset sizeOf (o-sz,c) fn r
+  | o >= sz = (p:) <$> insertAtOffset sizeOf (o-sz,c) fn r
     -- Recurse inside segment if p is a segment that contains region to insert.
   | o + c <= sz
-  , ElfDataSegment s <- p = -- New region ends before p ends and p is a segment.
-      let s' = s & elfSegmentData %~ insertAtOffset sizeOf (o,c) fn
-       in ElfDataSegment s' : r
+  , ElfDataSegment s <- p = do
+      -- New region ends before p ends and p is a segment.
+      s' <- elfSegmentData (insertAtOffset sizeOf (o,c) fn) s
+      pure $! ElfDataSegment s' : r
     -- Insert into current region is offset is 0.
-  | o == 0 = fn (p:r)
+  | o == 0 = pure $! fn (p:r)
     -- Split a raw segment into prefix and post.
   | ElfDataRaw b <- p =
       -- We know offset is less than length of bytestring as otherwise we would
       -- have gone to next segment
       assert (fromIntegral o < B.length b) $ do
         let (pref,post) = B.splitAt (fromIntegral o) b
-        insertRawRegion pref $ fn $ insertRawRegion post r
-  | otherwise = error "Attempt to insert overlapping Elf region"
+        pure $! insertRawRegion pref $ fn $ insertRawRegion post r
+  | otherwise = Left (OverlapSegment p)
   where sz = sizeOf p
-insertAtOffset _ (0,0) fn [] = fn []
-insertAtOffset _ _ _ [] = error "Invalid region"
+insertAtOffset _ (0,0) fn [] = pure $ fn []
+insertAtOffset _ _ _ [] = Left OutOfRange
 
 -- | Insert a leaf region into the region.
 insertSpecialRegion :: Integral w
@@ -888,21 +914,35 @@ insertSpecialRegion :: Integral w
                     -> Range w
                     -> ElfDataRegion w -- ^ New region
                     -> RegionPrefixFn w
-insertSpecialRegion sizeOf r n = insertAtOffset sizeOf r fn
+insertSpecialRegion sizeOf r n segs =
+    case insertAtOffset sizeOf r fn segs of
+      Left (OverlapSegment prev) ->
+        error $ "insertSpecialRegion: attempt to insert "
+          ++ elfDataRegionName n
+          ++ " overlapping Elf region into "
+          ++ elfDataRegionName prev
+          ++ "."
+      Left OutOfRange -> error "insertSpecialRegion: Invalid region"
+      Right result -> result
   where c = snd r
+        -- Insert function
         fn l | c == 0 = n : l
         fn (ElfDataRaw b:l)
           | fromIntegral c <= B.length b
           = n : insertRawRegion (B.drop (fromIntegral c) b) l
         fn _ = error $ "Elf file contained a non-empty header that overlapped with another.\n"
-                       ++ "  This is not supported by the Elf parser"
+                       ++ "  This is not supported by the Elf parser."
 
 insertSegment :: forall w
                . (Bits w, Integral w, Show w)
               => RegionSizeFn w
               -> ElfSegmentF w (Range w)
               -> RegionPrefixFn w
-insertSegment sizeOf d = insertAtOffset sizeOf rng (gather szd [])
+insertSegment sizeOf d segs =
+    case insertAtOffset sizeOf rng (gather szd []) segs of
+      Left (OverlapSegment _) -> error "Attempt to insert overlapping segments."
+      Left OutOfRange -> error "Invalid segment region"
+      Right result -> result
   where rng@(_,szd) = d^.elfSegmentData
         -- | @gather@ inserts new segment into head of list after collecting existings
         -- data it contains.
@@ -1948,11 +1988,16 @@ class (ElfWidth u, IsElfData u, IsElfData s, Show tp)
   isRelative :: tp -> Bool
 
 -- | A relocation entry
-data RelaEntry u s tp  = Rela { r_offset :: !u
-                              , r_sym    :: !Word32
-                              , r_type   :: !tp
-                              , r_addend :: !s
-                              } deriving (Show)
+data RelaEntry u s tp
+   = Rela { r_offset :: !u
+            -- ^ The location to apply the relocation action.
+          , r_sym    :: !Word32
+            -- ^ Symbol table entry relocation refers to.
+          , r_type   :: !tp
+            -- ^ The type of relocation entry
+          , r_addend :: !s
+            -- ^ The constant addend to apply.
+          } deriving (Show)
 
 -- | Return true if this is a relative relocation entry.
 isRelativeRelaEntry :: IsRelocationType u s tp => RelaEntry u s tp -> Bool
@@ -2266,6 +2311,10 @@ parsed_dyntags =
   , DT_VERNEEDNUM
   ]
 
+-- | This returns information about the dynamic segment in a elf file
+-- if it exists.
+--
+-- The code assumes that there is at most one segment with type PT_Dynamic.
 dynamicEntries :: (IsRelocationType u s tp, Monad m)
                => Elf u
                -> m (Maybe (DynamicSection u s tp))
@@ -2361,6 +2410,7 @@ infoToTypeAndBind i =
  STT_Other      _
 |]
 
+-- | Returns true if this is an OF specififc symbol type.
 isOSSpecificSymbolType :: ElfSymbolType -> Bool
 isOSSpecificSymbolType tp =
   case tp of
