@@ -1,22 +1,18 @@
-Name:          elf
+Name:          elf-galois
 Version:       0.28
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
-Author:        Erik Charlebois
-Copyright:     Erik Charlebois
-Maintainer:    Erik Charlebois <erikcharlebois@gmail.com>
+Author:        Galois, Inc and Erik Charlebois
+Copyright:     Galois, Inc and Erik Charlebois
+Maintainer:    Joe Hendrix <jhendrix@galois.com>
 Stability:     unstable
 Cabal-Version: >= 1.8
-Homepage:      http://github.com/erikcharlebois/elf
+Homepage:      http://github.com/GaloisInc/elf
 Build-Type:    Simple
 Synopsis:      Parser for ELF object format.
 Description:   Parser for ELF object format.
 Data-Files:    tests/empty.elf tests/Test.hs
-
-source-repository head
-  type:     git
-  location: http://github.com/erikcharlebois/elf
 
 library
   build-depends:
