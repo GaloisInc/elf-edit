@@ -313,15 +313,23 @@ stringTable strings = (res, stringMap)
 ------------------------------------------------------------------------
 -- Section traversal
 
--- | Traverse elf sections
-elfSections' :: ElfWidth w => Simple Traversal (Elf w) (ElfSection w)
-elfSections' f = updateSections' (fmap Just . f)
+-- | Return name of all elf sections.
+elfSectionNames :: Elf w -> [String]
+elfSectionNames e = concatMap regionNames (F.toList (e^.elfFileData))
+  where regionNames :: ElfDataRegion w -> [String]
+        regionNames (ElfDataSegment s) =
+          concatMap regionNames (F.toList (s^.elfSegmentData))
+        regionNames ElfDataSectionNameTable = [shstrtab]
+        regionNames (ElfDataGOT g)          = [elfGotName g]
+        regionNames (ElfDataSection s)      = [elfSectionName s]
+        regionNames _                       = []
 
 -- | Traverse sections in Elf file and modify or delete them.
-updateSections' :: ElfWidth w
+updateSections' :: (Bits w, Num w)
                 => Traversal (Elf w) (Elf w) (ElfSection w) (Maybe (ElfSection w))
 updateSections' fn e0 = elfFileData (updateSeq impl) e0
-  where (t,_) = stringTable $ map elfSectionName (toListOf elfSections' e0)
+  where (t,_) = stringTable $ elfSectionNames e0
+        norm :: (Bits w, Num w) => ElfSection w -> ElfDataRegion w
         norm s
           | elfSectionName s == shstrtab = ElfDataSectionNameTable
           | elfSectionName s `elem` [".got", ".got.plt"] =
@@ -329,12 +337,17 @@ updateSections' fn e0 = elfFileData (updateSeq impl) e0
               Left e -> error $ "Error in Data.Elf.updateSections: " ++ e
               Right v -> ElfDataGOT v
           | otherwise = ElfDataSection s
+
         impl (ElfDataSegment s) = Just . ElfDataSegment <$> s'
           where s' = s & elfSegmentData (updateSeq impl)
         impl ElfDataSectionNameTable = fmap norm <$> fn (elfNameTableSection t)
         impl (ElfDataGOT g) = fmap norm <$> fn (elfGotSection g)
         impl (ElfDataSection s) = fmap norm <$> fn s
         impl d = pure (Just d)
+
+-- | Traverse elf sections
+elfSections' :: (Bits w, Num w) => Simple Traversal (Elf w) (ElfSection w)
+elfSections' f = updateSections' (fmap Just . f)
 
 ------------------------------------------------------------------------
 -- Section Elf Layout
