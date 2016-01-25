@@ -31,12 +31,14 @@ library
     happy
   ghc-options : -Wall
   hs-source-dirs:  src
-  exposed-modules: Data.Elf
+  exposed-modules:
+    Data.Elf
   other-modules:
     Data.Elf.Lexer
     Data.Elf.Parser
     Data.Elf.SizedBuilder
     Data.Elf.TH
+    Data.Elf.Types
 
 test-suite test-elf
   type: exitcode-stdio-1.0
