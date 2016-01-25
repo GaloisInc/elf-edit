@@ -34,6 +34,7 @@ library
   exposed-modules:
     Data.Elf
   other-modules:
+    Data.Elf.Layout
     Data.Elf.Lexer
     Data.Elf.Parser
     Data.Elf.SizedBuilder

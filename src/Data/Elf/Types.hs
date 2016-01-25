@@ -13,6 +13,7 @@ module Data.Elf.Types
   , fromElfClass
   , SomeElfClass(..)
   , toSomeElfClass
+  , elfClassIntegralInstance
     -- **  ElfData
   , ElfData(..)
   , fromElfData
@@ -42,6 +43,9 @@ module Data.Elf.Types
   , toElfSectionType
     -- ** ElfGOT
   , ElfGOT(..)
+  , elfGotSection
+  , elfGotSectionFlags
+  , elfGotSize
     -- * ElfSegment
   , ElfSegment(..)
   , elfSegmentData
@@ -147,9 +151,9 @@ toSomeElfClass 1 = Just (SomeElfClass ELFCLASS32)
 toSomeElfClass 2 = Just (SomeElfClass ELFCLASS64)
 toSomeElfClass _ = Nothing
 
-elfClassNumInstance :: ElfClass w -> (Num w => a) -> a
-elfClassNumInstance ELFCLASS32 a = a
-elfClassNumInstance ELFCLASS64 a = a
+elfClassIntegralInstance :: ElfClass w -> (Integral w => a) -> a
+elfClassIntegralInstance ELFCLASS32 a = a
+elfClassIntegralInstance ELFCLASS64 a = a
 
 ------------------------------------------------------------------------
 -- ElfData
@@ -397,6 +401,27 @@ data ElfGOT w = ElfGOT
     , elfGotData      :: !B.ByteString
     } deriving (Show)
 
+elfGotSectionFlags :: (Bits w, Num w) => ElfSectionFlags w
+elfGotSectionFlags = shf_write .|. shf_alloc
+
+elfGotSize :: Num w => ElfGOT w -> w
+elfGotSize g = fromIntegral (B.length (elfGotData g))
+
+-- | Convert a GOT section to a standard section.
+elfGotSection :: (Bits w, Num w) => ElfGOT w -> ElfSection w
+elfGotSection g =
+  ElfSection { elfSectionName = elfGotName g
+             , elfSectionType = SHT_PROGBITS
+             , elfSectionFlags = elfGotSectionFlags
+             , elfSectionAddr = elfGotAddr g
+             , elfSectionSize = elfGotSize g
+             , elfSectionLink = 0
+             , elfSectionInfo = 0
+             , elfSectionAddrAlign = elfGotAddrAlign g
+             , elfSectionEntSize = elfGotEntSize g
+             , elfSectionData = elfGotData g
+             }
+
 ------------------------------------------------------------------------
 -- ElfSegmentType
 
@@ -543,7 +568,7 @@ data Elf w = Elf
 
 -- | Create an empty elf file.
 emptyElf :: ElfData -> ElfClass w -> ElfType -> ElfMachine -> Elf w
-emptyElf d c tp m = elfClassNumInstance c $
+emptyElf d c tp m = elfClassIntegralInstance c $
   Elf { elfData       = d
       , elfClass      = c
       , elfVersion    = 1 -- Current version as of Jan. 2016
