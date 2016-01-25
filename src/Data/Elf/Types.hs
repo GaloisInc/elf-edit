@@ -3,7 +3,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
-{-# OPTIONS_GHC -Werror #-}
 module Data.Elf.Types
   ( Elf(..)
   , emptyElf
