@@ -25,6 +25,7 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfMachine(..)
                 , ElfDataRegion(..)
                 , ElfGOT(..)
+                , ElfWidth
                   -- ** Reading and Writing Elf files
                 , hasElfMagic
                 , SomeElf(..)

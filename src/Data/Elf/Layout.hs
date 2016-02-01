@@ -19,6 +19,7 @@ module Data.Elf.Layout
   , elfMagic
   , sizeOfPhdr32
   , sizeOfShdr32
+  , ElfWidth
   ) where
 
 import           Control.Lens hiding (enum)
