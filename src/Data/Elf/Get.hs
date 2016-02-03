@@ -20,7 +20,13 @@ module Data.Elf.Get
 import           Control.Exception ( assert )
 import           Control.Lens
 import           Control.Monad
-import           Data.Binary.Get as G
+import           Data.Binary.Get
+  ( getWord8
+  , ByteOffset
+  , skip
+  , Get
+  )
+import qualified Data.Binary.Get as Get
 import           Data.Bits
 import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.ByteString as B
@@ -44,16 +50,16 @@ lookupString o b = B.takeWhile (/= 0) $ B.drop (fromIntegral o) b
 -- Low level getters
 
 getWord16 :: ElfData -> Get Word16
-getWord16 ELFDATA2LSB = getWord16le
-getWord16 ELFDATA2MSB = getWord16be
+getWord16 ELFDATA2LSB = Get.getWord16le
+getWord16 ELFDATA2MSB = Get.getWord16be
 
 getWord32 :: ElfData -> Get Word32
-getWord32 ELFDATA2LSB = getWord32le
-getWord32 ELFDATA2MSB = getWord32be
+getWord32 ELFDATA2LSB = Get.getWord32le
+getWord32 ELFDATA2MSB = Get.getWord32be
 
 getWord64 :: ElfData -> Get Word64
-getWord64 ELFDATA2LSB = getWord64le
-getWord64 ELFDATA2MSB = getWord64be
+getWord64 ELFDATA2LSB = Get.getWord64le
+getWord64 ELFDATA2MSB = Get.getWord64be
 
 -- | @tryParse msg f v@ returns @fromJust (f v)@ is @f v@ returns a value,
 -- and calls @fail@ otherwise.
@@ -272,7 +278,7 @@ segmentByIndex :: Integral w
                -> Word16 -- ^ Index
                -> Phdr w
 segmentByIndex epi i =
-  runGet (getPhdr epi) (tableEntry (phdrTable epi) i (fileContents epi))
+  Get.runGet (getPhdr epi) (tableEntry (phdrTable epi) i (fileContents epi))
 
 -- Return section
 getSection' :: Integral w
@@ -280,8 +286,8 @@ getSection' :: Integral w
             -> (Word32 -> String) -- ^ Maps section index to name to use for section.
             -> Word16 -- ^ Index of section.
             -> (Range w, ElfSection w)
-getSection' epi name_fn i = runGet (getShdr epi name_fn)
-                                   (tableEntry (shdrTable epi) i file)
+getSection' epi name_fn i = Get.runGet (getShdr epi name_fn)
+                                       (tableEntry (shdrTable epi) i file)
   where file = fileContents epi
 
 ------------------------------------------------------------------------
@@ -607,8 +613,8 @@ parseElfResult (Right (_,_,v)) = Right v
 -- | Parses a ByteString into an Elf record. Parse failures call error. 32-bit ELF objects hav
 -- their fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
 parseElfHeaderInfo :: B.ByteString -> Either (ByteOffset,String) (SomeElf ElfHeaderInfo)
-parseElfHeaderInfo b = parseElfResult $ flip runGetOrFail (L.fromChunks [b]) $ do
-  ei_magic    <- getByteString 4
+parseElfHeaderInfo b = parseElfResult $ flip Get.runGetOrFail (L.fromChunks [b]) $ do
+  ei_magic    <- Get.getByteString 4
   unless (ei_magic == elfMagic) $
     fail $ "Invalid magic number for ELF: " ++ show (ei_magic, elfMagic)
   ei_class   <- tryParse "ELF class" toSomeElfClass =<< getWord8

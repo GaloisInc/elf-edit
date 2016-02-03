@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PatternGuards #-}
@@ -39,6 +40,7 @@ module Data.Elf ( -- * Top-level definitions
                 , parseElfHeaderInfo
                 , getElf
                 , getSectionTable
+                , G.ByteOffset
                   -- ** Writing Elf files
                 , renderElf
                   -- ** Layout information
@@ -68,6 +70,7 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfSymbolTableEntry(..)
                 , ppSymbolTableEntries
                 , parseSymbolTables
+                , getSymbolTableEntries
                 , findSymbolDefinition
                   -- ** Elf symbol visibility
                 , steVisibility
@@ -78,6 +81,16 @@ module Data.Elf ( -- * Top-level definitions
                 , stv_protected
                   -- ** Elf symbol type
                 , ElfSymbolType(..)
+                , pattern STT_NOTYPE
+                , pattern STT_OBJECT
+                , pattern STT_FUNC
+                , pattern STT_SECTION
+                , pattern STT_FILE
+                , pattern STT_COMMON
+                , pattern STT_TLS
+                , pattern STT_RELC
+                , pattern STT_SRELC
+                , pattern STT_GNU_IFUNC
                   -- ** Elf symbol binding
                 , ElfSymbolBinding(..)
                 , ElfSectionIndex(..)
@@ -1204,7 +1217,7 @@ ppElfSymbolType tp =
 
 
 newtype ElfSectionIndex = ElfSectionIndex Word16
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Enum, Num, Real, Integral)
 
 asSectionIndex :: ElfSectionIndex -> Maybe Word16
 asSectionIndex si@(ElfSectionIndex w)
