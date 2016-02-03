@@ -72,7 +72,7 @@ updateSeq f l0 =
 ------------------------------------------------------------------------
 -- Phdr
 
--- | Program header representation
+-- | An elf segment and its layout.
 type Phdr w = (ElfSegment w, Range w)
 
 -- | Returns true if the segment should appear before a loadable segment.

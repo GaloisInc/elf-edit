@@ -1,4 +1,16 @@
-module Data.Elf.TH (enum) where
+{-|
+Module      : Data.Elf.TH
+Copyright   : (c) Galois Inc, 2016
+License     : BSD
+Maintainer  : jhendrix@galois.com
+
+This contains the template haskell enum quasiquoter for generating
+Elf constants.
+-}
+{-# LANGUAGE TemplateHaskell #-}
+module Data.Elf.TH
+  ( enum
+  ) where
 
 import Data.Elf.Lexer
 import Data.Elf.Parser

@@ -199,6 +199,7 @@ fromElfData ELFDATA2MSB = 2
 ------------------------------------------------------------------------
 -- ElfType
 
+-- | The type of information stored in the Elf file.
 [enum|
  ElfType :: Word16
  ET_NONE 0 -- ^ Unspecified type
@@ -336,6 +337,7 @@ fromElfData ELFDATA2MSB = 2
 ------------------------------------------------------------------------
 -- ElfSectionFlags
 
+-- | Flags for sections
 newtype ElfSectionFlags w = ElfSectionFlags { fromElfSectionFlags :: w }
   deriving (Eq, Num, Bits)
 

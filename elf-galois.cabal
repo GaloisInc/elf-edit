@@ -38,6 +38,7 @@ library
     Data.Elf.Layout
     Data.Elf.Lexer
     Data.Elf.Parser
+    Data.Elf.Relocations
     Data.Elf.SizedBuilder
     Data.Elf.TH
     Data.Elf.Types

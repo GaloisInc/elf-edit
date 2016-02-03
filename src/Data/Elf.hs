@@ -1,11 +1,16 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | Data.Elf provides an interface for querying and manipulating Elf files.
 module Data.Elf ( -- * Top-level definitions
                   Elf (..)
@@ -26,10 +31,15 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfDataRegion(..)
                 , ElfGOT(..)
                 , ElfWidth
-                  -- ** Reading and Writing Elf files
+                  -- ** Reading Elf files
                 , hasElfMagic
-                , SomeElf(..)
                 , parseElf
+                , SomeElf(..)
+                , ElfHeaderInfo
+                , parseElfHeaderInfo
+                , getElf
+                , getSectionTable
+                  -- ** Writing Elf files
                 , renderElf
                   -- ** Layout information
                 , ElfLayout
@@ -68,11 +78,55 @@ module Data.Elf ( -- * Top-level definitions
                 , stv_protected
                   -- ** Elf symbol type
                 , ElfSymbolType(..)
-                , fromElfSymbolType
-                , toElfSymbolType
                   -- ** Elf symbol binding
                 , ElfSymbolBinding(..)
                 , ElfSectionIndex(..)
+                  -- * Relocations
+                , IsRelocationType(..)
+                , RelaWidth(..)
+                , RelaEntry(..)
+                , ppRelaEntries
+                  -- ** 32-bit x86 relocations
+                , I386_RelocationType(..)
+                , elfRelaEntries
+                  -- ** 64-bit 386 relocations
+                , X86_64_RelocationType(..)
+                , pattern R_X86_64_NONE
+                , pattern R_X86_64_64
+                , pattern R_X86_64_PC32
+                , pattern R_X86_64_GOT32
+                , pattern R_X86_64_PLT32
+                , pattern R_X86_64_COPY
+                , pattern R_X86_64_GLOB_DAT
+                , pattern R_X86_64_JUMP_SLOT
+                , pattern R_X86_64_RELATIVE
+                , pattern R_X86_64_GOTPCREL
+                , pattern R_X86_64_32
+                , pattern R_X86_64_32S
+                , pattern R_X86_64_16
+                , pattern R_X86_64_PC16
+                , pattern R_X86_64_8
+                , pattern R_X86_64_PC8
+                , pattern R_X86_64_DTPMOD64
+                , pattern R_X86_64_DTPOFF64
+                , pattern R_X86_64_TPOFF64
+                , pattern R_X86_64_TLSGD
+                , pattern R_X86_64_TLSLD
+                , pattern R_X86_64_DTPOFF32
+                , pattern R_X86_64_GOTTPOFF
+                , pattern R_X86_64_TPOFF32
+                , pattern R_X86_64_PC64
+                , pattern R_X86_64_GOTOFF64
+                , pattern R_X86_64_GOTPC32
+                , pattern R_X86_64_SIZE32
+                , pattern R_X86_64_SIZE64
+                , pattern R_X86_64_GOTPC32_TLSDESC
+                , pattern R_X86_64_TLSDESC_CALL
+                , pattern R_X86_64_TLSDESC
+                , pattern R_X86_64_IRELATIVE
+                  -- ** Relocation utilitis
+                , ElfWordType
+                , ElfIntType
                   -- * Dynamic symbol table and relocations
                 , DynamicSection(..)
                 , VersionDef(..)
@@ -80,13 +134,7 @@ module Data.Elf ( -- * Top-level definitions
                 , VersionReqAux
                 , DynamicMap
                 , ElfDynamicArrayTag
-                , IsRelocationType(..)
-                , IsElfData(..)
                 , dynamicEntries
-                , RelaEntry(..)
-                , ppRelaEntries
-                , I386_RelocationType
-                , X86_64_RelocationType
                   -- * Common definitions
                 , Range
                 , hasPermissions
@@ -106,7 +154,7 @@ import qualified Data.ByteString.Lazy.UTF8 as L (toString)
 import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.Foldable as F
 import           Data.Int
-import           Data.List (genericDrop, foldl', transpose)
+import           Data.List (genericDrop, foldl')
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Numeric (showHex)
@@ -114,6 +162,7 @@ import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.Elf.Get
 import           Data.Elf.Layout
+import           Data.Elf.Relocations
 import qualified Data.Elf.SizedBuilder as U
 import           Data.Elf.TH
 import           Data.Elf.Types
@@ -121,17 +170,6 @@ import           Data.Elf.Types
 ------------------------------------------------------------------------
 -- Utilities
 
-runGetMany :: forall a . Get a -> L.ByteString -> [a]
-runGetMany g0 bs0 = start g0 (L.toChunks bs0)
-  where go :: Get a -> [B.ByteString] -> Decoder a -> [a]
-        go _ _ (Fail _ _ msg)  = error $ "runGetMany: " ++ msg
-        go g [] (Partial f)    = go g [] (f Nothing)
-        go g (h:r) (Partial f) = go g r (f (Just h))
-        go g l (Done bs _ v)   = v : start g (bs:l)
-
-        start _ [] = []
-        start g (h:r) | B.null h = start g r
-        start g l = go g l (runGetIncremental g)
 
 -- | @p `hasPermissions` req@ returns true if all bits set in 'req' are set in 'p'.
 hasPermissions :: Bits b => b -> b -> Bool
@@ -145,18 +183,20 @@ lookupStringL o b = L.takeWhile (/= 0) $ L.drop o b
 ------------------------------------------------------------------------
 -- Elf Layout
 
+-- | Return true if section has the given name.
+hasSectionName :: ElfSection w -> String -> Bool
+hasSectionName section name = elfSectionName section == name
 
 -- | Given a section name, returns sections matching that name.
 --
 -- Section names in elf are not necessarily unique.
 findSectionByName :: String -> Elf w -> [ElfSection w]
-findSectionByName name e  = e^..elfSections.filtered byName
-  where byName section = elfSectionName section == name
+findSectionByName name e  = e^..elfSections.filtered (`hasSectionName` name)
 
 -- | Remove section with given name.
 removeSectionByName :: String -> Elf w -> Elf w
 removeSectionByName nm = over updateSections fn
-  where fn s | elfSectionName s == nm = Nothing
+  where fn s | s `hasSectionName` nm = Nothing
              | otherwise = Just s
 
 -- | List of segments in the file.
@@ -179,6 +219,7 @@ hasElfMagic l = either (const False) (const True) $ flip runGetOrFail l $ do
 renderElf :: Elf w -> L.ByteString
 renderElf = elfLayoutBytes . elfLayout
 
+-- | A pair containing an elf segment and the underlying bytestring content.
 type RenderedElfSegment w = (ElfSegment w, B.ByteString)
 
 -- | Returns elf segments with data in them.
@@ -223,15 +264,48 @@ instance Show ElfSymbolVisibility where
 ------------------------------------------------------------------------
 -- ElfSymbolTableEntry
 
-class Integral w => ElfSymbolTableWidth w where
-  symbolTableEntrySize :: w
+symbolTableEntrySize :: ElfClass w -> w
+symbolTableEntrySize ELFCLASS32 = 16
+symbolTableEntrySize ELFCLASS64 = 24
 
-  getSymbolTableEntry :: Elf w
-                      -> (Word32 -> String)
+getSymbolTableEntry :: ElfClass w
+                    -> ElfData
+                    -> (Word32 -> String)
                          -- ^ Function for mapping offset in string table
                          -- to bytestring.
                       -> Get (ElfSymbolTableEntry w)
-
+getSymbolTableEntry ELFCLASS32 d nameFn = do
+  nameIdx <- getWord32 d
+  value <- getWord32 d
+  size  <- getWord32 d
+  info  <- getWord8
+  other <- getWord8
+  sTlbIdx <- ElfSectionIndex <$> getWord16 d
+  let (typ,bind) = infoToTypeAndBind info
+  return $ EST { steName = nameFn nameIdx
+               , steType  = typ
+               , steBind  = bind
+               , steOther = other
+               , steIndex = sTlbIdx
+               , steValue = value
+               , steSize  = size
+               }
+getSymbolTableEntry ELFCLASS64 d nameFn = do
+  nameIdx <- getWord32 d
+  info <- getWord8
+  other <- getWord8
+  sTlbIdx <- ElfSectionIndex <$> getWord16 d
+  symVal <- getWord64 d
+  size <- getWord64 d
+  let (typ,bind) = infoToTypeAndBind info
+  return $ EST { steName = nameFn nameIdx
+               , steType = typ
+               , steBind = bind
+               , steOther = other
+               , steIndex = sTlbIdx
+               , steValue = symVal
+               , steSize = size
+               }
 
 -- | The symbol table entries consist of index information to be read from other
 -- parts of the ELF file. Some of this information is automatically retrieved
@@ -243,7 +317,7 @@ data ElfSymbolTableEntry w = EST
     , steBind             :: ElfSymbolBinding
     , steOther            :: Word8
     , steIndex            :: ElfSectionIndex  -- ^ Section in which the def is held
-    , steValue            :: w
+    , steValue            :: w -- ^ Value associated with symbol.
     , steSize             :: w
     } deriving (Eq, Show)
 
@@ -252,31 +326,6 @@ steEnclosingSection e s = sectionByIndex e (steIndex s)
 
 steVisibility :: ElfSymbolTableEntry w -> ElfSymbolVisibility
 steVisibility e = ElfSymbolVisibility (steOther e .&. 0x3)
-
-type ColumnAlignmentFn = [String] -> [String]
-
-alignLeft :: Int -> ColumnAlignmentFn
-alignLeft minw l = ar <$> l
-  where w = maximum $ minw : (length <$> l)
-        ar s = s ++ replicate (w-n) ' '
-          where n = length s
-
-alignRight :: Int -> ColumnAlignmentFn
-alignRight minw l = ar <$> l
-  where w = maximum $ minw : (length <$> l)
-        ar s = replicate (w-n) ' ' ++ s
-          where n = length s
-
--- | Function for pretty printing a row of tables according to
--- rules for each column.
-fix_table_columns :: [ColumnAlignmentFn]
-                     -- ^ Functions for modifying each column
-                  -> [[String]]
-                  -> Doc
-fix_table_columns colFns rows = vcat (hsep . fmap text <$> fixed_rows)
-  where cols = transpose rows
-        fixed_cols = zipWith ($) colFns cols
-        fixed_rows = transpose fixed_cols
 
 -- | Pretty print symbol table entries in format used by readelf.
 ppSymbolTableEntries :: (Integral w, Bits w, Show w) => [ElfSymbolTableEntry w] -> Doc
@@ -316,12 +365,13 @@ parseSymbolTables e =
 -- | Assumes the given section is a symbol table, type SHT_SYMTAB
 -- (guaranteed by parseSymbolTables).
 getSymbolTableEntries :: Elf w -> ElfSection w -> [ElfSymbolTableEntry w]
-getSymbolTableEntries e s = elfSymbolTableWidthInstance (elfClass e) $
+getSymbolTableEntries e s =
   let link   = elfSectionLink s
       strtab = lookup link (zip [0..] (toListOf elfSections e))
       strs = fromMaybe B.empty (elfSectionData <$> strtab)
       nameFn idx = B.toString (lookupString idx strs)
-   in runGetMany (getSymbolTableEntry e nameFn) (L.fromChunks [elfSectionData s])
+   in runGetMany (getSymbolTableEntry (elfClass e) (elfData e) nameFn)
+                 (L.fromChunks [elfSectionData s])
 
 -- | Use the symbol offset and size to extract its definition
 -- (in the form of a ByteString).
@@ -341,52 +391,180 @@ hasSectionType tp s = elfSectionType s == tp
 symbolTableSections :: Elf w -> [ElfSection w]
 symbolTableSections = toListOf $ elfSections.filtered (hasSectionType SHT_SYMTAB)
 
-instance ElfSymbolTableWidth Word32 where
-  symbolTableEntrySize = 16
-  getSymbolTableEntry e nameFn = do
-    let d = elfData e
-    nameIdx <- getWord32 d
-    value <- getWord32 d
-    size  <- getWord32 d
-    info  <- getWord8
-    other <- getWord8
-    sTlbIdx <- ElfSectionIndex <$> getWord16 d
-    let (typ,bind) = infoToTypeAndBind info
-    return $ EST { steName = nameFn nameIdx
-                 , steType  = typ
-                 , steBind  = bind
-                 , steOther = other
-                 , steIndex = sTlbIdx
-                 , steValue = value
-                 , steSize  = size
-                 }
-
-instance ElfSymbolTableWidth Word64 where
-  symbolTableEntrySize = 24
-  getSymbolTableEntry e nameFn = do
-    let d = elfData e
-    nameIdx <- getWord32 d
-    info <- getWord8
-    other <- getWord8
-    sTlbIdx <- ElfSectionIndex <$> getWord16 d
-    symVal <- getWord64 d
-    size <- getWord64 d
-    let (typ,bind) = infoToTypeAndBind info
-    return $ EST { steName = nameFn nameIdx
-                 , steType = typ
-                 , steBind = bind
-                 , steOther = other
-                 , steIndex = sTlbIdx
-                 , steValue = symVal
-                 , steSize = size
-                 }
-
 sectionByIndex :: Elf w
                -> ElfSectionIndex
                -> Maybe (ElfSection w)
 sectionByIndex e si = do
   i <- asSectionIndex si
   listToMaybe $ genericDrop i (e^..elfSections)
+
+------------------------------------------------------------------------
+-- I386_RelocationType
+
+-- | Relocation types for 64-bit x86 code.
+newtype I386_RelocationType = I386_RelocationType { fromI386_RelocationType :: Word32 }
+  deriving (Eq,Ord)
+
+pattern R_386_NONE     = I386_RelocationType  0
+pattern R_386_32       = I386_RelocationType  1
+pattern R_386_PC32     = I386_RelocationType  2
+pattern R_386_GOT32    = I386_RelocationType  3
+pattern R_386_PLT32    = I386_RelocationType  4
+pattern R_386_COPY     = I386_RelocationType  5
+pattern R_386_GLOB_DAT = I386_RelocationType  6
+pattern R_386_JMP_SLOT = I386_RelocationType  7
+pattern R_386_RELATIVE = I386_RelocationType  8
+pattern R_386_GOTOFF   = I386_RelocationType  9
+pattern R_386_GOTPC    = I386_RelocationType 10
+
+i386_RelocationTypes :: Map.Map I386_RelocationType String
+i386_RelocationTypes = Map.fromList
+  [ (,) R_386_NONE     "R_386_NONE"
+  , (,) R_386_32       "R_386_32"
+  , (,) R_386_PC32     "R_386_PC32"
+  , (,) R_386_GOT32    "R_386_GOT32"
+  , (,) R_386_PLT32    "R_386_PLT32"
+  , (,) R_386_COPY     "R_386_COPY"
+  , (,) R_386_GLOB_DAT "R_386_GLOB_DAT"
+  , (,) R_386_JMP_SLOT "R_386_JMP_SLOT"
+  , (,) R_386_RELATIVE "R_386_RELATIVE"
+  , (,) R_386_GOTOFF   "R_386_GOTOFF"
+  , (,) R_386_GOTPC    "R_386_GOTPC"
+  ]
+
+instance Show I386_RelocationType where
+  show i =
+    case Map.lookup i i386_RelocationTypes of
+      Just s -> s
+      Nothing -> "0x" ++ showHex (fromI386_RelocationType i) ""
+
+instance IsRelocationType I386_RelocationType where
+  type RelocationWidth I386_RelocationType = 32
+  relaWidth _ = Rela32
+  relaType = Just . I386_RelocationType
+  isRelative R_386_RELATIVE = True
+  isRelative _ = False
+
+------------------------------------------------------------------------
+-- X86_64_RelocationType
+
+-- | Relocation types for 64-bit x86 code.
+newtype X86_64_RelocationType = X86_64_RelocationType { fromX86_64_RelocationType :: Word32 }
+  deriving (Eq,Ord)
+
+-- | No relocation
+pattern R_X86_64_NONE            = X86_64_RelocationType  0
+-- | Direct 64 bit
+pattern R_X86_64_64              = X86_64_RelocationType  1
+-- | PC relative 32 bit signed
+pattern R_X86_64_PC32            = X86_64_RelocationType  2
+-- | 32 bit GOT entry
+pattern R_X86_64_GOT32           = X86_64_RelocationType  3
+-- | 32 bit PLT address
+pattern R_X86_64_PLT32           = X86_64_RelocationType  4
+-- | Copy symbol at runtime
+pattern R_X86_64_COPY            = X86_64_RelocationType  5
+-- | Create GOT entry
+pattern R_X86_64_GLOB_DAT        = X86_64_RelocationType  6
+-- | Create PLT entry
+pattern R_X86_64_JUMP_SLOT       = X86_64_RelocationType  7
+-- | Adjust by program base
+pattern R_X86_64_RELATIVE        = X86_64_RelocationType  8
+-- | 32 bit signed pc relative offset to GOT
+pattern R_X86_64_GOTPCREL        = X86_64_RelocationType  9
+-- | Direct 32 bit zero extended
+pattern R_X86_64_32              = X86_64_RelocationType 10
+
+-- | Direct 32 bit sign extended
+pattern R_X86_64_32S             = X86_64_RelocationType 11
+
+-- | Direct 16 bit zero extended
+pattern R_X86_64_16              = X86_64_RelocationType 12
+
+-- | 16 bit sign extended pc relative
+pattern R_X86_64_PC16            = X86_64_RelocationType 13
+
+-- | Direct 8 bit sign extended
+pattern R_X86_64_8               = X86_64_RelocationType 14
+
+-- | 8 bit sign extended pc relative
+pattern R_X86_64_PC8             = X86_64_RelocationType 15
+
+pattern R_X86_64_DTPMOD64        = X86_64_RelocationType 16
+pattern R_X86_64_DTPOFF64        = X86_64_RelocationType 17
+pattern R_X86_64_TPOFF64         = X86_64_RelocationType 18
+pattern R_X86_64_TLSGD           = X86_64_RelocationType 19
+pattern R_X86_64_TLSLD           = X86_64_RelocationType 20
+pattern R_X86_64_DTPOFF32        = X86_64_RelocationType 21
+pattern R_X86_64_GOTTPOFF        = X86_64_RelocationType 22
+pattern R_X86_64_TPOFF32         = X86_64_RelocationType 23
+
+pattern R_X86_64_PC64            = X86_64_RelocationType 24
+pattern R_X86_64_GOTOFF64        = X86_64_RelocationType 25
+pattern R_X86_64_GOTPC32         = X86_64_RelocationType 26
+
+pattern R_X86_64_SIZE32          = X86_64_RelocationType 32
+pattern R_X86_64_SIZE64          = X86_64_RelocationType 33
+pattern R_X86_64_GOTPC32_TLSDESC = X86_64_RelocationType 34
+pattern R_X86_64_TLSDESC_CALL    = X86_64_RelocationType 35
+pattern R_X86_64_TLSDESC         = X86_64_RelocationType 36
+pattern R_X86_64_IRELATIVE       = X86_64_RelocationType 37
+
+x86_64_RelocationTypes :: Map.Map X86_64_RelocationType String
+x86_64_RelocationTypes = Map.fromList
+  [ (,) R_X86_64_NONE            "R_X86_64_NONE"
+  , (,) R_X86_64_64              "R_X86_64_64"
+  , (,) R_X86_64_PC32            "R_X86_64_PC32"
+  , (,) R_X86_64_GOT32           "R_X86_64_GOT32"
+  , (,) R_X86_64_PLT32           "R_X86_64_PLT32"
+  , (,) R_X86_64_COPY            "R_X86_64_COPY"
+  , (,) R_X86_64_GLOB_DAT        "R_X86_64_GLOB_DAT"
+  , (,) R_X86_64_JUMP_SLOT       "R_X86_64_JUMP_SLOT"
+
+  , (,) R_X86_64_RELATIVE        "R_X86_64_RELATIVE"
+  , (,) R_X86_64_GOTPCREL        "R_X86_64_GOTPCREL"
+  , (,) R_X86_64_32              "R_X86_64_32"
+  , (,) R_X86_64_32S             "R_X86_64_32S"
+  , (,) R_X86_64_16              "R_X86_64_16"
+  , (,) R_X86_64_PC16            "R_X86_64_PC16"
+  , (,) R_X86_64_8               "R_X86_64_8"
+  , (,) R_X86_64_PC8             "R_X86_64_PC8"
+
+  , (,) R_X86_64_DTPMOD64        "R_X86_64_DTPMOD64"
+  , (,) R_X86_64_DTPOFF64        "R_X86_64_DTPOFF64"
+  , (,) R_X86_64_TPOFF64         "R_X86_64_TPOFF64"
+  , (,) R_X86_64_TLSGD           "R_X86_64_TLSGD"
+  , (,) R_X86_64_TLSLD           "R_X86_64_TLSLD"
+  , (,) R_X86_64_DTPOFF32        "R_X86_64_DTPOFF32"
+  , (,) R_X86_64_GOTTPOFF        "R_X86_64_GOTTPOFF"
+  , (,) R_X86_64_TPOFF32         "R_X86_64_TPOFF32"
+
+  , (,) R_X86_64_PC64            "R_X86_64_PC64"
+  , (,) R_X86_64_GOTOFF64        "R_X86_64_GOTOFF64"
+  , (,) R_X86_64_GOTPC32         "R_X86_64_GOTPC32"
+
+  , (,) R_X86_64_SIZE32          "R_X86_64_SIZE32"
+  , (,) R_X86_64_SIZE64          "R_X86_64_SIZE64"
+  , (,) R_X86_64_GOTPC32_TLSDESC "R_X86_64_GOTPC32_TLSDESC"
+  , (,) R_X86_64_TLSDESC_CALL    "R_X86_64_TLSDESC_CALL"
+  , (,) R_X86_64_TLSDESC         "R_X86_64_TLSDESC"
+  , (,) R_X86_64_IRELATIVE       "R_X86_64_IRELATIVE"
+  ]
+
+instance Show X86_64_RelocationType where
+  show i =
+    case Map.lookup i x86_64_RelocationTypes of
+      Just s -> s
+      Nothing -> "0x" ++ showHex (fromX86_64_RelocationType i) ""
+
+instance IsRelocationType X86_64_RelocationType where
+  type RelocationWidth X86_64_RelocationType = 64
+
+  relaWidth _ = Rela64
+  relaType = Just . X86_64_RelocationType . fromIntegral
+
+  isRelative R_X86_64_RELATIVE = True
+  isRelative _ = False
 
 ------------------------------------------------------------------------
 -- Dynamic information
@@ -482,21 +660,20 @@ data Dynamic w
   deriving (Show)
 
 -- | Read dynamic array entry.
-getDynamic :: forall w . (Integral w, IsElfData w) => ElfData -> Get (Dynamic w)
-getDynamic d = do
-  tag <- getData d :: Get w
-  v <- getData d
+getDynamic :: forall w . RelaWidth w -> ElfData -> Get (Dynamic (ElfWordType w))
+getDynamic w d = elfWordInstances w $ do
+  tag <- getRelaWord w d :: Get (ElfWordType w)
+  v   <- getRelaWord w d
   return $! Dynamic (toElfDynamicArrayTag (fromIntegral tag)) v
 
-
-dynamicList :: (Integral w, IsElfData w) => ElfData -> Get [Dynamic w]
-dynamicList d = go []
+dynamicList :: RelaWidth w -> ElfData -> Get [Dynamic (ElfWordType w)]
+dynamicList w d = go []
   where go l = do
           done <- isEmpty
           if done then
             return l
            else do
-            e <- getDynamic d
+            e <- getDynamic w d
             case dynamicTag e of
               DT_NULL -> return (reverse l)
               _ -> go (e:l)
@@ -620,7 +797,8 @@ dynSymTab :: Monad m
           -> L.ByteString
           -> DynamicMap w
           -> m [ElfSymbolTableEntry w]
-dynSymTab e l file m = elfSymbolTableWidthInstance (elfClass e) $ do
+dynSymTab e l file m = elfClassIntegralInstance (elfClass e) $ do
+  let cl = elfClass e
   -- Get string table.
   strTab <- dynStrTab l file m
 
@@ -633,120 +811,15 @@ dynSymTab e l file m = elfSymbolTableWidthInstance (elfClass e) $ do
     fail $ "The string table offset is before the symbol table offset."
   -- Size of each symbol table entry.
   syment <- mandatoryDynamicEntry DT_SYMENT m
-  when (syment /= symbolTableEntrySize) $ do
+  when (syment /= symbolTableEntrySize cl) $ do
     fail "Unexpected symbol table entry size"
   let sym_sz = str_off - sym_off
   symtab <- addressRangeToFile l file "dynamic symbol table" (sym_off,sym_sz)
   let nameFn idx = L.toString $ lookupStringL (fromIntegral idx) strTab
-  return $ runGetMany (getSymbolTableEntry e nameFn) symtab
+  return $ runGetMany (getSymbolTableEntry (elfClass e) (elfData e) nameFn) symtab
 
-------------------------------------------------------------------------
--- IsElfData
-
--- | @IsElfData s@ indicates that @s@ is a type that can be read from an
--- Elf file given its endianess
-class Show s => IsElfData s where
-  getData :: ElfData -> Get s
-
-instance IsElfData Int32 where
-  getData d = fromIntegral <$> getWord32 d
-
-instance IsElfData Int64 where
-  getData d = fromIntegral <$> getWord64 d
-
-instance IsElfData Word32 where
-  getData = getWord32
-
-instance IsElfData Word64 where
-  getData = getWord64
-
-class Integral w => IsRelaWidth w where
-  -- | Size of one relocation entry.
-  relaEntSize :: w
-
-  -- | Convert info paramter to relocation sym.
-  relaSym :: w -> Word32
-
-  -- | Get relocation entry element.
-  getRelaEntryElt :: ElfData -> Get w
-
-instance IsRelaWidth Word32 where
-  relaEntSize = 12
-  relaSym info = info `shiftR` 8
-  getRelaEntryElt = getWord32
-
-instance IsRelaWidth Word64 where
-  relaEntSize = 24
-  relaSym info = fromIntegral (info `shiftR` 32)
-  getRelaEntryElt = getWord64
-
-elfRelaWidthInstance :: ElfClass w -> (IsRelaWidth w => a) -> a
-elfRelaWidthInstance c a =
-  case c of
-    ELFCLASS32 -> a
-    ELFCLASS64 -> a
-
--- | @IsRelocationType u s tp@ indicates that @tp@ is a tagged union of
--- relocation entries that encodes signed values as type @s@ and unsigned
--- values as type @u@.
-class (IsRelaWidth u, IsElfData u, IsElfData s, Show tp)
-   => IsRelocationType u s tp | tp -> u, tp -> s where
-
-  -- | Convert unsigned value to type.
-  relaType :: u -> Maybe tp
-
-  -- | Return true if this is a relative relocation type.
-  isRelative :: tp -> Bool
-
--- | A relocation entry
-data RelaEntry u s tp
-   = Rela { r_offset :: !u
-            -- ^ The location to apply the relocation action.
-          , r_sym    :: !Word32
-            -- ^ Symbol table entry relocation refers to.
-          , r_type   :: !tp
-            -- ^ The type of relocation entry
-          , r_addend :: !s
-            -- ^ The constant addend to apply.
-          } deriving (Show)
-
--- | Return true if this is a relative relocation entry.
-isRelativeRelaEntry :: IsRelocationType u s tp => RelaEntry u s tp -> Bool
-isRelativeRelaEntry r = isRelative (r_type r)
-
--- | Pretty-print a table of relocation entries.
-ppRelaEntries :: (Bits u, IsRelocationType u s tp) => [RelaEntry u s tp] -> Doc
-ppRelaEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
-  where entries = zipWith ppRelaEntry [0..] l
-        cols = [ ("Num", alignRight 0)
-               , ("Offset", alignLeft 0)
-               , ("Symbol", alignLeft 0)
-               , ("Type", alignLeft 0)
-               , ("Addend", alignLeft 0)
-               ]
-
-ppRelaEntry :: (Bits u, IsRelocationType u s tp) => Int -> RelaEntry u s tp -> [String]
-ppRelaEntry i e =
-  [ shows i ":"
-  , ppHex (r_offset e)
-  , show (r_sym e)
-  , show (r_type e)
-  , show (r_addend e)
-  ]
-
--- | Read a relocation entry.
-getRelaEntry :: IsRelocationType u s tp => ElfData -> Get (RelaEntry u s tp)
-getRelaEntry d = do
-  offset <- getData d
-  info   <- getData d
-  addend <- getData d
-  let msg = "Could not parse relocation type: " ++ showHex info ""
-  tp <- maybe (fail msg) return $ relaType info
-  return Rela { r_offset = offset
-              , r_sym = relaSym info
-              , r_type = tp
-              , r_addend = addend
-              }
+------------------------------
+-- Dynamic relocations
 
 checkPLTREL :: (Integral u, Monad m) => DynamicMap u -> m ()
 checkPLTREL dm = do
@@ -768,32 +841,34 @@ dynRelaPLT dm = do
       sz <- mandatoryDynamicEntry DT_PLTRELSZ dm
       return $ Just (relaplt, sz)
 
-dynRelaArray :: (IsRelocationType u s tp, Monad m)
+dynRelaArray :: forall m tp
+              . (IsRelocationType tp, Monad m)
              => ElfData
-             -> ElfLayout u
+             -> ElfLayout (ElfWordType (RelocationWidth tp))
              -> L.ByteString
-             -> DynamicMap u
-             -> m [RelaEntry u s tp]
-dynRelaArray d l file dm = elfRelaWidthInstance (elfLayoutClass l) $ do
-  checkPLTREL dm
+             -> DynamicMap (ElfWordType (RelocationWidth tp))
+             -> m [RelaEntry tp]
+dynRelaArray d l file dm = do
+  let w = relaWidth (error "dynRelaEntry temp evaluated" :: tp)
+  elfWordInstances w $ checkPLTREL dm
   mrela_offset <- optionalDynamicEntry DT_RELA dm
   case mrela_offset of
     Nothing -> return []
     Just rela_offset -> do
-      --cnt <- mandatoryDynamicEntry DT_RELACOUNT dm
       ent <- mandatoryDynamicEntry DT_RELAENT dm
       sz  <- mandatoryDynamicEntry DT_RELASZ dm
-      --when (cnt * ent /= sz) $ do
-      --  fail $ "Unexpected size of relocation array:" ++ show (cnt,ent,sz)
-      when (ent /= relaEntSize) $ fail "Unexpected size for relocation entry."
+      when (elfWordInstances w $ ent /= relaEntSize w) $
+        fail "Unexpected size for relocation entry."
       rela <- addressRangeToFile l file "relocation array" (rela_offset,sz)
-      return $ runGetMany (getRelaEntry d) rela
+      return $! runGetMany (getRelaEntry d) rela
 
-checkRelaCount :: (IsRelocationType u s tp, Monad m)
-               => [RelaEntry u s tp]
-               -> DynamicMap u
+checkRelaCount :: forall tp m
+                . (IsRelocationType tp, Monad m)
+               => [RelaEntry tp]
+               -> DynamicMap (ElfWordType (RelocationWidth tp))
                -> m ()
 checkRelaCount relocations dm = do
+  elfWordInstances (relaWidth (undefined :: tp))  $ do
   let relaCount = length (filter isRelativeRelaEntry relocations)
   mexpRelaCount <- optionalDynamicEntry DT_RELACOUNT dm
   let correctCount = case mexpRelaCount of
@@ -801,53 +876,6 @@ checkRelaCount relocations dm = do
                        Nothing -> True
   when (not correctCount) $ do
     fail $ "Incorrect DT_RELACOUNT"
-
-[enum|
-  I386_RelocationType :: Word32
-  R_386_NONE      0
-  R_386_32        1
-  R_386_PC32      2
-  R_386_GOT32     3
-  R_386_PLT32     4
-  R_386_COPY      5
-  R_386_GLOB_DAT  6
-  R_386_JMP_SLOT  7
-  R_386_RELATIVE  8
-  R_386_GOTOFF    9
-  R_386_GOTPC    10
-|]
-
-instance IsRelocationType Word32 Int32 I386_RelocationType where
-  relaType = toI386_RelocationType
-
-  isRelative R_386_RELATIVE = True
-  isRelative _ = False
-
-[enum|
- X86_64_RelocationType :: Word32
- R_X86_64_NONE           0  -- No reloc
- R_X86_64_64             1  -- Direct 64 bit
- R_X86_64_PC32           2  -- PC relative 32 bit signed
- R_X86_64_GOT32          3  -- 32 bit GOT entry
- R_X86_64_PLT32          4  -- 32 bit PLT address
- R_X86_64_COPY           5  -- Copy symbol at runtime
- R_X86_64_GLOB_DAT       6  -- Create GOT entry
- R_X86_64_JUMP_SLOT      7  -- Create PLT entry
- R_X86_64_RELATIVE       8  -- Adjust by program base
- R_X86_64_GOTPCREL       9  -- 32 bit signed pc relative offset to GOT
- R_X86_64_32             10 -- Direct 32 bit zero extended
- R_X86_64_32S            11 -- Direct 32 bit sign extended
- R_X86_64_16             12 -- Direct 16 bit zero extended
- R_X86_64_PC16           13 -- 16 bit sign extended pc relative
- R_X86_64_8              14 -- Direct 8 bit sign extended
- R_X86_64_PC8            15 -- 8 bit sign extended pc relative
-|]
-
-instance IsRelocationType Word64 Int64 X86_64_RelocationType where
-  relaType = toX86_64_RelocationType . fromIntegral
-
-  isRelative R_X86_64_RELATIVE = True
-  isRelative _ = False
 
 -- | Version definition
 data VersionDef = VersionDef { vd_flags :: !Word16
@@ -959,7 +987,7 @@ data DynamicSection u s tp
                 , dynInit :: [u]
                 , dynFini :: [u]
                 , dynSymbols :: [ElfSymbolTableEntry u]
-                , dynRelocations :: ![RelaEntry u s tp]
+                , dynRelocations :: ![RelaEntry tp]
                 , dynSymVersionTable :: ![Word16]
                 , dynVersionDefs :: ![VersionDef]
                 , dynVersionReqs :: ![VersionReq]
@@ -1022,27 +1050,27 @@ parsed_dyntags =
   , DT_VERNEEDNUM
   ]
 
-elfSymbolTableWidthInstance :: ElfClass w -> (ElfSymbolTableWidth w => a) -> a
-elfSymbolTableWidthInstance c a =
-  case c of
-    ELFCLASS32 -> a
-    ELFCLASS64 -> a
-
 -- | This returns information about the dynamic segment in a elf file
 -- if it exists.
 --
 -- The code assumes that there is at most one segment with type PT_Dynamic.
-dynamicEntries :: (IsRelocationType u s tp, Monad m)
-               => Elf u
-               -> m (Maybe (DynamicSection u s tp))
-dynamicEntries e = elfSymbolTableWidthInstance (elfClass e) $ do
-  let l = elfLayout e
+dynamicEntries :: forall s tp m
+                . (IsRelocationType tp, Monad m)
+               => Elf (ElfWordType (RelocationWidth tp))
+               -> m (Maybe (DynamicSection (ElfWordType (RelocationWidth tp)) s tp))
+dynamicEntries e = elfClassIntegralInstance (elfClass e) $ do
+  let w :: RelaWidth (RelocationWidth tp)
+      w = relaWidth (undefined :: tp)
+  let l :: ElfLayout (ElfWordType (RelocationWidth tp))
+      l = elfLayout e
   let file = U.toLazyByteString $ l^.elfOutput
   case filter (\(s,_) -> elfSegmentType s == PT_DYNAMIC) (F.toList (l^.phdrs)) of
     [] -> return Nothing
     [(_,p)] -> do
-      let elts = runGet (dynamicList (elfData e)) (sliceL p file)
-      let m = foldl' (flip insertDynamic) Map.empty elts
+      let elts :: [Dynamic (ElfWordType (RelocationWidth tp))]
+          elts = runGet (dynamicList w (elfData e)) (sliceL p file)
+      let m :: DynamicMap (ElfWordType (RelocationWidth tp))
+          m = foldl' (flip insertDynamic) Map.empty elts
 
       strTab <- dynStrTab l file m
 
@@ -1053,8 +1081,10 @@ dynamicEntries e = elfSymbolTableWidthInstance (elfClass e) $ do
 
       let isUnparsed tag _ = not (tag `elem` parsed_dyntags)
       sym_versions <- gnuSymVersionTable (elfData e) l file m (length symbols)
-      version_defs <- gnuVersionDefs (elfData e) l file strTab m
-      version_reqs <- gnuVersionReqs (elfData e) l file strTab m
+      version_defs <- elfWordInstances w $
+        gnuVersionDefs (elfData e) l file strTab m
+      version_reqs <- elfWordInstances w $
+        gnuVersionReqs (elfData e) l file strTab m
 
       relocations <- dynRelaArray (elfData e) l file m
       checkRelaCount relocations m
@@ -1107,38 +1137,52 @@ ppElfSymbolBinding b =
 
 infoToTypeAndBind :: Word8 -> (ElfSymbolType,ElfSymbolBinding)
 infoToTypeAndBind i =
-  let tp = toElfSymbolType (i .&. 0x0F)
+  let tp = ElfSymbolType (i .&. 0x0F)
       b = (i `shiftR` 4) .&. 0xF
    in (tp, toElfSymbolBinding b)
 
-[enum|
- ElfSymbolType :: Word8
- STT_NOTYPE     0 -- Symbol type is unspecified
- STT_OBJECT     1 -- Symbol is a data object
- STT_FUNC       2 -- Symbol is a code object
- STT_SECTION    3 -- Symbol associated with a section.
- STT_FILE       4 -- Symbol gives a file name.
- STT_COMMON     5 -- An uninitialised common block.
- STT_TLS        6 -- Thread local data object.
- STT_RELC       8 -- Complex relocation expression.
- STT_SRELC      9 -- Signed Complex relocation expression.
- STT_GNU_IFUNC 10 -- Symbol is an indirect code object.
- STT_Other      _
-|]
+newtype ElfSymbolType = ElfSymbolType Word8
+  deriving (Eq, Ord)
+
+-- | Symbol type is unspecified
+pattern STT_NOTYPE = ElfSymbolType 0
+
+-- | Symbol is a data object
+pattern STT_OBJECT = ElfSymbolType 1
+
+-- | Symbol is a code object
+pattern STT_FUNC   = ElfSymbolType 2
+
+-- | Symbol associated with a section.
+pattern STT_SECTION = ElfSymbolType 3
+
+-- | Symbol gives a file name.
+pattern STT_FILE = ElfSymbolType 4
+
+-- | An uninitialised common block.
+pattern STT_COMMON = ElfSymbolType 5
+
+-- | Thread local data object.
+pattern STT_TLS = ElfSymbolType 6
+
+-- | Complex relocation expression.
+pattern STT_RELC = ElfSymbolType 8
+
+-- | Signed Complex relocation expression.
+pattern STT_SRELC = ElfSymbolType 9
+
+-- | Symbol is an indirect code object.
+pattern STT_GNU_IFUNC = ElfSymbolType 10
 
 -- | Returns true if this is an OF specififc symbol type.
 isOSSpecificSymbolType :: ElfSymbolType -> Bool
-isOSSpecificSymbolType tp =
-  case tp of
-    STT_GNU_IFUNC -> True
-    STT_Other w | 10 <= w && w <= 12 -> True
-    _ -> False
+isOSSpecificSymbolType (ElfSymbolType w) = 10 <= w && w <= 12
 
 isProcSpecificSymbolType :: ElfSymbolType -> Bool
-isProcSpecificSymbolType tp =
-  case tp of
-    STT_Other w | 13 <= w && w <= 15 -> True
-    _ -> False
+isProcSpecificSymbolType (ElfSymbolType w) = 13 <= w && w <= 15
+
+instance Show ElfSymbolType where
+   show = ppElfSymbolType
 
 ppElfSymbolType :: ElfSymbolType -> String
 ppElfSymbolType tp =
@@ -1153,9 +1197,10 @@ ppElfSymbolType tp =
     STT_RELC    -> "RELC"
     STT_SRELC   -> "SRELC"
     STT_GNU_IFUNC -> "IFUNC"
-    STT_Other w | isOSSpecificSymbolType tp -> "<OS specific>: " ++ show w
-                | isProcSpecificSymbolType tp -> "<processor specific>: " ++ show w
-                | otherwise -> "<unknown>: " ++ show w
+    ElfSymbolType w
+      | isOSSpecificSymbolType tp   -> "<OS specific>: " ++ show w
+      | isProcSpecificSymbolType tp -> "<processor specific>: " ++ show w
+      | otherwise -> "<unknown>: " ++ show w
 
 
 newtype ElfSectionIndex = ElfSectionIndex Word16
@@ -1264,4 +1309,4 @@ elfInterpreter e =
         _ -> fail "Could not parse elf section."
 
 _unused :: a
-_unused = undefined fromElfSymbolBinding fromI386_RelocationType fromX86_64_RelocationType
+_unused = undefined fromElfSymbolBinding

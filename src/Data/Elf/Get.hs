@@ -2,9 +2,15 @@
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Data.Elf.Get
-  ( SomeElf(..)
-  , parseElf
-    -- * Low level utilities
+  ( -- * parseElf
+    parseElf
+  , SomeElf(..)
+    -- * elfHeaderInfo low-level interface
+  , ElfHeaderInfo
+  , parseElfHeaderInfo
+  , getElf
+  , getSectionTable
+    -- * Utilities
   , getWord16
   , getWord32
   , getWord64
@@ -20,6 +26,7 @@ import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Sequence as Seq
+import qualified Data.Vector as V
 import           Data.Word
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
@@ -47,7 +54,6 @@ getWord32 ELFDATA2MSB = getWord32be
 getWord64 :: ElfData -> Get Word64
 getWord64 ELFDATA2LSB = getWord64le
 getWord64 ELFDATA2MSB = getWord64be
-
 
 -- | @tryParse msg f v@ returns @fromJust (f v)@ is @f v@ returns a value,
 -- and calls @fail@ otherwise.
@@ -78,9 +84,6 @@ data TableLayout w =
                 -- ^ Number of entries in bytes.
               }
 
-mkTableLayout :: w -> Word16 -> Word16 -> TableLayout w
-mkTableLayout o s n = TableLayout o s n
-
 -- | Returns size of table.
 tableSize :: Integral w => TableLayout w -> w
 tableSize l = fromIntegral (entryNum l) * fromIntegral (entrySize l)
@@ -94,18 +97,6 @@ tableEntry :: Integral w => TableLayout w -> Word16 -> B.ByteString -> L.ByteStr
 tableEntry l i b = L.fromChunks [B.drop (fromIntegral o) b]
   where sz = fromIntegral (entrySize l)
         o = tableOffset l + fromIntegral i * sz
-
-------------------------------------------------------------------------
--- Section
-
-sectionData :: Integral w => ElfSectionType -> w -> w -> B.ByteString -> B.ByteString
-sectionData SHT_NOBITS _ _ _ = B.empty
-sectionData _ o s b = slice (o,s) b
-
--- | Returns length of section in file.
-sectionFileLen :: Num w => ElfSectionType -> w -> w
-sectionFileLen SHT_NOBITS _ = 0
-sectionFileLen _ s = s
 
 ------------------------------------------------------------------------
 -- GetPhdr
@@ -158,12 +149,16 @@ getPhdr64 d = do
 ------------------------------------------------------------------------
 -- GetShdr
 
-type GetShdrFn w = B.ByteString
-                 -> B.ByteString
+type GetShdrFn w = (Word32 -> String) -- ^ String lookup function
                  -> Get (Range w, ElfSection w)
 
-getShdr32 :: ElfData -> GetShdrFn Word32
-getShdr32 d file string_section = do
+-- | Returns length of section in file.
+sectionFileLen :: Num w => ElfSectionType -> w -> w
+sectionFileLen SHT_NOBITS _ = 0
+sectionFileLen _ s = s
+
+getShdr32 :: ElfData -> B.ByteString -> GetShdrFn Word32
+getShdr32 d file name_fn = do
   sh_name      <- getWord32 d
   sh_type      <- toElfSectionType <$> getWord32 d
   sh_flags     <- ElfSectionFlags  <$> getWord32 d
@@ -174,8 +169,9 @@ getShdr32 d file string_section = do
   sh_info      <- getWord32 d
   sh_addralign <- getWord32 d
   sh_entsize   <- getWord32 d
+  let file_sz = sectionFileLen sh_type sh_size
   let s = ElfSection
-           { elfSectionName      = B.toString $ lookupString sh_name string_section
+           { elfSectionName      = name_fn sh_name
            , elfSectionType      = sh_type
            , elfSectionFlags     = sh_flags
            , elfSectionAddr      = sh_addr
@@ -184,12 +180,12 @@ getShdr32 d file string_section = do
            , elfSectionInfo      = sh_info
            , elfSectionAddrAlign = sh_addralign
            , elfSectionEntSize   = sh_entsize
-           , elfSectionData      = sectionData sh_type sh_offset sh_size file
+           , elfSectionData      = slice (sh_offset, file_sz) file
            }
-  return ((sh_offset, sectionFileLen sh_type sh_size), s)
+  return ((sh_offset, file_sz), s)
 
-getShdr64 :: ElfData -> GetShdrFn Word64
-getShdr64 er file string_section = do
+getShdr64 :: ElfData -> B.ByteString -> GetShdrFn Word64
+getShdr64 er file name_fn = do
   sh_name      <- getWord32 er
   sh_type      <- toElfSectionType <$> getWord32 er
   sh_flags     <- ElfSectionFlags  <$> getWord64 er
@@ -200,8 +196,9 @@ getShdr64 er file string_section = do
   sh_info      <- getWord32 er
   sh_addralign <- getWord64 er
   sh_entsize   <- getWord64 er
+  let file_sz = sectionFileLen sh_type sh_size
   let s = ElfSection
-           { elfSectionName      = B.toString $ lookupString sh_name string_section
+           { elfSectionName      = name_fn sh_name
            , elfSectionType      = sh_type
            , elfSectionFlags     = sh_flags
            , elfSectionAddr      = sh_addr
@@ -210,33 +207,45 @@ getShdr64 er file string_section = do
            , elfSectionInfo      = sh_info
            , elfSectionAddrAlign = sh_addralign
            , elfSectionEntSize   = sh_entsize
-           , elfSectionData = sectionData sh_type sh_offset sh_size file
-    }
-  return ((sh_offset, sectionFileLen sh_type sh_size), s)
+           , elfSectionData      = slice (sh_offset, file_sz) file
+           }
+  return ((sh_offset, file_sz), s)
 
 ------------------------------------------------------------------------
--- ElfParseInfo
+-- ElfHeaderInfo
+
+data ElfHeader w = ElfHeader { headerData       :: !ElfData
+                             , headerClass      :: !(ElfClass w)
+                             , headerOSABI      :: !ElfOSABI
+                             , headerABIVersion :: !Word8
+                             , headerType :: !ElfType
+                             , headerMachine :: !ElfMachine
+                             , headerEntry   :: !w
+                             , headerFlags   :: !Word32
+                             }
 
 -- | Contains information needed to parse elf files.
-data ElfParseInfo w = ElfParseInfo {
-       -- | Size of ehdr table
-       ehdrSize :: !Word16
-       -- | Layout of segment header table.
+data ElfHeaderInfo w = ElfHeaderInfo {
+       header :: !(ElfHeader w)
+       -- ^ Elf header information
+     , ehdrSize :: !Word16
+       -- ^ Size of ehdr table
      , phdrTable :: !(TableLayout w)
-       -- | Function for reading elf segments.
+       -- ^ Layout of segment header table.
      , getPhdr :: !(GetPhdrFn w)
-       -- | Index of section for storing section names.
+       -- ^ Function for reading elf segments.
      , shdrNameIdx :: !Word16
-       -- | Layout of section header table.
+       -- ^ Index of section for storing section names.
      , shdrTable :: !(TableLayout w)
-       -- | Function for reading elf sections.
+       -- ^ Layout of section header table.
      , getShdr   :: !(GetShdrFn w)
-       -- | Contents of file as a bytestring.
+       -- ^ Function for reading elf sections.
      , fileContents :: !B.ByteString
+       -- ^ Contents of file as a bytestring.
      }
 
 -- | Return list of segments with contents.
-rawSegments :: Integral w => ElfParseInfo w -> [Phdr w]
+rawSegments :: Integral w => ElfHeaderInfo w -> [Phdr w]
 rawSegments epi = segmentByIndex epi <$> enumCnt 0 (entryNum (phdrTable epi))
 
 -- | Returns size of region.
@@ -244,7 +253,7 @@ type RegionSizeFn w = ElfDataRegion w -> w
 
 -- | Return size of region given parse information.
 regionSize :: Integral w
-           => ElfParseInfo w
+           => ElfHeaderInfo w
            -> w -- ^ Contains size of name table
            -> RegionSizeFn w
 regionSize epi nameSize = sizeOf
@@ -259,11 +268,21 @@ regionSize epi nameSize = sizeOf
 
 -- | Parse segment at given index.
 segmentByIndex :: Integral w
-               => ElfParseInfo w -- ^ Information for parsing
+               => ElfHeaderInfo w -- ^ Information for parsing
                -> Word16 -- ^ Index
                -> Phdr w
 segmentByIndex epi i =
   runGet (getPhdr epi) (tableEntry (phdrTable epi) i (fileContents epi))
+
+-- Return section
+getSection' :: Integral w
+            => ElfHeaderInfo w
+            -> (Word32 -> String) -- ^ Maps section index to name to use for section.
+            -> Word16 -- ^ Index of section.
+            -> (Range w, ElfSection w)
+getSection' epi name_fn i = runGet (getShdr epi name_fn)
+                                   (tableEntry (shdrTable epi) i file)
+  where file = fileContents epi
 
 ------------------------------------------------------------------------
 -- Region name
@@ -402,45 +421,101 @@ insertSegment sizeOf (d,rng) segs =
                      ++ "  Remaining bytes: " ++ show cnt
             Seq.EmptyL -> error "insertSegment: Data ended before completion"
 
+getSectionName :: B.ByteString -> Word32 -> String
+getSectionName names idx = B.toString $ lookupString idx names
+
+-- | Get list of sections from Elf parse info
+getSectionTable :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection w)
+getSectionTable epi = V.generate cnt $ getSection
+  where cnt = fromIntegral (entryNum (shdrTable epi)) :: Int
+
+        c = headerClass (header epi)
+
+        -- Return range used to store name index.
+        names :: B.ByteString
+        names = elfClassIntegralInstance c $
+          elfSectionData $ snd $ getSection' epi (\_ -> "") (shdrNameIdx epi)
+
+        getSection :: Int -> ElfSection w
+        getSection i = elfClassIntegralInstance c $
+          snd $ getSection' epi (getSectionName names) (fromIntegral i)
+
 
 -- | Parse elf region.
-parseElfRegions :: (Bits w, Integral w, Show w)
-                => ElfParseInfo w -- ^ Information for parsing.
-                -> [Phdr w]
+parseElfRegions :: forall w
+                .  (Bits w, Integral w, Show w)
+                => ElfHeaderInfo w -- ^ Information for parsing.
+                -> [Phdr w] -- ^ List of segments
                 -> Seq.Seq (ElfDataRegion w)
 parseElfRegions epi segments = final
-  where file = fileContents epi
-        getSection i = runGet (getShdr epi file names)
-                              (tableEntry (shdrTable epi) i file)
-        nameRange = fst $ getSection (shdrNameIdx epi)
-        sizeOf = regionSize epi (snd nameRange)
-        names = slice nameRange file
+  where -- Return range used to store name index.
+        nameRange :: Range w
+        nameRange = fst $ getSection' epi (\_ -> "") (shdrNameIdx epi)
+
+        sections :: [(Range w, ElfSection w)]
+        sections = fmap (getSection' epi (getSectionName names))
+                 $ filter (/= shdrNameIdx epi)
+                 $ enumCnt 0 (entryNum (shdrTable epi))
+          where
+                names = slice nameRange (fileContents epi)
+
         -- Define table with special data regions.
+        headers :: [(Range w, ElfDataRegion w)]
         headers = [ ((0, fromIntegral (ehdrSize epi)), ElfDataElfHeader)
                   , (tableRange (phdrTable epi), ElfDataSegmentHeaders)
                   , (tableRange (shdrTable epi), ElfDataSectionHeaders)
-                  , (nameRange, ElfDataSectionNameTable)
+                  , (nameRange,                  ElfDataSectionNameTable)
                   ]
+
+        -- | Returns size of a given data region.
+        sizeOf :: ElfDataRegion w -> w
+        sizeOf = regionSize epi (snd nameRange)
+
         -- Define table with regions for sections.
-        dataSection (r,s) = (r, ElfDataSection s)
-        sections = map (dataSection . getSection)
-                 $ filter (/= shdrNameIdx epi)
-                 $ enumCnt 0 (entryNum (shdrTable epi))
+        dataSection = over _2 ElfDataSection
+
         -- Define initial region list without segments.
         initial  = foldr (uncurry (insertSpecialRegion sizeOf))
-                         (insertRawRegion file Seq.empty)
-                         (headers ++ sections)
+                         (insertRawRegion (fileContents epi) Seq.empty)
+                         (headers ++ fmap dataSection sections)
+
+        -- Return final section
         final = foldr (insertSegment sizeOf) initial
                 -- Strip out relro segment (stored in `elfRelroRange')
               $ filter (not . isRelroPhdr) segments
 
+expectedElfVersion :: Word8
+expectedElfVersion = 1
+
+getElf :: (Bits w, Integral w, Show w)
+       => ElfHeaderInfo w
+       -> Elf w
+getElf  epi =
+    Elf { elfData       = headerData       (header epi)
+        , elfClass      = headerClass      (header epi)
+        , elfVersion    = expectedElfVersion
+        , elfOSABI      = headerOSABI      (header epi)
+        , elfABIVersion = headerABIVersion (header epi)
+        , elfType       = headerType       (header epi)
+        , elfMachine    = headerMachine    (header epi)
+        , elfEntry      = headerEntry      (header epi)
+        , elfFlags      = headerFlags      (header epi)
+        , _elfFileData  = parseElfRegions epi segments
+        , elfRelroRange = asRelroInfo segments
+        }
+  where segments = rawSegments epi
+
 -- | Parse a 32-bit elf.
-parseElf32 :: ElfData -> Word8 -> ElfOSABI -> Word8 -> B.ByteString -> Get (Elf Word32)
-parseElf32 d ei_version ei_osabi ei_abiver b = do
+parseElf32ParseInfo :: ElfData
+                    -> ElfOSABI
+                    -> Word8 -- ^ ABI Version
+                    -> B.ByteString
+                    -> Get (ElfHeaderInfo Word32)
+parseElf32ParseInfo d ei_osabi ei_abiver b = do
   e_type      <- toElfType    <$> getWord16 d
   e_machine   <- toElfMachine <$> getWord16 d
   e_version   <- getWord32 d
-  unless (fromIntegral ei_version == e_version) $
+  unless (fromIntegral expectedElfVersion == e_version) $
     fail "ELF Version mismatch"
   e_entry     <- getWord32 d
   e_phoff     <- getWord32 d
@@ -456,36 +531,38 @@ parseElf32 d ei_version ei_osabi ei_abiver b = do
     fail $ "Invalid section entry size"
   e_shnum     <- getWord16 d
   e_shstrndx  <- getWord16 d
-  let epi = ElfParseInfo
-                  { ehdrSize = e_ehsize
-                  , phdrTable = mkTableLayout e_phoff e_phentsize e_phnum
+  let hdr = ElfHeader { headerData       = d
+                      , headerClass      = ELFCLASS32
+                      , headerOSABI      = ei_osabi
+                      , headerABIVersion = ei_abiver
+                      , headerType       = e_type
+                      , headerMachine    = e_machine
+                      , headerFlags      = e_flags
+                      , headerEntry      = e_entry
+                      }
+  return $! ElfHeaderInfo
+                  { header = hdr
+                  , ehdrSize = e_ehsize
+                  , phdrTable = TableLayout e_phoff e_phentsize e_phnum
                   , getPhdr = getPhdr32 d
                   , shdrNameIdx = e_shstrndx
-                  , shdrTable = mkTableLayout e_shoff e_shentsize e_shnum
-                  , getShdr = getShdr32 d
+                  , shdrTable = TableLayout e_shoff e_shentsize e_shnum
+                  , getShdr = getShdr32 d b
                   , fileContents = b
                   }
-  let segments = rawSegments epi
-  return Elf { elfData       = d
-             , elfClass      = ELFCLASS32
-             , elfVersion    = ei_version
-             , elfOSABI      = ei_osabi
-             , elfABIVersion = ei_abiver
-             , elfType       = e_type
-             , elfMachine    = e_machine
-             , elfEntry      = e_entry
-             , elfFlags      = e_flags
-             , _elfFileData  = parseElfRegions epi segments
-             , elfRelroRange = asRelroInfo segments
-             }
+
 
 -- | Parse a 32-bit elf.
-parseElf64 :: ElfData -> Word8 -> ElfOSABI -> Word8 -> B.ByteString -> Get (Elf Word64)
-parseElf64 d ei_version ei_osabi ei_abiver b = do
+parseElf64ParseInfo :: ElfData
+                    -> ElfOSABI
+                    -> Word8 -- ^ ABI Version
+                    -> B.ByteString
+                    -> Get (ElfHeaderInfo Word64)
+parseElf64ParseInfo d ei_osabi ei_abiver b = do
   e_type      <- toElfType    <$> getWord16 d
   e_machine   <- toElfMachine <$> getWord16 d
   e_version   <- getWord32 d
-  unless (fromIntegral ei_version == e_version) $
+  when (fromIntegral expectedElfVersion /= e_version) $
     fail "ELF Version mismatch"
   e_entry     <- getWord64 d
   e_phoff     <- getWord64 d
@@ -497,33 +574,30 @@ parseElf64 d ei_version ei_osabi ei_abiver b = do
   e_shentsize <- getWord16 d
   e_shnum     <- getWord16 d
   e_shstrndx  <- getWord16 d
-  let epi = ElfParseInfo
-                  { ehdrSize    = e_ehsize
-                  , phdrTable   = mkTableLayout e_phoff e_phentsize e_phnum
+  let hdr = ElfHeader { headerData       = d
+                      , headerClass      = ELFCLASS64
+                      , headerOSABI      = ei_osabi
+                      , headerABIVersion = ei_abiver
+                      , headerType       = e_type
+                      , headerMachine    = e_machine
+                      , headerFlags      = e_flags
+                      , headerEntry      = e_entry
+                      }
+  return $! ElfHeaderInfo
+                  { header      = hdr
+                  , ehdrSize    = e_ehsize
+                  , phdrTable   = TableLayout e_phoff e_phentsize e_phnum
                   , getPhdr     = getPhdr64 d
                   , shdrNameIdx = e_shstrndx
-                  , shdrTable   = mkTableLayout e_shoff e_shentsize e_shnum
-                  , getShdr     = getShdr64 d
+                  , shdrTable   = TableLayout e_shoff e_shentsize e_shnum
+                  , getShdr     = getShdr64 d b
                   , fileContents = b
                   }
-  let segments = rawSegments epi
-  return Elf { elfData       = d
-             , elfClass      = ELFCLASS64
-             , elfVersion    = ei_version
-             , elfOSABI      = ei_osabi
-             , elfABIVersion = ei_abiver
-             , elfType       = e_type
-             , elfMachine    = e_machine
-             , elfEntry      = e_entry
-             , elfFlags      = e_flags
-             , _elfFileData  = parseElfRegions epi segments
-             , elfRelroRange = asRelroInfo segments
-             }
 
--- | Either a 32-bit or 64-bit elf file.
-data SomeElf
-   = Elf32 (Elf Word32)
-   | Elf64 (Elf Word64)
+-- | Either a 32-bit or 64-bit tpyed value.
+data SomeElf f
+   = Elf32 (f Word32)
+   | Elf64 (f Word64)
 
 parseElfResult :: Either (L.ByteString, ByteOffset, String) (L.ByteString, ByteOffset, a)
                -> Either (ByteOffset,String) a
@@ -532,21 +606,31 @@ parseElfResult (Right (_,_,v)) = Right v
 
 -- | Parses a ByteString into an Elf record. Parse failures call error. 32-bit ELF objects hav
 -- their fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
-parseElf :: B.ByteString -> Either (ByteOffset,String) SomeElf
-parseElf b = parseElfResult $ flip runGetOrFail (L.fromChunks [b]) $ do
+parseElfHeaderInfo :: B.ByteString -> Either (ByteOffset,String) (SomeElf ElfHeaderInfo)
+parseElfHeaderInfo b = parseElfResult $ flip runGetOrFail (L.fromChunks [b]) $ do
   ei_magic    <- getByteString 4
   unless (ei_magic == elfMagic) $
     fail $ "Invalid magic number for ELF: " ++ show (ei_magic, elfMagic)
   ei_class   <- tryParse "ELF class" toSomeElfClass =<< getWord8
   d          <- tryParse "ELF data"  toElfData =<< getWord8
   ei_version <- getWord8
-  unless (ei_version == 1) $
+  unless (ei_version == expectedElfVersion) $
     fail "Invalid version number for ELF"
   ei_osabi    <- toElfOSABI <$> getWord8
   ei_abiver   <- getWord8
   skip 7
   case ei_class of
-    SomeElfClass ELFCLASS32 ->
-      Elf32 <$> parseElf32 d ei_version ei_osabi ei_abiver b
-    SomeElfClass ELFCLASS64 ->
-      Elf64 <$> parseElf64 d ei_version ei_osabi ei_abiver b
+    SomeElfClass ELFCLASS32 -> do
+      Elf32 <$> parseElf32ParseInfo d ei_osabi ei_abiver b
+    SomeElfClass ELFCLASS64 -> do
+      Elf64 <$> parseElf64ParseInfo d ei_osabi ei_abiver b
+
+-- | Parses a ByteString into an Elf record. Parse failures call error. 32-bit ELF objects hav
+-- their fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
+parseElf :: B.ByteString -> Either (ByteOffset,String) (SomeElf Elf)
+parseElf b = do
+  some_header <- parseElfHeaderInfo b
+  return $!
+    case some_header of
+      Elf32 hdr -> Elf32 (getElf hdr)
+      Elf64 hdr -> Elf64 (getElf hdr)
