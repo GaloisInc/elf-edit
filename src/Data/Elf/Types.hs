@@ -1,10 +1,12 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 module Data.Elf.Types
-  ( Elf(..)
+  ( -- * Top leve ldeclaration
+    Elf(..)
   , emptyElf
   , elfFileData
     -- ** ElfClass
@@ -42,8 +44,6 @@ module Data.Elf.Types
   , toElfSectionType
     -- ** ElfGOT
   , ElfGOT(..)
-  , elfGotSection
-  , elfGotSectionFlags
   , elfGotSize
     -- * ElfSegment
   , ElfSegment(..)
@@ -51,11 +51,23 @@ module Data.Elf.Types
   , ppSegment
     -- ** Elf segment type
   , ElfSegmentType(..)
-  , fromElfSegmentType
-  , toElfSegmentType
+  , pattern PT_NULL
+  , pattern PT_LOAD
+  , pattern PT_DYNAMIC
+  , pattern PT_INTERP
+  , pattern PT_NOTE
+  , pattern PT_SHLIB
+  , pattern PT_PHDR
+  , pattern PT_GNU_EH_FRAME
+  , pattern PT_GNU_STACK
+  , pattern PT_GNU_RELRO
     -- ** Elf segment flags
   , ElfSegmentFlags(..)
   , pf_none, pf_x, pf_w, pf_r
+    -- * ElfHeader
+  , ElfHeader(..)
+  , elfHeader
+  , expectedElfVersion
     -- * Range
   ,  Range
   , inRange
@@ -72,6 +84,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import           Data.List (intercalate)
+import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
 import           Data.Word
@@ -402,44 +415,56 @@ data ElfGOT w = ElfGOT
     , elfGotData      :: !B.ByteString
     } deriving (Show)
 
-elfGotSectionFlags :: (Bits w, Num w) => ElfSectionFlags w
-elfGotSectionFlags = shf_write .|. shf_alloc
-
 elfGotSize :: Num w => ElfGOT w -> w
 elfGotSize g = fromIntegral (B.length (elfGotData g))
-
--- | Convert a GOT section to a standard section.
-elfGotSection :: (Bits w, Num w) => ElfGOT w -> ElfSection w
-elfGotSection g =
-  ElfSection { elfSectionName = elfGotName g
-             , elfSectionType = SHT_PROGBITS
-             , elfSectionFlags = elfGotSectionFlags
-             , elfSectionAddr = elfGotAddr g
-             , elfSectionSize = elfGotSize g
-             , elfSectionLink = 0
-             , elfSectionInfo = 0
-             , elfSectionAddrAlign = elfGotAddrAlign g
-             , elfSectionEntSize = elfGotEntSize g
-             , elfSectionData = elfGotData g
-             }
 
 ------------------------------------------------------------------------
 -- ElfSegmentType
 
-[enum|
- ElfSegmentType :: Word32
- PT_NULL    0 -- ^ Unused entry
- PT_LOAD    1 -- ^ Loadable segment
- PT_DYNAMIC 2 -- ^ Dynamic linking tables
- PT_INTERP  3 -- ^ Program interpreter path name
- PT_NOTE    4 -- ^ Note sections
- PT_SHLIB   5 -- ^ Reserved
- PT_PHDR    6 -- ^ Program header table
- PT_GNU_EH_FRAME 0x6474e550 -- ^ Exception handling information.
- PT_GNU_STACK    0x6474e551 -- ^ Indicates if stack should be executable.
- PT_GNU_RELRO    0x6474e552 -- ^ GNU segment with relocation that may be read-only.
- PT_Other   _ -- ^ Some other type
- |]
+-- | The type of an elf segment
+newtype ElfSegmentType = ElfSegmentType { fromElfSegmentType :: Word32 }
+  deriving (Eq,Ord)
+
+-- | Unused entry
+pattern PT_NULL    = ElfSegmentType 0
+-- | Loadable segment
+pattern PT_LOAD    = ElfSegmentType 1
+-- | Dynamic linking tables
+pattern PT_DYNAMIC = ElfSegmentType 2
+-- | Program interpreter path name
+pattern PT_INTERP  = ElfSegmentType 3
+-- | Note sections
+pattern PT_NOTE    = ElfSegmentType 4
+-- | Reserved
+pattern PT_SHLIB   = ElfSegmentType 5
+-- | Program header table
+pattern PT_PHDR    = ElfSegmentType 6
+-- | Exception handling information
+pattern PT_GNU_EH_FRAME = ElfSegmentType 0x6474e550
+-- | Indicates if stack should be executable.
+pattern PT_GNU_STACK    = ElfSegmentType 0x6474e551
+-- | GNU segment with relocation that may be read-only.
+pattern PT_GNU_RELRO    = ElfSegmentType 0x6474e552
+
+elfSegmentTypeNameMap :: Map.Map ElfSegmentType String
+elfSegmentTypeNameMap = Map.fromList $
+  [ (,) PT_NULL         "PT_NULL"
+  , (,) PT_LOAD         "PT_LOAD"
+  , (,) PT_DYNAMIC      "PT_DYNAMIC"
+  , (,) PT_INTERP       "PT_INTERP"
+  , (,) PT_NOTE         "PT_NOTE"
+  , (,) PT_SHLIB        "PT_SHLIB"
+  , (,) PT_PHDR         "PT_PHDR"
+  , (,) PT_GNU_EH_FRAME "PT_GNU_EH_FRAME"
+  , (,) PT_GNU_STACK    "PT_GNU_STACK"
+  , (,) PT_GNU_RELRO    "PT_GNU_RELRO"
+  ]
+
+instance Show ElfSegmentType where
+  show tp =
+    case Map.lookup tp elfSegmentTypeNameMap of
+      Just s -> s
+      Nothing -> "ElfSegmentType " ++ show (fromElfSegmentType tp)
 
 ------------------------------------------------------------------------
 -- ElfSegmentFlags
@@ -502,22 +527,32 @@ data ElfSegment w = ElfSegment
 
 -- | A region of data in the file.
 data ElfDataRegion w
-    -- | Identifies the elf header (should appear 1st in an in-order traversal of the file).
    = ElfDataElfHeader
-     -- | Identifies the program header table.
+     -- ^ Identifies the elf header
+     --
+     -- This should appear 1st in an in-order traversal of the file.
+     -- This is represented explicitly as an elf data region as it may be part of
+     -- an elf segment, and thus we need to know whether a segment contains it.
    | ElfDataSegmentHeaders
-     -- | A segment that contains other segments.
+     -- ^ Identifies the program header table.
+     --
+     -- This is represented explicitly as an elf data region as it may be part of
+     -- an elf segment, and thus we need to know whether a segment contains it.
    | ElfDataSegment (ElfSegment w)
-     -- | Identifies the section header table.
+     -- ^ A segment that contains other segments.
    | ElfDataSectionHeaders
-     -- | The section for storing the section names.
+     -- ^ Identifies the section header table.
+     --
+     -- This is represented explicitly as an elf data region as it may be part of
+     -- an elf segment, and thus we need to know whether a segment contains it.
    | ElfDataSectionNameTable
-     -- | A global offset table.
+     -- ^ The section for storing the section names.
    | ElfDataGOT (ElfGOT w)
-     -- | A section that has no special interpretation.
+     -- ^ A global offset table.
    | ElfDataSection (ElfSection w)
-     -- | Identifies an uninterpreted array of bytes.
+     -- ^ A section that has no special interpretation.
    | ElfDataRaw B.ByteString
+     -- ^ Identifies an uninterpreted array of bytes.
   deriving Show
 
 -- | Returns the sequence of data regions contained in segment.
@@ -541,14 +576,16 @@ instance (Bits w, Integral w, Show w) => Show (ElfSegment w) where
 ------------------------------------------------------------------------
 -- Elf
 
+-- | The version of elf files supported by this parser
+expectedElfVersion :: Word8
+expectedElfVersion = 1
+
 -- | The contents of an Elf file.  Many operations require that the
 -- width parameter is either @Word32@ or @Word64@ dependings on whether
 -- this is a 32-bit or 64-bit file.
 data Elf w = Elf
     { elfData       :: !ElfData       -- ^ Identifies the data encoding of the object file.
     , elfClass      :: !(ElfClass w)  -- ^ Identifies width of elf class.
-    , elfVersion    :: !Word8
-      -- ^ Identifies the version of the object file format.
     , elfOSABI      :: !ElfOSABI
       -- ^ Identifies the operating system and ABI for which the object is prepared.
     , elfABIVersion :: !Word8
@@ -572,7 +609,6 @@ emptyElf :: ElfData -> ElfClass w -> ElfType -> ElfMachine -> Elf w
 emptyElf d c tp m = elfClassIntegralInstance c $
   Elf { elfData       = d
       , elfClass      = c
-      , elfVersion    = 1 -- Current version as of Jan. 2016
       , elfOSABI      = ELFOSABI_SYSV
       , elfABIVersion = 0
       , elfType       = tp
@@ -586,3 +622,29 @@ emptyElf d c tp m = elfClassIntegralInstance c $
 -- | Lens to access top-level regions in Elf file.
 elfFileData :: Simple Lens (Elf w) (Seq.Seq (ElfDataRegion w))
 elfFileData = lens _elfFileData (\s v -> s { _elfFileData = v })
+
+------------------------------------------------------------------------
+-- ElfHeader
+
+-- | This contain entry for the Elf header.
+data ElfHeader w = ElfHeader { headerData       :: !ElfData
+                             , headerClass      :: !(ElfClass w)
+                             , headerOSABI      :: !ElfOSABI
+                             , headerABIVersion :: !Word8
+                             , headerType       :: !ElfType
+                             , headerMachine    :: !ElfMachine
+                             , headerEntry      :: !w
+                             , headerFlags      :: !Word32
+                             }
+
+-- | Return the header information about the elf
+elfHeader :: Elf w -> ElfHeader w
+elfHeader e = ElfHeader { headerData       = elfData e
+                        , headerClass      = elfClass e
+                        , headerOSABI      = elfOSABI e
+                        , headerABIVersion = elfABIVersion e
+                        , headerType       = elfType e
+                        , headerMachine    = elfMachine e
+                        , headerEntry      = elfEntry e
+                        , headerFlags      = elfFlags e
+                        }

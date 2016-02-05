@@ -23,6 +23,7 @@ module Data.Elf ( -- * Top-level definitions
                 , removeSectionByName
                 , updateSections
                 , elfInterpreter
+                , appendToLoadableSegment
                   -- ** Top-level Elf information
                 , ElfClass(..)
                 , ElfData(..)
@@ -153,9 +154,6 @@ module Data.Elf ( -- * Top-level definitions
                 , hasPermissions
                 ) where
 
-#if !MIN_VERSION_base(4,8,0)
-import           Control.Applicative
-#endif
 import           Control.Lens hiding (enum)
 import           Control.Monad
 import           Data.Binary
@@ -176,7 +174,6 @@ import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 import           Data.Elf.Get
 import           Data.Elf.Layout
 import           Data.Elf.Relocations
-import qualified Data.Elf.SizedBuilder as U
 import           Data.Elf.TH
 import           Data.Elf.Types
 
@@ -239,7 +236,7 @@ type RenderedElfSegment w = (ElfSegment w, B.ByteString)
 renderedElfSegments :: Elf w -> [RenderedElfSegment w]
 renderedElfSegments e = elfClassIntegralInstance (elfClass e) $
   let l = elfLayout e
-      b = U.toStrictByteString (l^.elfOutput)
+      b = L.toStrict (elfLayoutBytes l)
       segFn (s,rng) = (s, slice rng b)
    in segFn <$> F.toList (allPhdrs l)
 
@@ -351,7 +348,7 @@ ppSymbolTableEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entri
                , ("Bind",     alignLeft  6)
                , ("Vis",      alignLeft 8)
                , ("Ndx",      alignLeft 3)
-               , ("Name", id)
+               , ("Name",     id)
                ]
 
 ppSymbolTableEntry :: (Integral w, Bits w, Show w) => Int -> ElfSymbolTableEntry w -> [String]
@@ -1076,7 +1073,7 @@ dynamicEntries e = elfClassIntegralInstance (elfClass e) $ do
       w = relaWidth (undefined :: tp)
   let l :: ElfLayout (ElfWordType (RelocationWidth tp))
       l = elfLayout e
-  let file = U.toLazyByteString $ l^.elfOutput
+  let file = elfLayoutBytes l
   case filter (\(s,_) -> elfSegmentType s == PT_DYNAMIC) (F.toList (l^.phdrs)) of
     [] -> return Nothing
     [(_,p)] -> do

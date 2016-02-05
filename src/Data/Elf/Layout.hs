@@ -5,7 +5,6 @@ module Data.Elf.Layout
   ( -- * ElfLayout
     ElfLayout
   , elfLayoutClass
-  , elfOutput
   , Phdr
   , phdrs
   , allPhdrs
@@ -20,12 +19,15 @@ module Data.Elf.Layout
   , sizeOfPhdr32
   , sizeOfShdr32
   , ElfWidth
+    -- * Operations
+  , appendToLoadableSegment
   ) where
 
 import           Control.Lens hiding (enum)
 import           Control.Monad
 import           Data.Bits
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Builder as Bld
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.UTF8 as B (fromString)
 import qualified Data.Foldable as F
@@ -69,6 +71,33 @@ updateSeq f l0 =
       where compose Nothing  r = r
             compose (Just e) r = e Seq.<| r
 
+bldPad :: Integral w => w -> Bld.Builder
+bldPad sz = Bld.lazyByteString (L.replicate sz' 0)
+  where Just sz' = safeFromIntegral sz
+
+------------------------------------------------------------------------
+-- ElfGOTSection
+
+elfGotSectionFlags :: (Bits w, Num w) => ElfSectionFlags w
+elfGotSectionFlags = shf_write .|. shf_alloc
+
+
+-- | Convert a GOT section to a standard section.
+elfGotSection :: (Bits w, Num w) => ElfGOT w -> ElfSection w
+elfGotSection g =
+  ElfSection { elfSectionName = elfGotName g
+             , elfSectionType = SHT_PROGBITS
+             , elfSectionFlags = elfGotSectionFlags
+             , elfSectionAddr = elfGotAddr g
+             , elfSectionSize = elfGotSize g
+             , elfSectionLink = 0
+             , elfSectionInfo = 0
+             , elfSectionAddrAlign = elfGotAddrAlign g
+             , elfSectionEntSize = elfGotEntSize g
+             , elfSectionData = elfGotData g
+             }
+
+
 ------------------------------------------------------------------------
 -- Phdr
 
@@ -84,6 +113,8 @@ isPreloadPhdr _ = False
 -- | Compute number of bytes of padding to add to file.
 phdr_padding_count :: (Integral w, Ord w) => ElfSegment w -> w -> w
 phdr_padding_count s file_pos
+      -- Loadable segments need no padding
+    | elfSegmentType s /= PT_LOAD = 0
     | n <= 1 = 0
       -- Increment addr_mod up to file_mod if it can be.
     | file_mod <= addr_mod = addr_mod - file_mod
@@ -101,10 +132,14 @@ phdr_padding_count s file_pos
 --
 -- It can be used to obtain precise information about Elf file layout.
 data ElfLayout w = ElfLayout {
-        elfLayoutClass :: !(ElfClass w)
-        -- ^ Class for elf layout
-      , _elfOutput :: Builder
-        -- ^ Elf output
+        elfLayoutHeader :: !(ElfHeader w)
+        -- ^ Header information for elf file
+      , elfLayoutRegions :: !(Seq.Seq (ElfDataRegion w))
+        -- ^ Data regions from elf file
+      , elfLayoutSectionNameData :: B.ByteString
+        -- ^ Contents of section name table data.
+      , _elfOutputSize :: !w
+        -- ^ Elf output size
       , _phdrTableOffset :: w
         -- ^ Offset to phdr table.
       , _preLoadPhdrs :: Seq.Seq (Phdr w)
@@ -119,9 +154,12 @@ data ElfLayout w = ElfLayout {
         -- ^ List of section headers found so far.
       }
 
--- | Lens containing all data for an Elf file.
-elfOutput :: Simple Lens (ElfLayout w) Builder
-elfOutput = lens _elfOutput (\s v -> s { _elfOutput = v })
+elfLayoutClass :: ElfLayout w -> ElfClass w
+elfLayoutClass = headerClass . elfLayoutHeader
+
+-- | Lens containing size of sections processed so far in layout.
+elfOutputSize :: Simple Lens (ElfLayout w) w
+elfOutputSize = lens _elfOutputSize (\s v -> s { _elfOutputSize = v })
 
 phdrTableOffset :: Simple Lens (ElfLayout w) w
 phdrTableOffset = lens _phdrTableOffset (\s v -> s { _phdrTableOffset = v })
@@ -133,7 +171,7 @@ phdrs :: Simple Lens (ElfLayout w) (Seq.Seq (Phdr w))
 phdrs = lens _phdrs (\s v -> s { _phdrs = v })
 
 shdrTableOffset :: Simple Lens (ElfLayout w) w
-shdrTableOffset = lens _phdrTableOffset (\s v -> s { _phdrTableOffset = v })
+shdrTableOffset = lens _shdrTableOffset (\s v -> s { _shdrTableOffset = v })
 
 shstrndx :: Simple Lens (ElfLayout w) Word16
 shstrndx = lens _shstrndx (\s v -> s { _shstrndx = v })
@@ -141,16 +179,9 @@ shstrndx = lens _shstrndx (\s v -> s { _shstrndx = v })
 shdrs :: Simple Lens (ElfLayout w) (Seq.Seq Builder)
 shdrs = lens _shdrs (\s v -> s { _shdrs = v })
 
--- | Return the bytes in the Elf file as a lazy bytestring.
-elfLayoutBytes :: ElfLayout w -> L.ByteString
-elfLayoutBytes l = U.toLazyByteString (l^.elfOutput)
-
 -- | Return total size of elf file.
 elfLayoutSize :: ElfLayout w -> w
-elfLayoutSize l = elfClassIntegralInstance (elfLayoutClass l) $
-  case safeFromIntegral (U.length (l^.elfOutput)) of
-    Just r -> r
-    Nothing -> error "Output is too large."
+elfLayoutSize l = l^.elfOutputSize
 
 allPhdrs :: ElfLayout w -> Seq.Seq (Phdr w)
 allPhdrs l = l^.preLoadPhdrs Seq.>< l^.phdrs
@@ -166,6 +197,7 @@ shnum :: ElfLayout w -> Word16
 shnum l | r > 65536 = error "Number of sections is too large."
         | otherwise = fromIntegral r
   where r = Seq.length $ l^.shdrs
+
 
 ------------------------------------------------------------------------
 -- ElfField
@@ -192,6 +224,18 @@ writeField (EFWord32 f) ELFDATA2MSB = U.putWord32be . f
 writeField (EFWord64 f) ELFDATA2LSB = U.putWord64le . f
 writeField (EFWord64 f) ELFDATA2MSB = U.putWord64be . f
 
+cvtBuilder :: Builder -> Bld.Builder
+cvtBuilder = Bld.lazyByteString . U.toLazyByteString
+
+writeField2 :: ElfField v -> ElfData -> v -> Bld.Builder
+writeField2 (EFBS _   f) _           = cvtBuilder . f
+writeField2 (EFWord16 f) ELFDATA2LSB = Bld.word16LE . f
+writeField2 (EFWord16 f) ELFDATA2MSB = Bld.word16BE . f
+writeField2 (EFWord32 f) ELFDATA2LSB = Bld.word32LE . f
+writeField2 (EFWord32 f) ELFDATA2MSB = Bld.word32BE . f
+writeField2 (EFWord64 f) ELFDATA2LSB = Bld.word64LE . f
+writeField2 (EFWord64 f) ELFDATA2MSB = Bld.word64BE . f
+
 ------------------------------------------------------------------------
 -- ElfRecord
 
@@ -205,12 +249,16 @@ writeRecord :: ElfRecord v -> ElfData -> v -> Builder
 writeRecord fields d v =
   mconcat $ map (\(_,f) -> writeField f d v) fields
 
+writeRecord2 :: ElfRecord v -> ElfData -> v -> Bld.Builder
+writeRecord2 fields d v =
+  mconcat $ map (\(_,f) -> writeField2 f d v) fields
+
 ------------------------------------------------------------------------
 -- ElfWidth
 
 
 -- | Contains elf file, program header offset, section header offset.
-type Ehdr w = (Elf w, ElfLayout w)
+type Ehdr w = (ElfHeader w, ElfLayout w)
 -- | Contains Elf section data, name offset, and data offset.
 type Shdr w = (ElfSection w, Word32, w)
 
@@ -220,6 +268,102 @@ class (Bits w, Integral w, Show w) => ElfWidth w where
   ehdrFields :: ElfRecord (Ehdr w)
   phdrFields :: ElfRecord (Phdr w)
   shdrFields :: ElfRecord (Shdr w)
+
+
+------------------------------------------------------------------------
+-- elfLayoutBytes
+
+-- | Return the bytes in the Elf file as a lazy bytestring.
+elfLayoutBytes2 :: ElfWidth w
+                => ElfLayout w
+                -> w
+                -> [ElfDataRegion w]
+                -> Bld.Builder
+elfLayoutBytes2 _ _ [] = mempty
+elfLayoutBytes2 l o (reg:rest) = do
+  let e = elfLayoutHeader l
+  let d = headerData e
+  let o' = nextRegionOffset l o reg
+  case reg of
+    ElfDataElfHeader -> do
+      writeRecord2 ehdrFields d (e,l)
+        <> elfLayoutBytes2 l o' rest
+    ElfDataSegmentHeaders -> do
+      mconcat (writeRecord2 phdrFields d <$> F.toList (allPhdrs l))
+        <> elfLayoutBytes2 l o' rest
+    ElfDataSegment s -> do
+      let sz = phdr_padding_count s o
+      bldPad sz
+        <> elfLayoutBytes2 l o' (F.toList (s^.elfSegmentData) ++ rest)
+    ElfDataSectionHeaders -> do
+      mconcat (cvtBuilder <$> F.toList (l^.shdrs))
+        <> elfLayoutBytes2 l o' rest
+    ElfDataSectionNameTable -> do
+      let s = elfNameTableSection (elfLayoutSectionNameData l)
+      elfLayoutSection o s
+        <> elfLayoutBytes2 l o' rest
+    ElfDataGOT g -> do
+      let s = elfGotSection g
+      elfLayoutSection o s
+        <> elfLayoutBytes2 l o' rest
+    ElfDataSection s -> do
+      elfLayoutSection o s
+        <> elfLayoutBytes2 l o' rest
+    ElfDataRaw b -> do
+      Bld.byteString b
+        <> elfLayoutBytes2 l o' rest
+
+elfLayoutSection :: ElfWidth w
+                 => w
+                 -> ElfSection w
+                 -> Bld.Builder
+elfLayoutSection o s =
+    bldPad (pad_offset' - o)
+      <> Bld.byteString dta
+  where pad_offset' = fixAlignment o (elfSectionAddrAlign s)
+        dta = elfSectionData s
+
+
+-- | Return the offset of the next data region to traverse.
+--
+-- Note that for segments, this just returns the offset by adding
+-- padding to get alignment correct, it does not return the offset
+-- including all subsections.
+nextRegionOffset :: (Bits w, Integral w)
+                 => ElfLayout w
+                 -> w
+                 -> ElfDataRegion w
+                 -> w
+nextRegionOffset l o reg = do
+  let e = elfLayoutHeader l
+  let c = headerClass e
+  case reg of
+    ElfDataElfHeader -> o + fromIntegral (sizeOfEhdr c)
+    ElfDataSegmentHeaders -> o + phdr_size
+      where phdr_size = fromIntegral (phnum l) * fromIntegral (sizeOfPhdr c)
+    ElfDataSegment s -> o + phdr_padding_count s o
+    ElfDataSectionHeaders -> o + sz
+      where sz = fromIntegral (shnum l) * fromIntegral (sizeOfShdr c)
+    ElfDataSectionNameTable -> nextSectionOffset o s
+      where s = elfNameTableSection (elfLayoutSectionNameData l)
+    ElfDataGOT g -> nextSectionOffset o s
+      where s = elfGotSection g
+    ElfDataSection s -> nextSectionOffset o s
+    ElfDataRaw b -> o + sz
+      where sz = fromIntegral (B.length b)
+
+nextSectionOffset :: (Bits w, Integral w) => w -> ElfSection w -> w
+nextSectionOffset o s = pad_offset' + data_size
+  where pad_offset' = fixAlignment o (elfSectionAddrAlign s)
+        dta = elfSectionData s
+        data_size = fromIntegral (B.length dta)
+
+-- | Return the offset after all data in region.
+offsetAfterRegion :: (Bits w, Integral w) => ElfLayout w -> w -> ElfDataRegion w -> w
+offsetAfterRegion l b (ElfDataSegment seg) =
+    F.foldl' (offsetAfterRegion l) next (seg^.elfSegmentData)
+  where next = nextRegionOffset l b (ElfDataSegment seg)
+offsetAfterRegion l b reg = nextRegionOffset l b reg
 
 ------------------------------------------------------------------------
 -- elfNameTableSection
@@ -329,7 +473,7 @@ elfSectionNames e = concatMap regionNames (F.toList (e^.elfFileData))
 updateSections' :: (Bits w, Num w)
                 => Traversal (Elf w) (Elf w) (ElfSection w) (Maybe (ElfSection w))
 updateSections' fn e0 = elfFileData (updateSeq impl) e0
-  where (t,_) = stringTable $ elfSectionNames e0
+  where t = fst $ stringTable $ elfSectionNames e0
         norm :: (Bits w, Num w) => ElfSection w -> ElfDataRegion w
         norm s
           | elfSectionName s == shstrtab = ElfDataSectionNameTable
@@ -361,13 +505,11 @@ addSectionToLayout :: ElfWidth w
                    -> ElfSection w
                    -> ElfLayout w
 addSectionToLayout d name_map l s =
-    l & elfOutput <>~ pad <> fn
+    l & elfOutputSize +~ (o - base)
       & shdrs %~ (Seq.|> writeRecord shdrFields d (s,no, o))
   where Just no = Map.lookup (elfSectionName s) name_map
-        base = elfLayoutSize l
+        base =  l^.elfOutputSize
         o = fixAlignment base (elfSectionAddrAlign s)
-        pad = U.fromByteString (B.replicate (fromIntegral (o - base)) 0)
-        fn  = U.fromByteString (elfSectionData s)
 
 ------------------------------------------------------------------------
 -- elfLayout
@@ -384,14 +526,35 @@ addRelroToLayout (Just (f,c)) l = l & phdrs %~ (Seq.|> (s, (f,c)))
                        , _elfSegmentData = Seq.empty
                        }
 
+elfSegmentCount :: Elf w -> Int
+elfSegmentCount e = F.foldl' f 0 (e^.elfFileData)
+  where f c (ElfDataSegment s) = F.foldl' f (c + 1) (s^.elfSegmentData)
+        f c _ = c
+
+elfSectionCount :: Elf w -> Int
+elfSectionCount e = F.foldl' f 0 (e^.elfFileData)
+  where f c (ElfDataSegment s) = F.foldl' f c (s^.elfSegmentData)
+        f c ElfDataSectionNameTable{} = c + 1
+        f c ElfDataGOT{}              = c + 1
+        f c ElfDataSection{}          = c + 1
+        f c _                         = c
+
 -- | Return layout information from elf file.
 elfLayout' :: forall w . ElfWidth w => Elf w -> ElfLayout w
-elfLayout' e = final
-  where d = elfData e
-        section_names = map elfSectionName $ toListOf elfSections' e
-        (name_data,name_map) = stringTable section_names
-        initl = ElfLayout { elfLayoutClass = elfClass e
-                          , _elfOutput = mempty
+elfLayout' e = initl & flip (foldl impl) (e^.elfFileData)
+                     & addRelroToLayout (elfRelroRange e)
+  where c = elfClass e
+        d = elfData e
+        (name_data,name_map) = stringTable $
+          elfSectionName <$> toListOf elfSections' e
+
+        phdr_cnt = elfSegmentCount e
+        shdr_cnt = elfSectionCount e
+
+        initl = ElfLayout { elfLayoutHeader = elfHeader e
+                          , elfLayoutRegions = e^.elfFileData
+                          , elfLayoutSectionNameData = name_data
+                          , _elfOutputSize = 0
                           , _phdrTableOffset = 0
                           , _preLoadPhdrs = Seq.empty
                           , _phdrs = Seq.empty
@@ -399,35 +562,28 @@ elfLayout' e = final
                           , _shstrndx = 0
                           , _shdrs = Seq.empty
                           }
-        -- Get final elf layout after processing elements.
-        final0 = foldl impl initl (e^.elfFileData)
-        -- Add relro information if needed.
-        final = addRelroToLayout (elfRelroRange e) final0
 
         -- Process element.
         impl :: ElfWidth w => ElfLayout w -> ElfDataRegion w -> ElfLayout w
         impl l ElfDataElfHeader =
-             l & elfOutput <>~ writeRecord ehdrFields d (e,final)
+             l & elfOutputSize +~ fromIntegral (sizeOfEhdr c)
         impl l ElfDataSegmentHeaders =
-             l & elfOutput <>~ headers
-               & phdrTableOffset .~ elfLayoutSize l
-          where headers = mconcat (writeRecord phdrFields d <$> F.toList (allPhdrs final))
+             l & elfOutputSize +~ phdr_size
+               & phdrTableOffset .~ l^.elfOutputSize
+          where phdr_size = fromIntegral phdr_cnt * fromIntegral (sizeOfPhdr c)
         impl l (ElfDataSegment s) = l3
-          where l1 = case elfSegmentType s of
-                       -- Add padding so that offset will be congruent to virtual address.
-                       PT_LOAD | cnt > 0 -> l & elfOutput <>~ padding
-                         where cnt = phdr_padding_count s (elfLayoutSize l1)
-                               Just cnt' = safeFromIntegral cnt
-                               padding = U.fromLazyByteString $ L.replicate cnt' 0
-                       -- No padding is needed.
-                       _ -> l
+          where cnt = phdr_padding_count s (l^.elfOutputSize)
+
+                -- Add padding so that offset will be congruent to virtual address
+                -- This will be zero if segment is not loadable.
+                l1 = l & elfOutputSize +~ cnt
 
                 -- Update layout by folding over segment data.
                 l2 :: ElfLayout w
                 l2 = l1 & flip (foldl impl) (s^.elfSegmentData)
                 -- Get bytes at start of elf
-                seg_offset = elfLayoutSize l1
-                seg_size   = elfLayoutSize l2 - seg_offset
+                seg_offset = l1^.elfOutputSize
+                seg_size   = l2^.elfOutputSize - seg_offset
                 -- Add segment to appropriate
                 l3 :: ElfLayout w
                 l3 | isPreloadPhdr (elfSegmentType s)
@@ -435,14 +591,60 @@ elfLayout' e = final
                    | otherwise
                    = l2 & phdrs        %~ (Seq.|> (s, (seg_offset, seg_size)))
         impl l ElfDataSectionHeaders =
-             l & elfOutput <>~ mconcat (F.toList (final^.shdrs))
-               & shdrTableOffset .~ elfLayoutSize l
-        impl l ElfDataSectionNameTable = impl l' (ElfDataSection s)
+             l & elfOutputSize   +~ shdr_size
+               & shdrTableOffset .~ l^.elfOutputSize
+          where shdr_size = fromIntegral shdr_cnt * fromIntegral (sizeOfShdr c)
+        impl l ElfDataSectionNameTable =
+            addSectionToLayout d name_map l' s
           where l' = l & shstrndx .~ shnum l
                 s  = elfNameTableSection name_data
         impl l (ElfDataGOT g) = addSectionToLayout d name_map l (elfGotSection g)
         impl l (ElfDataSection s) = addSectionToLayout d name_map l s
-        impl l (ElfDataRaw b) = l & elfOutput <>~ U.fromByteString b
+        impl l (ElfDataRaw b) = l & elfOutputSize +~ fromIntegral (B.length b)
+
+loadableSectionHeaders :: Elf w -> Bool
+loadableSectionHeaders e = any containsLoadableSectionHeaders (e^.elfFileData)
+  where containsLoadableSectionHeaders :: ElfDataRegion w -> Bool
+        containsLoadableSectionHeaders (ElfDataSegment s)
+          | elfSegmentType s == PT_LOAD =
+              any containsSectionHeaders (s^.elfSegmentData)
+        containsLoadableSectionHeaders _ = False
+
+        containsSectionHeaders :: ElfDataRegion w -> Bool
+        containsSectionHeaders ElfDataSectionHeaders = True
+        containsSectionHeaders (ElfDataSegment s) =
+          any containsSectionHeaders (s^.elfSegmentData)
+        containsSectionHeaders _ = False
+
+-- | This provides the user with the ability to insert a bytestring or section into
+-- the end of a loadable section safifying a predicate.
+appendToLoadableSegment :: forall m w
+                         . (Applicative m, Bits w, Integral w)
+                        => (ElfSegment w -> Bool)
+                        -> (w -> ElfSegment w -> m (ElfDataRegion w))
+                        -> Elf w
+                        -> m (Maybe (Elf w))
+appendToLoadableSegment isSegment f e = go Seq.empty 0 (e^.elfFileData)
+  where l = elfLayout e
+        -- This find sthe appropriate segment to insert a
+        go :: Seq.Seq (ElfDataRegion w) -> w -> Seq.Seq (ElfDataRegion w) -> m (Maybe (Elf w))
+        go prev o s =
+          case Seq.viewl s of
+            Seq.EmptyL -> pure Nothing
+            ElfDataSegment seg Seq.:< r
+                | elfSegmentType seg == PT_LOAD && isSegment seg ->
+                  resolve <$> f o seg
+              where resolve (ElfDataSection sec)
+                       | loadableSectionHeaders e =
+                         error "Cannot create section when section headers are loadable."
+                       | otherwise = addNew (ElfDataSection sec)
+                    resolve (ElfDataRaw b) = addNew (ElfDataRaw b)
+                    resolve _ = error "Can only append a new section or raw bytestring."
+
+                    addNew new = Just $ e & elfFileData .~ prev Seq.>< (seg' Seq.<| r)
+                      where seg' = ElfDataSegment $ seg & elfSegmentData %~ (Seq.|> new)
+            h Seq.:< r -> do
+              go (prev Seq.|> h) (offsetAfterRegion l o h) r
 
 ------------------------------------------------------------------------
 -- Elf Width instances
@@ -450,14 +652,14 @@ elfLayout' e = final
 elfMagic :: B.ByteString
 elfMagic = B.fromString "\DELELF"
 
-elfIdentBuilder :: ElfWidth w  => Elf w -> Builder
+elfIdentBuilder :: ElfHeader w -> Builder
 elfIdentBuilder e =
   mconcat [ U.fromByteString elfMagic
-          , U.singleton (fromElfClass (elfClass e))
-          , U.singleton (fromElfData (elfData e))
-          , U.singleton (elfVersion e)
-          , U.singleton (fromElfOSABI (elfOSABI e))
-          , U.singleton (fromIntegral (elfABIVersion e))
+          , U.singleton (fromElfClass (headerClass e))
+          , U.singleton (fromElfData  (headerData e))
+          , U.singleton expectedElfVersion
+          , U.singleton (fromElfOSABI (headerOSABI e))
+          , U.singleton (fromIntegral (headerABIVersion e))
           , mconcat (replicate 7 (U.singleton 0))
           ]
 
@@ -479,40 +681,52 @@ sizeOfShdr32 = sizeOfRecord shdr32Fields
 sizeOfShdr64 :: Word16
 sizeOfShdr64 = sizeOfRecord shdr64Fields
 
+sizeOfEhdr :: ElfClass w -> Word16
+sizeOfEhdr ELFCLASS32 = sizeOfEhdr32
+sizeOfEhdr ELFCLASS64 = sizeOfEhdr64
+
+sizeOfPhdr :: ElfClass w -> Word16
+sizeOfPhdr ELFCLASS32 = sizeOfPhdr32
+sizeOfPhdr ELFCLASS64 = sizeOfPhdr64
+
+sizeOfShdr :: ElfClass w -> Word16
+sizeOfShdr ELFCLASS32 = sizeOfShdr32
+sizeOfShdr ELFCLASS64 = sizeOfShdr64
+
 ehdr32Fields :: ElfRecord (Ehdr Word32)
 ehdr32Fields =
-  [ ("e_ident",     EFBS 16  (\(e,_) -> elfIdentBuilder e))
-  , ("e_type",      EFWord16 (\(e,_) -> fromElfType    $ elfType e))
-  , ("e_machine",   EFWord16 (\(e,_) -> fromElfMachine $ elfMachine e))
-  , ("e_version",   EFWord32 (\(e,_) -> fromIntegral   $ elfVersion e))
-  , ("e_entry",     EFWord32 (\(e,_) -> elfEntry e))
-  , ("e_phoff",     EFWord32 (view (_2.phdrTableOffset)))
-  , ("e_shoff",     EFWord32 (view (_2.shdrTableOffset)))
-  , ("e_flags",     EFWord32 (\(e,_) -> elfFlags e))
-  , ("e_ehsize",    EFWord16 (\(_,_) -> sizeOfEhdr32))
-  , ("e_phentsize", EFWord16 (\(_,_) -> sizeOfPhdr32))
-  , ("e_phnum",     EFWord16 (\(_,l) -> phnum l))
-  , ("e_shentsize", EFWord16 (\(_,_) -> sizeOfShdr32))
-  , ("e_shnum",     EFWord16 (\(_,l) -> shnum l))
-  , ("e_shstrndx",  EFWord16 (view $ _2.shstrndx))
+  [ ("e_ident",     EFBS 16  $ \(e,_) -> elfIdentBuilder e)
+  , ("e_type",      EFWord16 $ \(e,_) -> fromElfType    $ headerType e)
+  , ("e_machine",   EFWord16 $ \(e,_) -> fromElfMachine $ headerMachine e)
+  , ("e_version",   EFWord32 $ \_     -> fromIntegral expectedElfVersion)
+  , ("e_entry",     EFWord32 $ \(e,_) -> headerEntry e)
+  , ("e_phoff",     EFWord32 $ \(_,l) -> l^.phdrTableOffset)
+  , ("e_shoff",     EFWord32 $ \(_,l) -> l^.shdrTableOffset)
+  , ("e_flags",     EFWord32 $ \(e,_) -> headerFlags e)
+  , ("e_ehsize",    EFWord16 $ \_     -> sizeOfEhdr32)
+  , ("e_phentsize", EFWord16 $ \_     -> sizeOfPhdr32)
+  , ("e_phnum",     EFWord16 $ \(_,l) -> phnum l)
+  , ("e_shentsize", EFWord16 $ \_     -> sizeOfShdr32)
+  , ("e_shnum",     EFWord16 $ \(_,l) -> shnum l)
+  , ("e_shstrndx",  EFWord16 $ \(_,l) -> l^.shstrndx)
   ]
 
 ehdr64Fields :: ElfRecord (Ehdr Word64)
 ehdr64Fields =
-  [ ("e_ident",     EFBS 16  $ elfIdentBuilder . fst)
-  , ("e_type",      EFWord16 $ fromElfType . elfType . fst)
-  , ("e_machine",   EFWord16 $ fromElfMachine . elfMachine . fst)
-  , ("e_version",   EFWord32 $ fromIntegral . elfVersion . fst)
-  , ("e_entry",     EFWord64 $ view $ _1.to elfEntry)
-  , ("e_phoff",     EFWord64 $ view $ _2.phdrTableOffset)
-  , ("e_shoff",     EFWord64 $ view $ _2.shdrTableOffset)
-  , ("e_flags",     EFWord32 $ view $ _1.to elfFlags)
-  , ("e_ehsize",    EFWord16 $ const sizeOfEhdr64)
-  , ("e_phentsize", EFWord16 $ const sizeOfPhdr64)
-  , ("e_phnum",     EFWord16 $ view $ _2.to phnum)
-  , ("e_shentsize", EFWord16 $ const sizeOfShdr64)
-  , ("e_shnum",     EFWord16 $ view $ _2.to shnum)
-  , ("e_shstrndx",  EFWord16 $ view $ _2.shstrndx)
+  [ ("e_ident",     EFBS 16  $ \(e,_) -> elfIdentBuilder e)
+  , ("e_type",      EFWord16 $ \(e,_) -> fromElfType $ headerType e)
+  , ("e_machine",   EFWord16 $ \(e,_) -> fromElfMachine $ headerMachine e)
+  , ("e_version",   EFWord32 $ \_     -> fromIntegral expectedElfVersion)
+  , ("e_entry",     EFWord64 $ \(e,_) -> headerEntry e)
+  , ("e_phoff",     EFWord64 $ \(_,l) -> l^.phdrTableOffset)
+  , ("e_shoff",     EFWord64 $ \(_,l) -> l^.shdrTableOffset)
+  , ("e_flags",     EFWord32 $ \(e,_) -> headerFlags e)
+  , ("e_ehsize",    EFWord16 $ \_     -> sizeOfEhdr64)
+  , ("e_phentsize", EFWord16 $ \_     -> sizeOfPhdr64)
+  , ("e_phnum",     EFWord16 $ \(_,l) -> phnum l)
+  , ("e_shentsize", EFWord16 $ \_     -> sizeOfShdr64)
+  , ("e_shnum",     EFWord16 $ \(_,l) -> shnum l)
+  , ("e_shstrndx",  EFWord16 $ \(_,l) -> l^.shstrndx)
   ]
 
 phdr32Fields :: ElfRecord (Phdr Word32)
@@ -582,6 +796,13 @@ instance ElfWidth Word64 where
 elfClassElfWidthInstance :: ElfClass w -> (ElfWidth w => a) -> a
 elfClassElfWidthInstance ELFCLASS32 a = a
 elfClassElfWidthInstance ELFCLASS64 a = a
+
+-- | Return the bytes in the Elf file as a lazy bytestring.
+elfLayoutBytes :: ElfLayout w -> L.ByteString
+elfLayoutBytes l = elfClassElfWidthInstance (elfLayoutClass l) $
+    Bld.toLazyByteString $ elfLayoutBytes2 l 0 regions
+  where regions = F.toList (elfLayoutRegions l)
+
 
 ------------------------------------------------------------------------
 -- elfLayout

@@ -112,7 +112,7 @@ type GetPhdrFn w = Get (ElfSegment w, (Range w))
 
 getPhdr32 :: ElfData -> GetPhdrFn Word32
 getPhdr32 d = do
-  p_type   <- toElfSegmentType  <$> getWord32 d
+  p_type   <- ElfSegmentType  <$> getWord32 d
   p_offset <- getWord32 d
   p_vaddr  <- getWord32 d
   p_paddr  <- getWord32 d
@@ -133,7 +133,7 @@ getPhdr32 d = do
 
 getPhdr64 :: ElfData -> GetPhdrFn Word64
 getPhdr64 d = do
-  p_type   <- toElfSegmentType  <$> getWord32 d
+  p_type   <- ElfSegmentType  <$> getWord32 d
   p_flags  <- ElfSegmentFlags <$> getWord32 d
   p_offset <- getWord64 d
   p_vaddr  <- getWord64 d
@@ -219,16 +219,6 @@ getShdr64 er file name_fn = do
 
 ------------------------------------------------------------------------
 -- ElfHeaderInfo
-
-data ElfHeader w = ElfHeader { headerData       :: !ElfData
-                             , headerClass      :: !(ElfClass w)
-                             , headerOSABI      :: !ElfOSABI
-                             , headerABIVersion :: !Word8
-                             , headerType :: !ElfType
-                             , headerMachine :: !ElfMachine
-                             , headerEntry   :: !w
-                             , headerFlags   :: !Word32
-                             }
 
 -- | Contains information needed to parse elf files.
 data ElfHeaderInfo w = ElfHeaderInfo {
@@ -478,6 +468,8 @@ parseElfRegions epi segments = final
         sizeOf = regionSize epi (snd nameRange)
 
         -- Define table with regions for sections.
+        -- TODO: Modify this so that it correctly recognizes the GOT section
+        -- and generate the appropriate type.
         dataSection = over _2 ElfDataSection
 
         -- Define initial region list without segments.
@@ -490,16 +482,12 @@ parseElfRegions epi segments = final
                 -- Strip out relro segment (stored in `elfRelroRange')
               $ filter (not . isRelroPhdr) segments
 
-expectedElfVersion :: Word8
-expectedElfVersion = 1
-
 getElf :: (Bits w, Integral w, Show w)
        => ElfHeaderInfo w
        -> Elf w
 getElf  epi =
     Elf { elfData       = headerData       (header epi)
         , elfClass      = headerClass      (header epi)
-        , elfVersion    = expectedElfVersion
         , elfOSABI      = headerOSABI      (header epi)
         , elfABIVersion = headerABIVersion (header epi)
         , elfType       = headerType       (header epi)
