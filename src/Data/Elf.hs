@@ -22,7 +22,10 @@ module Data.Elf ( -- * Top-level definitions
                 , removeSectionByName
                 , updateSections
                 , elfInterpreter
-                , appendToLoadableSegment
+                  -- * Modifications that preserve memory layout.
+                , loadableSectionHeaders
+                , appendSectionToLoadableSegment
+                , appendDataToLoadableSegment
                   -- ** Top-level Elf information
                 , ElfClass(..)
                 , ElfData(..)
