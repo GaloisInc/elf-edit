@@ -34,6 +34,7 @@ library
   exposed-modules:
     Data.Elf
   other-modules:
+    Data.Elf.DynamicArrayTag
     Data.Elf.Get
     Data.Elf.Layout
     Data.Elf.Lexer

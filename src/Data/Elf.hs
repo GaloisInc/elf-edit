@@ -8,7 +8,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -143,11 +142,11 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfIntType
                   -- * Dynamic symbol table and relocations
                 , DynamicSection(..)
+                , module Data.Elf.DynamicArrayTag
                 , VersionDef(..)
                 , VersionReq(..)
                 , VersionReqAux
                 , DynamicMap
-                , ElfDynamicArrayTag
                 , dynamicEntries
                   -- * Common definitions
                 , Range
@@ -171,10 +170,10 @@ import           Data.Maybe
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
+import           Data.Elf.DynamicArrayTag
 import           Data.Elf.Get
 import           Data.Elf.Layout
 import           Data.Elf.Relocations
-import           Data.Elf.TH
 import           Data.Elf.Types
 
 ------------------------------------------------------------------------
@@ -357,7 +356,7 @@ ppSymbolTableEntry i e =
   , ppHex (steValue e)
   , show (steSize e)
   , ppElfSymbolType (steType e)
-  , ppElfSymbolBinding (steBind e)
+  , show (steBind e)
   , show (steVisibility e)
     -- Ndx
   , show (steIndex e)
@@ -579,89 +578,6 @@ instance IsRelocationType X86_64_RelocationType where
 ------------------------------------------------------------------------
 -- Dynamic information
 
-[enum|
- ElfDynamicArrayTag :: Word32
- DT_NULL          0
- DT_NEEDED        1
- DT_PLTRELSZ      2
- DT_PLTGOT        3
- DT_HASH          4
- DT_STRTAB        5
- DT_SYMTAB        6
- DT_RELA          7
- DT_RELASZ        8
- DT_RELAENT       9
- DT_STRSZ        10
- DT_SYMENT       11
- DT_INIT         12
- DT_FINI         13
- DT_SONAME       14
- DT_RPATH        15
- DT_SYMBOLIC     16
- DT_REL          17
- DT_RELSZ        18
- DT_RELENT       19
- DT_PLTREL       20
- DT_DEBUG        21
- DT_TEXTREL      22
- DT_JMPREL       23
- DT_BIND_NOW     24
- DT_INIT_ARRAY   25
- DT_FINI_ARRAY   26
- DT_INIT_ARRAYSZ    27
- DT_FINI_ARRAYSZ    28
- DT_RUNPATH         29 -- Library search path
- DT_FLAGS           30 -- Flags for the object being loaded
- DT_PREINIT_ARRAY   32 -- Start of encoded range (also DT_PREINIT_ARRAY)
- DT_PREINIT_ARRAYSZ 33 -- Size in bytes of DT_PREINIT_ARRAY
-
- -- DT_LOOS   0x60000000
- -- DT_VALRNGLO    0x6ffffd00
- DT_GNU_PRELINKED  0x6ffffdf5 -- Prelinking timestamp
- DT_GNU_CONFLICTSZ 0x6ffffdf6 -- Size of conflict section.
- DT_GNU_LIBLISTSZ  0x6ffffdf7 -- Size of lbirary list
- DT_CHECKSUM       0x6ffffdf8
- DT_PLTPADSZ       0x6ffffdf9
- DT_MOVEENT        0x6ffffdfa
- DT_MOVESZ         0x6ffffdfb
- DT_FEATURE_1      0x6ffffdfc -- Feature selection (DTF_*).
- DT_POSFLAG_1      0x6ffffdfd -- Flags for DT_* entries, effecting the following DT_* entry.
- DT_SYMINSZ        0x6ffffdfe -- Size of syminfo table (in bytes)
- DT_SYMINENT       0x6ffffdff -- Entry size of syminfo
- -- DT_VALRNGHI    0x6ffffdff
-
-
--- DT_* entries between DT_ADDRRNGHI & DT_ADDRRNGLO use the
--- d_ptr field
- -- DT_ADDRRNGLO   0x6ffffe00
- DT_GNU_HASH       0x6ffffef5 -- GNU-style hash table.
- DT_TLSDESC_PLT	   0x6ffffef6
- DT_TLSDESC_GOT	   0x6ffffef7
- DT_GNU_CONFLICT   0x6ffffef8 -- Start of conflict section
- DT_GNU_LIBLIST	   0x6ffffef9 -- Library list
- DT_CONFIG	   0x6ffffefa -- Configuration information
- DT_DEPAUDIT       0x6ffffefb -- Dependency auditing
- DT_AUDIT          0x6ffffefc -- Object auditing
- DT_PLTPAD         0x6ffffefd -- PLT padding
- DT_MOVETAB        0x6ffffefe -- Move table
- DT_SYMINFO        0x6ffffeff -- Syminfo table
-  -- DT_ADDRRNGHI  0x6ffffeff
-
- DT_VERSYM         0x6ffffff0
- DT_RELACOUNT      0x6ffffff9
- DT_RELCOUNT       0x6ffffffa
- DT_FLAGS_1        0x6ffffffb -- State flags
- DT_VERDEF         0x6ffffffc -- Address of version definition.
- DT_VERDEFNUM      0x6ffffffd
- DT_VERNEED        0x6ffffffe
- DT_VERNEEDNUM     0x6fffffff -- Number of needed versions.
- -- DT_HIOS        0x6FFFFFFF
-
- -- DT_LOPROC 0x70000000
- -- DT_HIPROC 0x7FFFFFFF
- DT_Other         _
-|]
-
 -- | Dynamic array entry
 data Dynamic w
    = Dynamic { dynamicTag :: !ElfDynamicArrayTag
@@ -674,7 +590,7 @@ getDynamic :: forall w . RelaWidth w -> ElfData -> Get (Dynamic (ElfWordType w))
 getDynamic w d = elfWordInstances w $ do
   tag <- getRelaWord w d :: Get (ElfWordType w)
   v   <- getRelaWord w d
-  return $! Dynamic (toElfDynamicArrayTag (fromIntegral tag)) v
+  return $! Dynamic (ElfDynamicArrayTag (fromIntegral tag)) v
 
 dynamicList :: RelaWidth w -> ElfData -> Get [Dynamic (ElfWordType w)]
 dynamicList w d = go []
@@ -1125,31 +1041,43 @@ dynamicEntries e = elfClassIntegralInstance (elfClass e) $ do
 ------------------------------------------------------------------------
 -- Elf symbol information
 
-[enum|
-  ElfSymbolBinding :: Word8
-  STB_LOCAL 0 -- Symbol not visible outside obj
-  STB_GLOBAL 1 -- Symbol visible outside obj
-  STB_WEAK 2 -- Like globals, lower precedence
-  STB_GNU_UNIQUE 10 --Symbol is unique in namespace
-  STB_Other w
-|]
+-- | Symbol bi nding type
+newtype ElfSymbolBinding = ElfSymbolBinding { fromElfSymbolBinding :: Word8 }
+  deriving (Eq, Ord)
 
-ppElfSymbolBinding :: ElfSymbolBinding -> String
-ppElfSymbolBinding b =
-  case b of
-    STB_LOCAL -> "LOCAL"
-    STB_GLOBAL -> "GLOBAL"
-    STB_WEAK   -> "WEAK"
-    STB_GNU_UNIQUE -> "UNIQUE"
-    STB_Other w | 11 <= w && w <= 12 -> "<OS specific>: " ++ show w
-                | 13 <= w && w <= 15 -> "<processor specific>: " ++ show w
-                | otherwise -> "<unknown>: " ++ show w
+pattern STB_LOCAL  = ElfSymbolBinding  0
+pattern STB_GLOBAL = ElfSymbolBinding  1
+pattern STB_WEAK   = ElfSymbolBinding  2
+pattern STB_NUM    = ElfSymbolBinding  3
+
+-- | Lower bound for OS specific symbol bindings.
+pattern STB_LOOS   = ElfSymbolBinding 10
+-- | Upper bound for OS specific symbol bindings.
+pattern STB_HIOS   = ElfSymbolBinding 12
+-- | GNU-specific override that makes symbol unique even with local
+-- dynamic loading.
+pattern STB_GNU_UNIQUE = ElfSymbolBinding 10
+
+pattern STB_LOPROC = ElfSymbolBinding 13
+pattern STB_HIPROC = ElfSymbolBinding 15
+
+
+instance Show ElfSymbolBinding where
+  show STB_LOCAL  = "STB_LOCAL"
+  show STB_GLOBAL = "STB_GLOBAL"
+  show STB_WEAK   = "STB_WEAK"
+  show STB_NUM    = "STB_NUM"
+  show STB_GNU_UNIQUE = "STB_GNU_UNIQUE"
+  show b | STB_LOOS   <= b && b <= STB_HIOS   = "<OS specific>: " ++ show w
+         | STB_LOPROC <= b && b <= STB_HIPROC = "<processor specific>: " ++ show w
+         | otherwise = "<unknown>: " ++ show w
+   where w = fromElfSymbolBinding b
 
 infoToTypeAndBind :: Word8 -> (ElfSymbolType,ElfSymbolBinding)
 infoToTypeAndBind i =
   let tp = ElfSymbolType (i .&. 0x0F)
       b = (i `shiftR` 4) .&. 0xF
-   in (tp, toElfSymbolBinding b)
+   in (tp, ElfSymbolBinding b)
 
 newtype ElfSymbolType = ElfSymbolType Word8
   deriving (Eq, Ord)
