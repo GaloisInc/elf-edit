@@ -56,9 +56,18 @@ module Data.Elf ( -- * Top-level definitions
                 , shf_none, shf_write, shf_alloc, shf_execinstr
                   -- * Segment operations.
                 , ElfSegment(..)
-                , elfSegmentData
                   -- ** Elf segment type
                 , ElfSegmentType(..)
+                , pattern PT_NULL
+                , pattern PT_LOAD
+                , pattern PT_DYNAMIC
+                , pattern PT_INTERP
+                , pattern PT_NOTE
+                , pattern PT_SHLIB
+                , pattern PT_PHDR
+                , pattern PT_GNU_EH_FRAME
+                , pattern PT_GNU_STACK
+                , pattern PT_GNU_RELRO
                   -- ** Elf segment flags
                 , ElfSegmentFlags
                 , pf_none, pf_x, pf_w, pf_r
@@ -213,7 +222,7 @@ removeSectionByName nm = over updateSections fn
 -- | List of segments in the file.
 elfSegments :: Elf w -> [ElfSegment w]
 elfSegments e = concatMap impl (e^.elfFileData)
-  where impl (ElfDataSegment s) = s : concatMap impl (F.toList (s^.elfSegmentData))
+  where impl (ElfDataSegment s) = s : concatMap impl (F.toList (elfSegmentData s))
         impl _ = []
 
 -- | Return true if this bytestring has the 4 bytes "\DELELF" at the start.
@@ -1244,7 +1253,7 @@ elfInterpreter e =
   case filter (\s -> elfSegmentType s == PT_INTERP) (elfSegments e) of
     [] -> return Nothing
     seg:_ ->
-      case F.toList (seg^.elfSegmentData) of
+      case F.toList (elfSegmentData seg) of
         [ElfDataSection s] -> return (Just (B.toString (elfSectionData s)))
         _ -> fail "Could not parse elf section."
 

@@ -127,7 +127,7 @@ getPhdr32 d = do
           , elfSegmentPhysAddr  = p_paddr
           , elfSegmentAlign     = p_align
           , elfSegmentMemSize   = p_memsz
-          , _elfSegmentData     = Seq.empty
+          , elfSegmentData     = Seq.empty
           }
   return $! (s, (p_offset, p_filesz))
 
@@ -148,7 +148,7 @@ getPhdr64 d = do
          , elfSegmentPhysAddr = p_paddr
          , elfSegmentAlign    = p_align
          , elfSegmentMemSize  = p_memsz
-         , _elfSegmentData    = Seq.empty
+         , elfSegmentData    = Seq.empty
          }
   return $! (s, (p_offset, p_filesz))
 
@@ -255,7 +255,7 @@ regionSize :: Integral w
 regionSize epi nameSize = sizeOf
   where sizeOf ElfDataElfHeader        = fromIntegral $ ehdrSize epi
         sizeOf ElfDataSegmentHeaders   = tableSize $ phdrTable epi
-        sizeOf (ElfDataSegment s)      = sum $ sizeOf <$> (s^.elfSegmentData)
+        sizeOf (ElfDataSegment s)      = sum $ sizeOf <$> elfSegmentData s
         sizeOf ElfDataSectionHeaders   = tableSize $ shdrTable epi
         sizeOf ElfDataSectionNameTable = nameSize
         sizeOf (ElfDataGOT g)          = elfGotSize g
@@ -331,7 +331,8 @@ insertAtOffset sizeOf (o,c) fn r0 =
       | o + c <= sz
       , ElfDataSegment s <- p -> do
         -- New region ends before p ends and p is a segment.
-        s' <- s & elfSegmentData (insertAtOffset sizeOf (o,c) fn)
+        seg_data' <- insertAtOffset sizeOf (o,c) fn (elfSegmentData s)
+        let s' = s { elfSegmentData = seg_data' }
         pure $! ElfDataSegment s' Seq.<| r
         -- Insert into current region is offset is 0.
       | o == 0 ->
@@ -395,7 +396,7 @@ insertSegment sizeOf (d,rng) segs =
                   -- ^ Segments after insertion point.
                -> Seq.Seq (ElfDataRegion w)
         -- Insert segment if there are 0 bytes left to process.
-        gather 0 l r = ElfDataSegment (d & elfSegmentData .~ l) Seq.<| r
+        gather 0 l r = ElfDataSegment (d { elfSegmentData = l}) Seq.<| r
         -- Collect p if it is contained within segment we are inserting.
         gather cnt l r0 =
           case Seq.viewl r0 of
@@ -407,7 +408,7 @@ insertSegment sizeOf (d,rng) segs =
                   let pref = B.take (fromIntegral cnt) b
                       post = B.drop (fromIntegral cnt) b
                       newData = l Seq.>< insertRawRegion pref Seq.empty
-                      d' = d & elfSegmentData .~ newData
+                      d' = d { elfSegmentData = newData }
                    in ElfDataSegment d' Seq.<| insertRawRegion post r
               | otherwise ->
                 error $ "insertSegment: Inserted segments overlaps a previous segment.\n"

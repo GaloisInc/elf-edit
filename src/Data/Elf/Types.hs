@@ -47,7 +47,6 @@ module Data.Elf.Types
   , elfGotSize
     -- * ElfSegment
   , ElfSegment(..)
-  , elfSegmentData
   , ppSegment
     -- ** Elf segment type
   , ElfSegmentType(..)
@@ -58,9 +57,15 @@ module Data.Elf.Types
   , pattern PT_NOTE
   , pattern PT_SHLIB
   , pattern PT_PHDR
+  , pattern PT_TLS
+  , pattern PT_NUM
+  , pattern PT_LOOS
   , pattern PT_GNU_EH_FRAME
   , pattern PT_GNU_STACK
   , pattern PT_GNU_RELRO
+  , pattern PT_HIOS
+  , pattern PT_LOPROC
+  , pattern PT_HIPROC
     -- ** Elf segment flags
   , ElfSegmentFlags(..)
   , pf_none, pf_x, pf_w, pf_r
@@ -428,9 +433,9 @@ newtype ElfSegmentType = ElfSegmentType { fromElfSegmentType :: Word32 }
 
 -- | Unused entry
 pattern PT_NULL    = ElfSegmentType 0
--- | Loadable segment
+-- | Loadable program segment
 pattern PT_LOAD    = ElfSegmentType 1
--- | Dynamic linking tables
+-- | Dynamic linking information
 pattern PT_DYNAMIC = ElfSegmentType 2
 -- | Program interpreter path name
 pattern PT_INTERP  = ElfSegmentType 3
@@ -440,36 +445,56 @@ pattern PT_NOTE    = ElfSegmentType 4
 pattern PT_SHLIB   = ElfSegmentType 5
 -- | Program header table
 pattern PT_PHDR    = ElfSegmentType 6
--- | Exception handling information
+-- | A thread local storage segment
+--
+-- See 'https://www.akkadia.org/drepper/tls.pdf'
+pattern PT_TLS     = ElfSegmentType 7
+-- | A number of defined types.
+pattern PT_NUM     = ElfSegmentType 8
+
+-- | Start of OS-specific
+pattern PT_LOOS    = ElfSegmentType 0x60000000
+
+-- | The GCC '.eh_frame_hdr' segment
 pattern PT_GNU_EH_FRAME = ElfSegmentType 0x6474e550
 -- | Indicates if stack should be executable.
 pattern PT_GNU_STACK    = ElfSegmentType 0x6474e551
 -- | GNU segment with relocation that may be read-only.
 pattern PT_GNU_RELRO    = ElfSegmentType 0x6474e552
 
+-- | End of OS-specific
+pattern PT_HIOS    = ElfSegmentType 0x6fffffff
+
+-- | Start of OS-specific
+pattern PT_LOPROC  = ElfSegmentType 0x70000000
+-- | End of OS-specific
+pattern PT_HIPROC  = ElfSegmentType 0x7fffffff
+
 elfSegmentTypeNameMap :: Map.Map ElfSegmentType String
 elfSegmentTypeNameMap = Map.fromList $
-  [ (,) PT_NULL         "PT_NULL"
-  , (,) PT_LOAD         "PT_LOAD"
-  , (,) PT_DYNAMIC      "PT_DYNAMIC"
-  , (,) PT_INTERP       "PT_INTERP"
-  , (,) PT_NOTE         "PT_NOTE"
-  , (,) PT_SHLIB        "PT_SHLIB"
-  , (,) PT_PHDR         "PT_PHDR"
-  , (,) PT_GNU_EH_FRAME "PT_GNU_EH_FRAME"
-  , (,) PT_GNU_STACK    "PT_GNU_STACK"
-  , (,) PT_GNU_RELRO    "PT_GNU_RELRO"
+  [ (,) PT_NULL         "NULL"
+  , (,) PT_LOAD         "LOAD"
+  , (,) PT_DYNAMIC      "DYNAMIC"
+  , (,) PT_INTERP       "INTERP"
+  , (,) PT_NOTE         "NOTE"
+  , (,) PT_SHLIB        "SHLIB"
+  , (,) PT_PHDR         "PHDR"
+  , (,) PT_TLS          "TLS"
+  , (,) PT_GNU_EH_FRAME "GNU_EH_FRAME"
+  , (,) PT_GNU_STACK    "GNU_STACK"
+  , (,) PT_GNU_RELRO    "GNU_RELRO"
   ]
 
 instance Show ElfSegmentType where
   show tp =
     case Map.lookup tp elfSegmentTypeNameMap of
-      Just s -> s
+      Just s -> "PT_" ++ s
       Nothing -> "ElfSegmentType " ++ show (fromElfSegmentType tp)
 
 ------------------------------------------------------------------------
 -- ElfSegmentFlags
 
+-- | The flags (permission bits on an elf segment.
 newtype ElfSegmentFlags  = ElfSegmentFlags { fromElfSegmentFlags :: Word32 }
   deriving (Eq, Num, Bits)
 
@@ -479,19 +504,19 @@ instance Show ElfSegmentFlags where
 
 -- | No permissions
 pf_none :: ElfSegmentFlags
-pf_none = 0
+pf_none = ElfSegmentFlags 0
 
 -- | Execute permission
 pf_x :: ElfSegmentFlags
-pf_x = 1
+pf_x = ElfSegmentFlags 1
 
 -- | Write permission
 pf_w :: ElfSegmentFlags
-pf_w = 2
+pf_w = ElfSegmentFlags 2
 
 -- | Read permission
 pf_r :: ElfSegmentFlags
-pf_r = 4
+pf_r = ElfSegmentFlags 4
 
 ------------------------------------------------------------------------
 -- ElfSegment and ElfDataRegion
@@ -522,7 +547,7 @@ data ElfSegment w = ElfSegment
     -- then 'o mod n = a mod n'
   , elfSegmentMemSize   :: !w
     -- ^ Size in memory (may be larger then segment data)
-  , _elfSegmentData     :: !(Seq.Seq (ElfDataRegion w))
+  , elfSegmentData     :: !(Seq.Seq (ElfDataRegion w))
     -- ^ Regions contained in segment.
   }
 
@@ -556,10 +581,6 @@ data ElfDataRegion w
      -- ^ Identifies an uninterpreted array of bytes.
   deriving Show
 
--- | Returns the sequence of data regions contained in segment.
-elfSegmentData :: Simple Lens (ElfSegment w) (Seq.Seq (ElfDataRegion w))
-elfSegmentData = lens _elfSegmentData (\s v -> s { _elfSegmentData = v })
-
 ppSegment :: (Bits w, Integral w, Show w) => ElfSegment w -> Doc
 ppSegment s =
     text "type: " <+> ppShow (elfSegmentType s) <$$>
@@ -569,7 +590,7 @@ ppSegment s =
     text "align:" <+> ppShow (elfSegmentAlign s) <$$>
     text "msize:" <+> ppShow (elfSegmentMemSize s) <$$>
     text "data:"  <$$>
-    indent 2 (ppShow (F.toList (_elfSegmentData s)))
+    indent 2 (ppShow (F.toList (elfSegmentData s)))
 
 instance (Bits w, Integral w, Show w) => Show (ElfSegment w) where
   show s = show (ppSegment s)
