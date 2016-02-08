@@ -22,10 +22,6 @@ module Data.Elf ( -- * Top-level definitions
                 , removeSectionByName
                 , updateSections
                 , elfInterpreter
-                  -- * Modifications that preserve memory layout.
-                , loadableSectionHeaders
-                , appendSectionToLoadableSegment
-                , appendDataToLoadableSegment
                   -- ** Top-level Elf information
                 , ElfClass(..)
                 , ElfData(..)
@@ -69,6 +65,9 @@ module Data.Elf ( -- * Top-level definitions
                   -- ** Getting data from Elf segments
                 , RenderedElfSegment
                 , renderedElfSegments
+                  -- ** Modifications that preserve memory layout.
+                , ElfSegmentUpdater(..)
+                , updateElfLoadableSegment
                   -- * Symbol Table Entries
                 , ElfSymbolTableEntry(..)
                 , ppSymbolTableEntries

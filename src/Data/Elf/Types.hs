@@ -163,7 +163,7 @@ toSomeElfClass 1 = Just (SomeElfClass ELFCLASS32)
 toSomeElfClass 2 = Just (SomeElfClass ELFCLASS64)
 toSomeElfClass _ = Nothing
 
-elfClassIntegralInstance :: ElfClass w -> (Integral w => a) -> a
+elfClassIntegralInstance :: ElfClass w -> ((Bits w, Integral w) => a) -> a
 elfClassIntegralInstance ELFCLASS32 a = a
 elfClassIntegralInstance ELFCLASS64 a = a
 
@@ -387,7 +387,8 @@ data ElfSection w = ElfSection
       -- ^ Identifies the attributes of the section.
     , elfSectionAddr      :: !w
       -- ^ The virtual address of the beginning of the section in memory.
-      -- 0 for sections that are not loaded into target memory.
+      --
+      -- This should be 0 for sections that are not loaded into target memory.
     , elfSectionSize      :: !w
       -- ^ The size of the section. Except for SHT_NOBITS sections, this is the
       -- size of elfSectionData.

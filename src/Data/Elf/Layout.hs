@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Data.Elf.Layout
   ( -- * ElfLayout
@@ -20,9 +21,8 @@ module Data.Elf.Layout
   , sizeOfShdr32
   , ElfWidth
     -- * Operations that require layout information
-  , loadableSectionHeaders
-  , appendSectionToLoadableSegment
-  , appendDataToLoadableSegment
+  , ElfSegmentUpdater(..)
+  , updateElfLoadableSegment
   ) where
 
 import           Control.Lens hiding (enum)
@@ -42,7 +42,6 @@ import           Data.Word
 import           Data.Elf.SizedBuilder (Builder)
 import qualified Data.Elf.SizedBuilder as U
 import           Data.Elf.Types
-
 
 ------------------------------------------------------------------------
 -- Utilities
@@ -620,65 +619,6 @@ loadableSectionHeaders e = any containsLoadableSectionHeaders (e^.elfFileData)
           any containsSectionHeaders (s^.elfSegmentData)
         containsSectionHeaders _ = False
 
--- | This calls a user provided function  to the first loadable section
--- satisfying the given predicate.
---
--- This function is designed to preserve the in-memory representation
--- of all currently loaded data, and so requires that the section headers
--- are not loaded at runtime.
-appendSectionToLoadableSegment :: forall m w
-                               . (Applicative m, Bits w, Integral w)
-                               => (ElfSegment w -> Bool)
-                               -> (w -> ElfSegment w -> m (ElfSection w))
-                                  -- ^ This function takes the offset and segment,
-                                  -- and returns the new section to append.
-                               -> Elf w
-                               -> m (Maybe (Elf w))
-appendSectionToLoadableSegment isSegment mk e
-  | loadableSectionHeaders e =
-    error "Cannot create section when section headers are loadable."
-  | otherwise =
-    appendToLoadableSegment isSegment (\o s -> ElfDataSection <$> mk o s) e
-
--- | This calls a user provided function to the first loadable section
--- satisfying the given predicate to get new data to append.
---
--- This function is designed to preserve the in-memory representation
--- of all currently loaded data.
-appendDataToLoadableSegment :: forall m w
-                            . (Applicative m, Bits w, Integral w)
-                            => (ElfSegment w -> Bool)
-                            -> (w -> ElfSegment w -> m B.ByteString)
-                               -- ^ This function takes the offset and segment,
-                               -- and returns the new section to append.
-                            -> Elf w
-                            -> m (Maybe (Elf w))
-appendDataToLoadableSegment isSegment mk e =
-  appendToLoadableSegment isSegment (\o s -> ElfDataRaw <$> mk o s) e
-
--- | This provides the user with the ability to insert a bytestring or section into
--- the end of a loadable section safifying a predicate.
-appendToLoadableSegment :: forall m w
-                         . (Applicative m, Bits w, Integral w)
-                        => (ElfSegment w -> Bool)
-                        -> (w -> ElfSegment w -> m (ElfDataRegion w))
-                        -> Elf w
-                        -> m (Maybe (Elf w))
-appendToLoadableSegment isSegment f e = go Seq.empty 0 (e^.elfFileData)
-  where l = elfLayout e
-        -- This find sthe appropriate segment to insert a
-        go :: Seq.Seq (ElfDataRegion w) -> w -> Seq.Seq (ElfDataRegion w) -> m (Maybe (Elf w))
-        go prev o s =
-          case Seq.viewl s of
-            Seq.EmptyL -> pure Nothing
-            ElfDataSegment seg Seq.:< r
-                | elfSegmentType seg == PT_LOAD && isSegment seg ->
-                  addNew <$> f o seg
-              where addNew new = Just $ e & elfFileData .~ prev Seq.>< (seg' Seq.<| r)
-                      where seg' = ElfDataSegment $ seg & elfSegmentData %~ (Seq.|> new)
-            h Seq.:< r -> do
-              go (prev Seq.|> h) (offsetAfterRegion l o h) r
-
 ------------------------------------------------------------------------
 -- Elf Width instances
 
@@ -852,3 +792,67 @@ elfSections f = updateSections (fmap Just . f)
 -- | Return layout information from elf file.
 elfLayout :: Elf w -> ElfLayout w
 elfLayout e = elfClassElfWidthInstance (elfClass e) $ elfLayout' e
+
+------------------------------------------------------------------------
+-- ElfSegmentUpdater
+
+-- | This provides information and operations for modifying the contents of a
+-- loadable segment without modifying the position in memory of existing code.
+data ElfSegmentUpdater w
+   = ElfSegmentUpdater { updaterVirtEnd :: !w
+                         -- ^ The virtual address for the end of the segment.
+                       , updaterAppendSection :: !(ElfSection w -> Elf w)
+                         -- ^ This appends a section to the selected segment, and
+                         -- returns a new elf file.
+                         --
+                         -- Note: This is not allowed if the section headers are
+                         -- loadable (which is atypical), and 'error' will be
+                         -- called if this is the case.
+                       , updaterAppendData :: !(B.ByteString -> Elf w)
+                         -- ^ This appends raw data to the selected segment, and
+                         -- returns a new elf file.
+                       }
+
+-- | Given an elf file and a predicate on segments, this looks for the first
+-- segment matching the predicate, and returns a 'ElfSegmentUpdater' that
+-- allows changes to the segment that do not change the position of
+-- any data in memory.
+updateElfLoadableSegment :: Elf w
+                         -> (ElfSegment w -> Bool)
+                         -> Maybe (ElfSegmentUpdater w)
+updateElfLoadableSegment  e isSegment =
+    elfClassIntegralInstance (elfClass e) $
+      updateElfLoadableSegment' e (elfLayout e) isSegment Seq.empty 0 (e^.elfFileData)
+
+updateElfLoadableSegment' :: (Bits w, Integral w)
+                          => Elf w
+                          -> ElfLayout w
+                          -> (ElfSegment w -> Bool)
+                          -> Seq.Seq (ElfDataRegion w)
+                          -> w
+                          -> Seq.Seq (ElfDataRegion w)
+                          -> Maybe (ElfSegmentUpdater w)
+updateElfLoadableSegment' e l isSegment prev o s =
+  case Seq.viewl s of
+    Seq.EmptyL -> Nothing
+    h Seq.:< r
+      | ElfDataSegment seg <- h
+      , elfSegmentType seg == PT_LOAD
+      , isSegment seg -> do
+        let appendData new = e & elfFileData .~ prev Seq.>< (seg' Seq.<| r)
+              where seg' = ElfDataSegment $ seg & elfSegmentData %~ (Seq.|> new)
+            seg_length = next_offset - o
+            -- Compute address where the new segment will be loaded.
+            new_addr = elfSegmentVirtAddr seg + seg_length
+            updateSection sec
+              | loadableSectionHeaders e =
+                error "Cannot create section when section headers are loadable."
+              | otherwise = appendData (ElfDataSection sec)
+            updater = ElfSegmentUpdater { updaterVirtEnd = new_addr
+                                        , updaterAppendSection = updateSection
+                                        , updaterAppendData = appendData . ElfDataRaw
+                                        }
+        return $! updater
+      | otherwise ->
+        updateElfLoadableSegment' e l isSegment (prev Seq.|> h) next_offset r
+      where next_offset = offsetAfterRegion l o h
