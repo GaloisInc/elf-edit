@@ -36,7 +36,14 @@ import qualified Data.Vector as V
 import           Data.Word
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
-import           Data.Elf.Layout (Phdr, elfMagic, sizeOfPhdr32, sizeOfShdr32)
+import           Data.Elf.Layout
+  ( FileOffset(..)
+  , Phdr(..)
+  , phdrFileRange
+  , elfMagic
+  , phdrEntrySize
+  , shdrEntrySize
+  )
 import           Data.Elf.Types
 
 ------------------------------------------------------------------------
@@ -67,14 +74,14 @@ tryParse :: Monad m => String -> (a -> Maybe b) -> a -> m b
 tryParse desc toFn = maybe (fail ("Invalid " ++ desc)) return . toFn
 
 isRelroPhdr :: Phdr w -> Bool
-isRelroPhdr (s,_) = elfSegmentType s == PT_GNU_RELRO
+isRelroPhdr p = elfSegmentType (phdrSegment p) == PT_GNU_RELRO
 
 -- | Extract relro information.
 asRelroInfo :: [Phdr w] -> Maybe (Range w)
 asRelroInfo l =
   case filter isRelroPhdr l of
     [] -> Nothing
-    [(_,r)] -> Just r
+    [p] -> Just (fromFileOffset (phdrFileStart p), phdrFileSize p)
     _ -> error "Multiple relro segments."
 
 ------------------------------------------------------------------------
@@ -108,9 +115,9 @@ tableEntry l i b = L.fromChunks [B.drop (fromIntegral o) b]
 -- GetPhdr
 
 -- | Type for reading a elf segment from binary data.
-type GetPhdrFn w = Get (ElfSegment w, (Range w))
+type GetPhdrFn w = Get (Phdr w)
 
-getPhdr32 :: ElfData -> GetPhdrFn Word32
+getPhdr32 :: ElfData -> Get (Phdr Word32)
 getPhdr32 d = do
   p_type   <- ElfSegmentType  <$> getWord32 d
   p_offset <- getWord32 d
@@ -126,10 +133,14 @@ getPhdr32 d = do
           , elfSegmentVirtAddr  = p_vaddr
           , elfSegmentPhysAddr  = p_paddr
           , elfSegmentAlign     = p_align
-          , elfSegmentMemSize   = p_memsz
+          , elfSegmentMemSize   = ElfAbsoluteSize p_memsz
           , elfSegmentData     = Seq.empty
           }
-  return $! (s, (p_offset, p_filesz))
+  return $! Phdr { phdrSegment   = s
+                 , phdrFileStart = FileOffset p_offset
+                 , phdrFileSize  = p_filesz
+                 , phdrMemSize   = p_memsz
+                 }
 
 getPhdr64 :: ElfData -> GetPhdrFn Word64
 getPhdr64 d = do
@@ -147,10 +158,14 @@ getPhdr64 d = do
          , elfSegmentVirtAddr = p_vaddr
          , elfSegmentPhysAddr = p_paddr
          , elfSegmentAlign    = p_align
-         , elfSegmentMemSize  = p_memsz
-         , elfSegmentData    = Seq.empty
+         , elfSegmentMemSize  = ElfAbsoluteSize p_memsz
+         , elfSegmentData     = Seq.empty
          }
-  return $! (s, (p_offset, p_filesz))
+  return $! Phdr { phdrSegment   = s
+                 , phdrFileStart = FileOffset p_offset
+                 , phdrFileSize  = p_filesz
+                 , phdrMemSize   = p_memsz
+                 }
 
 ------------------------------------------------------------------------
 -- GetShdr
@@ -381,17 +396,19 @@ insertSegment :: forall w
               -> Phdr w
               -> Seq.Seq (ElfDataRegion w)
               -> Seq.Seq (ElfDataRegion w)
-insertSegment sizeOf (d,rng) segs =
+insertSegment sizeOf phdr segs =
     case insertAtOffset sizeOf rng (gather szd Seq.empty) segs of
       Left (OverlapSegment _) -> error "Attempt to insert overlapping segments."
       Left OutOfRange -> error "Invalid segment region"
       Right result -> result
-  where (_,szd) = rng
+  where d = phdrSegment phdr
+        rng = phdrFileRange phdr
+        szd = phdrFileSize  phdr
         -- | @gather@ inserts new segment into head of list after collecting existings
         -- data it contains.
         gather :: w -- ^ Number of bytes to insert.
                -> Seq.Seq (ElfDataRegion w)
-                  -- ^ Subsegments that occur before this segment. segment.
+                  -- ^ Subsegments that occur before this segment.
                -> Seq.Seq (ElfDataRegion w)
                   -- ^ Segments after insertion point.
                -> Seq.Seq (ElfDataRegion w)
@@ -507,10 +524,10 @@ parseElf32ParseInfo :: ElfData
                     -> B.ByteString
                     -> Get (ElfHeaderInfo Word32)
 parseElf32ParseInfo d ei_osabi ei_abiver b = do
-  e_type      <- toElfType    <$> getWord16 d
+  e_type      <- ElfType      <$> getWord16 d
   e_machine   <- toElfMachine <$> getWord16 d
   e_version   <- getWord32 d
-  unless (fromIntegral expectedElfVersion == e_version) $
+  when (fromIntegral expectedElfVersion /= e_version) $
     fail "ELF Version mismatch"
   e_entry     <- getWord32 d
   e_phoff     <- getWord32 d
@@ -518,11 +535,11 @@ parseElf32ParseInfo d ei_osabi ei_abiver b = do
   e_flags     <- getWord32 d
   e_ehsize    <- getWord16 d
   e_phentsize <- getWord16 d
-  unless (e_phentsize == sizeOfPhdr32) $
+  when (e_phentsize /= phdrEntrySize ELFCLASS32) $ do
     fail $ "Invalid segment entry size"
   e_phnum     <- getWord16 d
   e_shentsize <- getWord16 d
-  unless (e_shentsize == sizeOfShdr32) $
+  when (e_shentsize /= shdrEntrySize ELFCLASS32) $ do
     fail $ "Invalid section entry size"
   e_shnum     <- getWord16 d
   e_shstrndx  <- getWord16 d
@@ -554,7 +571,7 @@ parseElf64ParseInfo :: ElfData
                     -> B.ByteString
                     -> Get (ElfHeaderInfo Word64)
 parseElf64ParseInfo d ei_osabi ei_abiver b = do
-  e_type      <- toElfType    <$> getWord16 d
+  e_type      <- ElfType      <$> getWord16 d
   e_machine   <- toElfMachine <$> getWord16 d
   e_version   <- getWord32 d
   when (fromIntegral expectedElfVersion /= e_version) $
@@ -565,8 +582,12 @@ parseElf64ParseInfo d ei_osabi ei_abiver b = do
   e_flags     <- getWord32 d
   e_ehsize    <- getWord16 d
   e_phentsize <- getWord16 d
+  when (e_phentsize /= phdrEntrySize ELFCLASS64) $ do
+    fail $ "Invalid segment entry size"
   e_phnum     <- getWord16 d
   e_shentsize <- getWord16 d
+  when (e_shentsize /= shdrEntrySize ELFCLASS64) $ do
+    fail $ "Invalid section entry size"
   e_shnum     <- getWord16 d
   e_shstrndx  <- getWord16 d
   let hdr = ElfHeader { headerData       = d

@@ -72,11 +72,12 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfSegmentFlags
                 , pf_none, pf_x, pf_w, pf_r
                   -- ** Getting data from Elf segments
-                , RenderedElfSegment
-                , renderedElfSegments
-                  -- ** Modifications that preserve memory layout.
-                , ElfSegmentUpdater(..)
-                , updateElfLoadableSegment
+                , allPhdrs
+                , Phdr(..)
+                , phdrFileRange
+--                  -- ** Modifications that preserve memory layout.
+--                , ElfSegmentUpdater(..)
+--                , updateElfLoadableSegment
                   -- * Symbol Table Entries
                 , ElfSymbolTableEntry(..)
                 , ppSymbolTableEntries
@@ -86,10 +87,10 @@ module Data.Elf ( -- * Top-level definitions
                   -- ** Elf symbol visibility
                 , steVisibility
                 , ElfSymbolVisibility
-                , stv_default
-                , stv_internal
-                , stv_hidden
-                , stv_protected
+                , pattern STV_DEFAULT
+                , pattern STV_INTERNAL
+                , pattern STV_HIDDEN
+                , pattern STV_PROTECTED
                   -- ** Elf symbol type
                 , ElfSymbolType(..)
                 , pattern STT_NOTYPE
@@ -239,46 +240,31 @@ hasElfMagic l = either (const False) (const True) $ flip runGetOrFail l $ do
 renderElf :: Elf w -> L.ByteString
 renderElf = elfLayoutBytes . elfLayout
 
--- | A pair containing an elf segment and the underlying bytestring content.
-type RenderedElfSegment w = (ElfSegment w, B.ByteString)
-
--- | Returns elf segments with data in them.
-renderedElfSegments :: Elf w -> [RenderedElfSegment w]
-renderedElfSegments e = elfClassIntegralInstance (elfClass e) $
-  let l = elfLayout e
-      b = L.toStrict (elfLayoutBytes l)
-      segFn (s,rng) = (s, slice rng b)
-   in segFn <$> F.toList (allPhdrs l)
-
 ------------------------------------------------------------------------
 -- ElfSymbolVisibility
 
 -- | Visibility for elf symbol
-newtype ElfSymbolVisibility = ElfSymbolVisibility { _visAsWord :: Word8 }
+newtype ElfSymbolVisibility = ElfSymbolVisibility { fromElfSymbolVisibility :: Word8 }
 
 -- | Visibility is specified by binding type
-stv_default :: ElfSymbolVisibility
-stv_default = ElfSymbolVisibility 0
+pattern STV_DEFAULT = ElfSymbolVisibility 0
 
 -- | OS specific version of STV_HIDDEN.
-stv_internal :: ElfSymbolVisibility
-stv_internal = ElfSymbolVisibility 1
+pattern STV_INTERNAL = ElfSymbolVisibility 1
 
--- | Can only be seen inside currect component.
-stv_hidden :: ElfSymbolVisibility
-stv_hidden = ElfSymbolVisibility 2
+-- | Can only be seen inside current component.
+pattern STV_HIDDEN = ElfSymbolVisibility 2
 
--- | Can only be seen inside currect component.
-stv_protected :: ElfSymbolVisibility
-stv_protected = ElfSymbolVisibility 3
+-- | Can only be seen inside current component.
+pattern STV_PROTECTED = ElfSymbolVisibility 3
 
 instance Show ElfSymbolVisibility where
-  show (ElfSymbolVisibility w) =
-    case w of
-      0 -> "DEFAULT"
-      1 -> "INTERNAL"
-      2 -> "HIDDEN"
-      3 -> "PROTECTED"
+  show v =
+    case v of
+      STV_DEFAULT   -> "DEFAULT"
+      STV_INTERNAL  -> "INTERNAL"
+      STV_HIDDEN    -> "HIDDEN"
+      STV_PROTECTED -> "PROTECTED"
       _ -> "BadVis"
 
 ------------------------------------------------------------------------
@@ -646,7 +632,10 @@ mandatoryDynamicEntry tag m =
 fileOffsetOfAddr :: (Ord w, Num w) => w -> ElfLayout w -> [Range w]
 fileOffsetOfAddr w l =
   [ (dta + offset, n-offset)
-  | (seg, (dta,n)) <- F.toList (l^.phdrs)
+  | phdr <- F.toList (l^.phdrs)
+  , let seg            = phdrSegment phdr
+  , let FileOffset dta = phdrFileStart phdr
+  , let n              = phdrFileSize phdr
   , elfSegmentType seg == PT_LOAD
   , let base = elfSegmentVirtAddr seg
   , inRange w (base, n)
@@ -670,7 +659,10 @@ addressToFile l b nm w = elfClassIntegralInstance (elfLayoutClass l) $
 fileOffsetOfRange :: (Ord w, Num w) => Range w -> ElfLayout w -> [Range w]
 fileOffsetOfRange (w,sz) l =
   [ (dta + offset, sz)
-  | (seg, (dta,n)) <- F.toList (l^.phdrs)
+  | phdr <- F.toList (l^.phdrs)
+  , let seg = phdrSegment phdr
+  , let FileOffset dta = phdrFileStart phdr
+  , let n = phdrFileSize phdr
   , elfSegmentType seg == PT_LOAD
   , let base = elfSegmentVirtAddr seg
   , inRange w (base, n)
@@ -1001,9 +993,10 @@ dynamicEntries e = elfClassIntegralInstance (elfClass e) $ do
   let l :: ElfLayout (ElfWordType (RelocationWidth tp))
       l = elfLayout e
   let file = elfLayoutBytes l
-  case filter (\(s,_) -> elfSegmentType s == PT_DYNAMIC) (F.toList (l^.phdrs)) of
+  case filter (\p -> elfSegmentType (phdrSegment p) == PT_DYNAMIC) (F.toList (l^.phdrs)) of
     [] -> return Nothing
-    [(_,p)] -> do
+    [phdr] -> do
+      let p = phdrFileRange phdr
       let elts :: [Dynamic (ElfWordType (RelocationWidth tp))]
           elts = runGet (dynamicList w (elfData e)) (sliceL p file)
       let m :: DynamicMap (ElfWordType (RelocationWidth tp))

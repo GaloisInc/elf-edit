@@ -25,8 +25,11 @@ module Data.Elf.Types
   , fromElfOSABI
     -- ** ElfType
   , ElfType(..)
-  , toElfType
-  , fromElfType
+  , pattern ET_NONE
+  , pattern ET_REL
+  , pattern ET_EXEC
+  , pattern ET_DYN
+  , pattern ET_CORE
     -- ** ElfMachine
   , ElfMachine(..)
   , fromElfMachine
@@ -45,6 +48,8 @@ module Data.Elf.Types
     -- ** ElfGOT
   , ElfGOT(..)
   , elfGotSize
+    --  * Memory size
+  , ElfMemSize(..)
     -- * ElfSegment
   , ElfSegment(..)
   , ppSegment
@@ -218,15 +223,27 @@ fromElfData ELFDATA2MSB = 2
 -- ElfType
 
 -- | The type of information stored in the Elf file.
-[enum|
- ElfType :: Word16
- ET_NONE 0 -- ^ Unspecified type
- ET_REL  1 -- ^ Relocatable object file
- ET_EXEC 2 -- ^ Executable object file
- ET_DYN  3 -- ^ Shared object file
- ET_CORE 4 -- ^ Core dump object file
- ET_EXT  _ -- ^ Other
-|]
+newtype ElfType = ElfType { fromElfType :: Word16 }
+  deriving (Eq, Ord)
+
+-- | Unspecified elf type.
+pattern ET_NONE = ElfType 0
+-- | Relocatable object file
+pattern ET_REL  = ElfType 1
+-- | Executable object file
+pattern ET_EXEC = ElfType 2
+-- | Shared object file
+pattern ET_DYN  = ElfType 3
+-- | Core dump object file
+pattern ET_CORE = ElfType 4
+
+instance Show ElfType where
+  show ET_NONE = "ET_NONE"
+  show ET_REL  = "ET_REL"
+  show ET_EXEC = "ET_EXEC"
+  show ET_DYN  = "ET_DYN"
+  show ET_CORE = "ET_CORE"
+  show (ElfType w) = "ElfType " ++ show w
 
 ------------------------------------------------------------------------
 -- ElfMachine
@@ -519,6 +536,17 @@ pf_r :: ElfSegmentFlags
 pf_r = ElfSegmentFlags 4
 
 ------------------------------------------------------------------------
+-- ElfMemSize
+
+-- | This describes the size of a elf section or segment memory size.
+data ElfMemSize w
+   = ElfAbsoluteSize !w
+     -- ^ The region  has the given absolute size
+   | ElfRelativeSize !w
+     -- ^ The given offset should be added to the computed size.
+  deriving (Show)
+
+------------------------------------------------------------------------
 -- ElfSegment and ElfDataRegion
 
 -- | Information about an elf segment (parameter is for type of data).
@@ -545,7 +573,7 @@ data ElfSegment w = ElfSegment
     -- be congruent to the segment offset in the file modulo 'elfSegmentAlign'.
     -- e.g., if file offset is 'o', alignment is 'n', and virtual address is 'a',
     -- then 'o mod n = a mod n'
-  , elfSegmentMemSize   :: !w
+  , elfSegmentMemSize   :: !(ElfMemSize w)
     -- ^ Size in memory (may be larger then segment data)
   , elfSegmentData     :: !(Seq.Seq (ElfDataRegion w))
     -- ^ Regions contained in segment.

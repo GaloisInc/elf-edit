@@ -7,7 +7,8 @@ module Data.Elf.Layout
   ( -- * ElfLayout
     ElfLayout
   , elfLayoutClass
-  , Phdr
+  , Phdr(..)
+  , phdrFileRange
   , phdrs
   , allPhdrs
   , elfLayout
@@ -18,12 +19,14 @@ module Data.Elf.Layout
   , updateSections
     -- * Low level constants
   , elfMagic
-  , sizeOfPhdr32
-  , sizeOfShdr32
+  , ehdrSize
+  , phdrEntrySize
+  , shdrEntrySize
   , ElfWidth
+  , FileOffset(..)
     -- * Operations that require layout information
-  , ElfSegmentUpdater(..)
-  , updateElfLoadableSegment
+--  , ElfSegmentUpdater(..)
+--  , updateElfLoadableSegment
   ) where
 
 import           Control.Exception (assert)
@@ -121,7 +124,15 @@ rangeSize (FileOffset s) (FileOffset e) = assert (e >= s) $ e - s
 ------------------------------------------------------------------------
 -- Phdr
 
-type Phdr w = (ElfSegment w, Range w)
+-- | Provides concrete information about an elf segment and its layout.
+data Phdr w = Phdr { phdrSegment :: !(ElfSegment w)
+                   , phdrFileStart :: !(FileOffset w)
+                   , phdrFileSize  :: !w
+                   , phdrMemSize   :: !w
+                   }
+
+phdrFileRange :: Phdr w -> Range w
+phdrFileRange phdr = (fromFileOffset (phdrFileStart phdr), phdrFileSize phdr)
 
 -- | Returns true if the segment should appear before a loadable segment.
 isPreloadPhdr :: ElfSegmentType -> Bool
@@ -358,12 +369,12 @@ nextRegionOffset l o reg = do
   let e = elfLayoutHeader l
   let c = headerClass e
   case reg of
-    ElfDataElfHeader -> o `incOffset` fromIntegral (sizeOfEhdr c)
+    ElfDataElfHeader -> o `incOffset` fromIntegral (ehdrSize c)
     ElfDataSegmentHeaders -> o `incOffset` phdr_size
-      where phdr_size = fromIntegral (phnum l) * fromIntegral (sizeOfPhdr c)
+      where phdr_size = fromIntegral (phnum l) * fromIntegral (phdrEntrySize c)
     ElfDataSegment s -> o `incOffset` phdr_padding_count s o
     ElfDataSectionHeaders -> o `incOffset` sz
-      where sz = fromIntegral (shnum l) * fromIntegral (sizeOfShdr c)
+      where sz = fromIntegral (shnum l) * fromIntegral (shdrEntrySize c)
     ElfDataSectionNameTable -> nextSectionOffset o s
       where s = elfNameTableSection (elfLayoutSectionNameData l)
     ElfDataGOT g -> nextSectionOffset o s
@@ -549,15 +560,21 @@ addSectionToLayout d name_map l s =
 
 addRelroToLayout :: Num w => Maybe (Range w) -> ElfLayout w -> ElfLayout w
 addRelroToLayout Nothing l = l
-addRelroToLayout (Just (f,c)) l = l & phdrs %~ (Seq.|> (s, (f,c)))
+addRelroToLayout (Just (f,c)) l = l & phdrs %~ (Seq.|> phdr)
   where s = ElfSegment { elfSegmentType = PT_GNU_RELRO
                        , elfSegmentFlags = pf_r
                        , elfSegmentVirtAddr = f
                        , elfSegmentPhysAddr = f
                        , elfSegmentAlign = 1
-                       , elfSegmentMemSize = c
+                       , elfSegmentMemSize = ElfRelativeSize 0
                        , elfSegmentData = Seq.empty
                        }
+
+        phdr = Phdr { phdrSegment   = s
+                    , phdrFileStart = FileOffset f
+                    , phdrFileSize  = c
+                    , phdrMemSize   = c
+                    }
 
 elfSegmentCount :: Elf w -> Int
 elfSegmentCount e = F.foldl' f 0 (e^.elfFileData)
@@ -599,11 +616,11 @@ elfLayout' e = initl & flip (foldl impl) (e^.elfFileData)
         -- Process element.
         impl :: ElfWidth w => ElfLayout w -> ElfDataRegion w -> ElfLayout w
         impl l ElfDataElfHeader =
-             l & elfOutputSize %~ (`incOffset` (fromIntegral (sizeOfEhdr c)))
+             l & elfOutputSize %~ (`incOffset` (fromIntegral (ehdrSize c)))
         impl l ElfDataSegmentHeaders =
              l & elfOutputSize %~ (`incOffset` phdr_size)
                & phdrTableOffset .~ l^.elfOutputSize
-          where phdr_size = fromIntegral phdr_cnt * fromIntegral (sizeOfPhdr c)
+          where phdr_size = fromIntegral phdr_cnt * fromIntegral (phdrEntrySize c)
         impl l (ElfDataSegment s) = l3
           where cnt = phdr_padding_count s (l^.elfOutputSize)
 
@@ -617,16 +634,25 @@ elfLayout' e = initl & flip (foldl impl) (e^.elfFileData)
                 -- Get bytes at start of elf
                 seg_offset = l1^.elfOutputSize
                 seg_size   = rangeSize seg_offset (l2^.elfOutputSize)
+                mem_size =
+                  case elfSegmentMemSize s of
+                    ElfAbsoluteSize sz -> sz
+                    ElfRelativeSize o  -> seg_size + o
+                phdr = Phdr { phdrSegment = s
+                            , phdrFileStart = seg_offset
+                            , phdrFileSize  = seg_size
+                            , phdrMemSize   = mem_size
+                            }
                 -- Add segment to appropriate
                 l3 :: ElfLayout w
                 l3 | isPreloadPhdr (elfSegmentType s)
-                   = l2 & preLoadPhdrs %~ (Seq.|> (s, (fromFileOffset seg_offset, seg_size)))
+                   = l2 & preLoadPhdrs %~ (Seq.|> phdr)
                    | otherwise
-                   = l2 & phdrs        %~ (Seq.|> (s, (fromFileOffset seg_offset, seg_size)))
+                   = l2 & phdrs        %~ (Seq.|> phdr)
         impl l ElfDataSectionHeaders =
              l & elfOutputSize   %~ (`incOffset` shdr_size)
                & shdrTableOffset .~ l^.elfOutputSize
-          where shdr_size = fromIntegral shdr_cnt * fromIntegral (sizeOfShdr c)
+          where shdr_size = fromIntegral shdr_cnt * fromIntegral (shdrEntrySize c)
         impl l ElfDataSectionNameTable =
             addSectionToLayout d name_map l' s
           where l' = l & shstrndx .~ shnum l
@@ -668,35 +694,38 @@ elfIdentBuilder e =
           , mconcat (replicate 7 (U.singleton 0))
           ]
 
-sizeOfEhdr32 :: Word16
-sizeOfEhdr32 = sizeOfRecord ehdr32Fields
+ehdrSize32 :: Word16
+ehdrSize32 = sizeOfRecord ehdr32Fields
 
-sizeOfEhdr64 :: Word16
-sizeOfEhdr64 = sizeOfRecord ehdr64Fields
+ehdrSize64 :: Word16
+ehdrSize64 = sizeOfRecord ehdr64Fields
 
-sizeOfPhdr32 :: Word16
-sizeOfPhdr32 = sizeOfRecord phdr32Fields
+phdrEntrySize32 :: Word16
+phdrEntrySize32 = sizeOfRecord phdr32Fields
 
-sizeOfPhdr64 :: Word16
-sizeOfPhdr64 = sizeOfRecord phdr64Fields
+phdrEntrySize64 :: Word16
+phdrEntrySize64 = sizeOfRecord phdr64Fields
 
-sizeOfShdr32 :: Word16
-sizeOfShdr32 = sizeOfRecord shdr32Fields
+shdrEntrySize32 :: Word16
+shdrEntrySize32 = sizeOfRecord shdr32Fields
 
-sizeOfShdr64 :: Word16
-sizeOfShdr64 = sizeOfRecord shdr64Fields
+shdrEntrySize64 :: Word16
+shdrEntrySize64 = sizeOfRecord shdr64Fields
 
-sizeOfEhdr :: ElfClass w -> Word16
-sizeOfEhdr ELFCLASS32 = sizeOfEhdr32
-sizeOfEhdr ELFCLASS64 = sizeOfEhdr64
+-- | Return the size of the main elf header table.
+ehdrSize :: ElfClass w -> Word16
+ehdrSize ELFCLASS32 = ehdrSize32
+ehdrSize ELFCLASS64 = ehdrSize64
 
-sizeOfPhdr :: ElfClass w -> Word16
-sizeOfPhdr ELFCLASS32 = sizeOfPhdr32
-sizeOfPhdr ELFCLASS64 = sizeOfPhdr64
+-- | Return size of entry in Elf programs header table.
+phdrEntrySize :: ElfClass w -> Word16
+phdrEntrySize ELFCLASS32 = phdrEntrySize32
+phdrEntrySize ELFCLASS64 = phdrEntrySize64
 
-sizeOfShdr :: ElfClass w -> Word16
-sizeOfShdr ELFCLASS32 = sizeOfShdr32
-sizeOfShdr ELFCLASS64 = sizeOfShdr64
+-- | Return size of entry in Elf section header table.
+shdrEntrySize :: ElfClass w -> Word16
+shdrEntrySize ELFCLASS32 = shdrEntrySize32
+shdrEntrySize ELFCLASS64 = shdrEntrySize64
 
 ehdr32Fields :: ElfRecord (Ehdr Word32)
 ehdr32Fields =
@@ -708,10 +737,10 @@ ehdr32Fields =
   , ("e_phoff",     EFWord32 $ \(_,l) -> fromFileOffset $ l^.phdrTableOffset)
   , ("e_shoff",     EFWord32 $ \(_,l) -> fromFileOffset $ l^.shdrTableOffset)
   , ("e_flags",     EFWord32 $ \(e,_) -> headerFlags e)
-  , ("e_ehsize",    EFWord16 $ \_     -> sizeOfEhdr32)
-  , ("e_phentsize", EFWord16 $ \_     -> sizeOfPhdr32)
+  , ("e_ehsize",    EFWord16 $ \_     -> ehdrSize32)
+  , ("e_phentsize", EFWord16 $ \_     -> phdrEntrySize32)
   , ("e_phnum",     EFWord16 $ \(_,l) -> phnum l)
-  , ("e_shentsize", EFWord16 $ \_     -> sizeOfShdr32)
+  , ("e_shentsize", EFWord16 $ \_     -> shdrEntrySize32)
   , ("e_shnum",     EFWord16 $ \(_,l) -> shnum l)
   , ("e_shstrndx",  EFWord16 $ \(_,l) -> l^.shstrndx)
   ]
@@ -726,36 +755,36 @@ ehdr64Fields =
   , ("e_phoff",     EFWord64 $ \(_,l) -> fromFileOffset $ l^.phdrTableOffset)
   , ("e_shoff",     EFWord64 $ \(_,l) -> fromFileOffset $ l^.shdrTableOffset)
   , ("e_flags",     EFWord32 $ \(e,_) -> headerFlags e)
-  , ("e_ehsize",    EFWord16 $ \_     -> sizeOfEhdr64)
-  , ("e_phentsize", EFWord16 $ \_     -> sizeOfPhdr64)
+  , ("e_ehsize",    EFWord16 $ \_     -> ehdrSize64)
+  , ("e_phentsize", EFWord16 $ \_     -> phdrEntrySize64)
   , ("e_phnum",     EFWord16 $ \(_,l) -> phnum l)
-  , ("e_shentsize", EFWord16 $ \_     -> sizeOfShdr64)
+  , ("e_shentsize", EFWord16 $ \_     -> shdrEntrySize64)
   , ("e_shnum",     EFWord16 $ \(_,l) -> shnum l)
   , ("e_shstrndx",  EFWord16 $ \(_,l) -> l^.shstrndx)
   ]
 
 phdr32Fields :: ElfRecord (Phdr Word32)
 phdr32Fields =
-  [ ("p_type",   EFWord32 $ view $ _1 . to elfSegmentType . to fromElfSegmentType)
-  , ("p_offset", EFWord32 $ view $ _2 . _1)
-  , ("p_vaddr",  EFWord32 $ view $ _1 . to elfSegmentVirtAddr)
-  , ("p_paddr",  EFWord32 $ view $ _1 . to elfSegmentPhysAddr)
-  , ("p_filesz", EFWord32 $ view $ _2 . _2)
-  , ("p_memsz",  EFWord32 $ view $ _1 . to elfSegmentMemSize)
-  , ("p_flags",  EFWord32 $ view $ _1 . to elfSegmentFlags . to fromElfSegmentFlags)
-  , ("p_align",  EFWord32 $ view $ _1 . to elfSegmentAlign)
+  [ ("p_type",   EFWord32 $ fromElfSegmentType . elfSegmentType . phdrSegment)
+  , ("p_offset", EFWord32 $ fromFileOffset . phdrFileStart)
+  , ("p_vaddr",  EFWord32 $ elfSegmentVirtAddr . phdrSegment)
+  , ("p_paddr",  EFWord32 $ elfSegmentPhysAddr . phdrSegment)
+  , ("p_filesz", EFWord32 $ phdrFileSize)
+  , ("p_memsz",  EFWord32 $ phdrMemSize)
+  , ("p_flags",  EFWord32 $ fromElfSegmentFlags . elfSegmentFlags . phdrSegment)
+  , ("p_align",  EFWord32 $                       elfSegmentAlign . phdrSegment)
   ]
 
 phdr64Fields :: ElfRecord (Phdr Word64)
 phdr64Fields =
-  [ ("p_type",   EFWord32 $ view $ _1 . to elfSegmentType . to fromElfSegmentType)
-  , ("p_flags",  EFWord32 $ view $ _1 . to elfSegmentFlags . to fromElfSegmentFlags)
-  , ("p_offset", EFWord64 $ view $ _2 . _1)
-  , ("p_vaddr",  EFWord64 $ view $ _1 . to elfSegmentVirtAddr)
-  , ("p_paddr",  EFWord64 $ view $ _1 . to elfSegmentPhysAddr)
-  , ("p_filesz", EFWord64 $ view $ _2 . _2)
-  , ("p_memsz",  EFWord64 $ view $ _1 . to elfSegmentMemSize)
-  , ("p_align",  EFWord64 $ view $ _1 . to elfSegmentAlign)
+  [ ("p_type",   EFWord32 $ fromElfSegmentType  . elfSegmentType  . phdrSegment)
+  , ("p_flags",  EFWord32 $ fromElfSegmentFlags . elfSegmentFlags . phdrSegment)
+  , ("p_offset", EFWord64 $ fromFileOffset . phdrFileStart)
+  , ("p_vaddr",  EFWord64 $ elfSegmentVirtAddr . phdrSegment)
+  , ("p_paddr",  EFWord64 $ elfSegmentPhysAddr . phdrSegment)
+  , ("p_filesz", EFWord64 $ phdrFileSize)
+  , ("p_memsz",  EFWord64 $ phdrMemSize)
+  , ("p_align",  EFWord64 $ elfSegmentAlign    . phdrSegment)
   ]
 
 shdr32Fields :: ElfRecord (Shdr Word32)
@@ -825,6 +854,7 @@ elfSections f = updateSections (fmap Just . f)
 elfLayout :: Elf w -> ElfLayout w
 elfLayout e = elfClassElfWidthInstance (elfClass e) $ elfLayout' e
 
+{-
 ------------------------------------------------------------------------
 -- ElfSegmentUpdater
 
@@ -896,3 +926,4 @@ updateElfLoadableSegment' e l isSegment prev o s =
       | otherwise ->
         let next_offset = fileOffsetAfterRegion l o h
          in updateElfLoadableSegment' e l isSegment (prev Seq.|> h) next_offset r
+-}
