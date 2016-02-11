@@ -38,13 +38,28 @@ module Data.Elf.Types
   , ElfDataRegion(..)
     -- * ElfSection
   , ElfSection(..)
-    -- ** Elf section flags
-  , ElfSectionFlags(..)
-  , shf_none, shf_write, shf_alloc, shf_execinstr
     -- ** Elf section type
   , ElfSectionType(..)
-  , fromElfSectionType
-  , toElfSectionType
+  , pattern SHT_NULL
+  , pattern SHT_PROGBITS
+  , pattern SHT_SYMTAB
+  , pattern SHT_STRTAB
+  , pattern SHT_RELA
+  , pattern SHT_HASH
+  , pattern SHT_DYNAMIC
+  , pattern SHT_NOTE
+  , pattern SHT_NOBITS
+  , pattern SHT_REL
+  , pattern SHT_SHLIB
+  , pattern SHT_DYNSYM
+    -- ** Elf section flags
+  , ElfSectionFlags(..)
+  , shf_none
+  , shf_write
+  , shf_alloc
+  , shf_execinstr
+  , shf_merge
+  , shf_tls
     -- ** ElfGOT
   , ElfGOT(..)
   , elfGotSize
@@ -183,7 +198,7 @@ elfClassIntegralInstance ELFCLASS64 a = a
 -- | A flag indicating byte order used to encode data.
 data ElfData = ELFDATA2LSB -- ^ Least significant byte first
              | ELFDATA2MSB -- ^ Most significant byte first.
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 toElfData :: Word8 -> Maybe ElfData
 toElfData 1 = Just $ ELFDATA2LSB
@@ -352,29 +367,58 @@ instance Show ElfType where
 ------------------------------------------------------------------------
 -- ElfSectionType
 
-[enum|
- ElfSectionType :: Word32
- SHT_NULL           0 -- ^ Identifies an empty section header.
- SHT_PROGBITS       1 -- ^ Contains information defined by the program
- SHT_SYMTAB         2 -- ^ Contains a linker symbol table
- SHT_STRTAB         3 -- ^ Contains a string table
- SHT_RELA           4 -- ^ Contains "Rela" type relocation entries
- SHT_HASH           5 -- ^ Contains a symbol hash table
- SHT_DYNAMIC        6 -- ^ Contains dynamic linking tables
- SHT_NOTE           7 -- ^ Contains note information
- SHT_NOBITS         8 -- ^ Contains uninitialized space; does not occupy any space in the file
- SHT_REL            9 -- ^ Contains "Rel" type relocation entries
- SHT_SHLIB         10 -- ^ Reserved
- SHT_DYNSYM        11 -- ^ Contains a dynamic loader symbol table
- SHT_EXT            _ -- ^ Processor- or environment-specific type
-|]
+-- | The type associated with an Elf file.
+newtype ElfSectionType = ElfSectionType { fromElfSectionType :: Word32 }
+  deriving (Eq, Ord)
+
+-- | Identifies an empty section header.
+pattern SHT_NULL     = ElfSectionType  0
+-- | Contains information defined by the program
+pattern SHT_PROGBITS = ElfSectionType  1
+-- | Contains a linker symbol table
+pattern SHT_SYMTAB   = ElfSectionType  2
+-- | Contains a string table
+pattern SHT_STRTAB   = ElfSectionType  3
+-- | Contains "Rela" type relocation entries
+pattern SHT_RELA     = ElfSectionType  4
+-- | Contains a symbol hash table
+pattern SHT_HASH     = ElfSectionType  5
+-- | Contains dynamic linking tables
+pattern SHT_DYNAMIC  = ElfSectionType  6
+-- | Contains note information
+pattern SHT_NOTE     = ElfSectionType  7
+-- | Contains uninitialized space; does not occupy any space in the file
+pattern SHT_NOBITS   = ElfSectionType  8
+-- | Contains "Rel" type relocation entries
+pattern SHT_REL      = ElfSectionType  9
+-- | Reserved
+pattern SHT_SHLIB    = ElfSectionType 10
+-- | Contains a dynamic loader symbol table
+pattern SHT_DYNSYM   = ElfSectionType 11
+
+instance Show ElfSectionType where
+  show tp =
+    case tp of
+      SHT_NULL     -> "SHT_NULL"
+      SHT_PROGBITS -> "SHT_PROGBITS"
+      SHT_SYMTAB   -> "SHT_SYMTAB"
+      SHT_STRTAB   -> "SHT_STRTAB"
+      SHT_RELA     -> "SHT_RELA"
+      SHT_HASH     -> "SHT_HASH"
+      SHT_DYNAMIC  -> "SHT_DYNAMIC"
+      SHT_NOTE     -> "SHT_NOTE"
+      SHT_NOBITS   -> "SHT_NOBITS"
+      SHT_REL      -> "SHT_REL"
+      SHT_SHLIB    -> "SHT_SHLIB"
+      SHT_DYNSYM   -> "SHT_DYNSYM"
+      ElfSectionType w -> "(Unknown type " ++ show w ++ ")"
 
 ------------------------------------------------------------------------
 -- ElfSectionFlags
 
 -- | Flags for sections
 newtype ElfSectionFlags w = ElfSectionFlags { fromElfSectionFlags :: w }
-  deriving (Eq, Num, Bits)
+  deriving (Eq, Bits)
 
 instance (Bits w, Integral w, Show w) => Show (ElfSectionFlags w) where
   showsPrec d (ElfSectionFlags w) = showFlags names d w
@@ -382,19 +426,31 @@ instance (Bits w, Integral w, Show w) => Show (ElfSectionFlags w) where
 
 -- | Empty set of flags
 shf_none :: Num w => ElfSectionFlags w
-shf_none = 0
+shf_none = ElfSectionFlags 0x0
 
 -- | Section contains writable data
 shf_write :: Num w => ElfSectionFlags w
-shf_write = 1
+shf_write = ElfSectionFlags 0x1
 
 -- | Section is allocated in memory image of program
 shf_alloc :: Num w => ElfSectionFlags w
-shf_alloc = 2
+shf_alloc = ElfSectionFlags 0x2
 
 -- | Section contains executable instructions
 shf_execinstr :: Num w => ElfSectionFlags w
-shf_execinstr = 4
+shf_execinstr = ElfSectionFlags 0x4
+
+-- | The contents of this section can be merged with elements in
+-- sections of the same name, type, and flags.
+shf_merge :: Num w => ElfSectionFlags w
+shf_merge = ElfSectionFlags 0x10
+
+-- | Section contains TLS data (".tdata" or ".tbss")
+--
+-- Information in it may be modified by the dynamic linker, but is only copied
+-- once the binary is linked.
+shf_tls :: Num w => ElfSectionFlags w
+shf_tls = ElfSectionFlags 0x400
 
 ------------------------------------------------------------------------
 -- ElfSection

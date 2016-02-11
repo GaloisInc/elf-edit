@@ -109,6 +109,9 @@ elfGotSection g =
 -- | A offset in the file (implemented as a newtype to avoid confusion with virtual addresses)
 newtype FileOffset w = FileOffset { fromFileOffset :: w }
 
+instance Show w => Show (FileOffset w) where
+  show (FileOffset o) = show o
+
 startOfFile :: Num w => FileOffset w
 startOfFile = FileOffset 0
 
@@ -306,44 +309,44 @@ class (Bits w, Integral w, Show w) => ElfWidth w where
 -- elfLayoutBytes
 
 -- | Return the bytes in the Elf file as a lazy bytestring.
-elfLayoutBytes2 :: ElfWidth w
+buildRegions :: ElfWidth w
                 => ElfLayout w
                 -> FileOffset w
                 -> [ElfDataRegion w]
                 -> Bld.Builder
-elfLayoutBytes2 _ _ [] = mempty
-elfLayoutBytes2 l o (reg:rest) = do
+buildRegions _ _ [] = mempty
+buildRegions l o (reg:rest) = do
   let e = elfLayoutHeader l
   let d = headerData e
   let o' = nextRegionOffset l o reg
   case reg of
     ElfDataElfHeader -> do
       writeRecord2 ehdrFields d (e,l)
-        <> elfLayoutBytes2 l o' rest
+        <> buildRegions l o' rest
     ElfDataSegmentHeaders -> do
       mconcat (writeRecord2 phdrFields d <$> F.toList (allPhdrs l))
-        <> elfLayoutBytes2 l o' rest
+        <> buildRegions l o' rest
     ElfDataSegment s -> do
       let sz = phdr_padding_count s o
       bldPad sz
-        <> elfLayoutBytes2 l o' (F.toList (elfSegmentData s) ++ rest)
+        <> buildRegions l o' (F.toList (elfSegmentData s) ++ rest)
     ElfDataSectionHeaders -> do
       mconcat (cvtBuilder <$> F.toList (l^.shdrs))
-        <> elfLayoutBytes2 l o' rest
+        <> buildRegions l o' rest
     ElfDataSectionNameTable -> do
       let s = elfNameTableSection (elfLayoutSectionNameData l)
       elfLayoutSection o s
-        <> elfLayoutBytes2 l o' rest
+        <> buildRegions l o' rest
     ElfDataGOT g -> do
       let s = elfGotSection g
       elfLayoutSection o s
-        <> elfLayoutBytes2 l o' rest
+        <> buildRegions l o' rest
     ElfDataSection s -> do
       elfLayoutSection o s
-        <> elfLayoutBytes2 l o' rest
+        <> buildRegions l o' rest
     ElfDataRaw b -> do
       Bld.byteString b
-        <> elfLayoutBytes2 l o' rest
+        <> buildRegions l o' rest
 
 elfLayoutSection :: ElfWidth w
                  => FileOffset w
@@ -389,7 +392,7 @@ nextSectionOffset o s = pad_offset' `incOffset` data_size
         dta = elfSectionData s
         data_size = fromIntegral (B.length dta)
 
-
+{-
 -- | Return the offset after all data in region.
 fileOffsetAfterRegion :: (Bits w, Integral w)
                       => ElfLayout w
@@ -408,7 +411,7 @@ fileOffsetAfterRegions :: (Bits w, Integral w, Foldable t)
                        -> t (ElfDataRegion w)
                        -> FileOffset w
 fileOffsetAfterRegions l = F.foldl' (fileOffsetAfterRegion l)
-
+-}
 ------------------------------------------------------------------------
 -- elfNameTableSection
 
@@ -548,12 +551,13 @@ addSectionToLayout :: ElfWidth w
                    -> ElfLayout w
                    -> ElfSection w
                    -> ElfLayout w
-addSectionToLayout d name_map l s =
-    l & elfOutputSize %~ (`incOffset` rangeSize base o)
+addSectionToLayout d name_map l s = do
+    l & elfOutputSize %~ (`incOffset` (rangeSize base o + data_size))
       & shdrs %~ (Seq.|> writeRecord shdrFields d (s, no, fromFileOffset o))
   where Just no = Map.lookup (elfSectionName s) name_map
         base =  l^.elfOutputSize
         o    = base `alignOffset` elfSectionAddrAlign s
+        data_size = fromIntegral $ B.length $ elfSectionData s
 
 ------------------------------------------------------------------------
 -- elfLayout
@@ -661,6 +665,7 @@ elfLayout' e = initl & flip (foldl impl) (e^.elfFileData)
         impl l (ElfDataSection s) = addSectionToLayout d name_map l s
         impl l (ElfDataRaw b) = l & elfOutputSize %~ (`incOffset` fromIntegral (B.length b))
 
+{-
 -- | Return true if the section headers are stored in a loadable part of
 -- memory.
 loadableSectionHeaders :: Elf w -> Bool
@@ -676,7 +681,7 @@ loadableSectionHeaders e = any containsLoadableSectionHeaders (e^.elfFileData)
         containsSectionHeaders (ElfDataSegment s) =
           any containsSectionHeaders (elfSegmentData s)
         containsSectionHeaders _ = False
-
+-}
 ------------------------------------------------------------------------
 -- Elf Width instances
 
@@ -834,7 +839,7 @@ elfClassElfWidthInstance ELFCLASS64 a = a
 -- | Return the bytes in the Elf file as a lazy bytestring.
 elfLayoutBytes :: ElfLayout w -> L.ByteString
 elfLayoutBytes l = elfClassElfWidthInstance (elfLayoutClass l) $
-    Bld.toLazyByteString $ elfLayoutBytes2 l startOfFile regions
+    Bld.toLazyByteString $ buildRegions l startOfFile regions
   where regions = F.toList (elfLayoutRegions l)
 
 

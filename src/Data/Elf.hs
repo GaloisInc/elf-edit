@@ -27,6 +27,11 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfData(..)
                 , ElfOSABI(..)
                 , ElfType(..)
+                , pattern ET_NONE
+                , pattern ET_REL
+                , pattern ET_EXEC
+                , pattern ET_DYN
+                , pattern ET_CORE
                 , ElfMachine(..)
                 , ElfDataRegion(..)
                 , ElfGOT(..)
@@ -47,13 +52,34 @@ module Data.Elf ( -- * Top-level definitions
                 , elfLayout
                 , elfLayoutBytes
                 , elfLayoutSize
+                , elfMagic
+                , ehdrSize
+                , phdrEntrySize
+                , shdrEntrySize
                   -- * Sections
                 , ElfSection(..)
                   -- ** Elf section type
                 , ElfSectionType(..)
+                , pattern SHT_NULL
+                , pattern SHT_PROGBITS
+                , pattern SHT_SYMTAB
+                , pattern SHT_STRTAB
+                , pattern SHT_RELA
+                , pattern SHT_HASH
+                , pattern SHT_DYNAMIC
+                , pattern SHT_NOTE
+                , pattern SHT_NOBITS
+                , pattern SHT_REL
+                , pattern SHT_SHLIB
+                , pattern SHT_DYNSYM
                   -- ** Elf section flags
                 , ElfSectionFlags
-                , shf_none, shf_write, shf_alloc, shf_execinstr
+                , shf_none
+                , shf_write
+                , shf_alloc
+                , shf_execinstr
+                , shf_merge
+                , shf_tls
                   -- * Segment operations.
                 , ElfSegment(..)
                   -- ** Elf segment type
@@ -71,13 +97,12 @@ module Data.Elf ( -- * Top-level definitions
                   -- ** Elf segment flags
                 , ElfSegmentFlags
                 , pf_none, pf_x, pf_w, pf_r
+                  -- ** ElfMemSize
+                , ElfMemSize(..)
                   -- ** Getting data from Elf segments
                 , allPhdrs
                 , Phdr(..)
                 , phdrFileRange
---                  -- ** Modifications that preserve memory layout.
---                , ElfSegmentUpdater(..)
---                , updateElfLoadableSegment
                   -- * Symbol Table Entries
                 , ElfSymbolTableEntry(..)
                 , ppSymbolTableEntries
@@ -86,7 +111,7 @@ module Data.Elf ( -- * Top-level definitions
                 , findSymbolDefinition
                   -- ** Elf symbol visibility
                 , steVisibility
-                , ElfSymbolVisibility
+                , ElfSymbolVisibility(..)
                 , pattern STV_DEFAULT
                 , pattern STV_INTERNAL
                 , pattern STV_HIDDEN
@@ -314,7 +339,9 @@ getSymbolTableEntry ELFCLASS64 d nameFn = do
                }
 
 -- | The symbol table entries consist of index information to be read from other
--- parts of the ELF file. Some of this information is automatically retrieved
+-- parts of the ELF file.
+--
+-- Some of this information is automatically retrieved
 -- for your convenience (including symbol name, description of the enclosing
 -- section, and definition).
 data ElfSymbolTableEntry w = EST

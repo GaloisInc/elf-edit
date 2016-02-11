@@ -31,6 +31,7 @@ import           Data.Bits
 import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
+import           Data.Foldable (foldl')
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
 import           Data.Word
@@ -181,8 +182,8 @@ sectionFileLen _ s = s
 getShdr32 :: ElfData -> B.ByteString -> GetShdrFn Word32
 getShdr32 d file name_fn = do
   sh_name      <- getWord32 d
-  sh_type      <- toElfSectionType <$> getWord32 d
-  sh_flags     <- ElfSectionFlags  <$> getWord32 d
+  sh_type      <- ElfSectionType  <$> getWord32 d
+  sh_flags     <- ElfSectionFlags <$> getWord32 d
   sh_addr      <- getWord32 d
   sh_offset    <- getWord32 d
   sh_size      <- getWord32 d
@@ -208,8 +209,8 @@ getShdr32 d file name_fn = do
 getShdr64 :: ElfData -> B.ByteString -> GetShdrFn Word64
 getShdr64 er file name_fn = do
   sh_name      <- getWord32 er
-  sh_type      <- toElfSectionType <$> getWord32 er
-  sh_flags     <- ElfSectionFlags  <$> getWord64 er
+  sh_type      <- ElfSectionType  <$> getWord32 er
+  sh_flags     <- ElfSectionFlags <$> getWord64 er
   sh_addr      <- getWord64 er
   sh_offset    <- getWord64 er
   sh_size      <- getWord64 er
@@ -393,10 +394,10 @@ insertSpecialRegion sizeOf r n segs =
 insertSegment :: forall w
                . (Bits w, Integral w, Show w)
               => RegionSizeFn w
+              -> Seq.Seq (ElfDataRegion w)
               -> Phdr w
               -> Seq.Seq (ElfDataRegion w)
-              -> Seq.Seq (ElfDataRegion w)
-insertSegment sizeOf phdr segs =
+insertSegment sizeOf segs phdr =
     case insertAtOffset sizeOf rng (gather szd Seq.empty) segs of
       Left (OverlapSegment _) -> error "Attempt to insert overlapping segments."
       Left OutOfRange -> error "Invalid segment region"
@@ -413,7 +414,8 @@ insertSegment sizeOf phdr segs =
                   -- ^ Segments after insertion point.
                -> Seq.Seq (ElfDataRegion w)
         -- Insert segment if there are 0 bytes left to process.
-        gather 0 l r = ElfDataSegment (d { elfSegmentData = l}) Seq.<| r
+        gather 0 l r =
+          ElfDataSegment (d { elfSegmentData = l}) Seq.<| r
         -- Collect p if it is contained within segment we are inserting.
         gather cnt l r0 =
           case Seq.viewl r0 of
@@ -470,8 +472,7 @@ parseElfRegions epi segments = final
         sections = fmap (getSection' epi (getSectionName names))
                  $ filter (/= shdrNameIdx epi)
                  $ enumCnt 0 (entryNum (shdrTable epi))
-          where
-                names = slice nameRange (fileContents epi)
+          where names = slice nameRange (fileContents epi)
 
         -- Define table with special data regions.
         headers :: [(Range w, ElfDataRegion w)]
@@ -495,8 +496,8 @@ parseElfRegions epi segments = final
                          (insertRawRegion (fileContents epi) Seq.empty)
                          (headers ++ fmap dataSection sections)
 
-        -- Return final section
-        final = foldr (insertSegment sizeOf) initial
+        -- Add in segments
+        final = foldl' (insertSegment sizeOf) initial
                 -- Strip out relro segment (stored in `elfRelroRange')
               $ filter (not . isRelroPhdr) segments
 

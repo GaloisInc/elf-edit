@@ -190,7 +190,7 @@ class Show tp => IsRelocationType tp where
 -- | A relocation entry
 data RelaEntry tp
    = Rela { r_offset :: !(ElfWordType (RelocationWidth tp))
-            -- ^ The location to apply the relocation action.
+            -- ^ Offset in section/segment where relocation should be applied.
           , r_sym    :: !Word32
             -- ^ Offset in symbol table entry relocation refers to.
           , r_type   :: !tp
