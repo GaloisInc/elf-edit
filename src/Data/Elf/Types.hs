@@ -63,6 +63,8 @@ module Data.Elf.Types
     -- ** ElfGOT
   , ElfGOT(..)
   , elfGotSize
+  , elfGotSection
+  , elfGotSectionFlags
     --  * Memory size
   , ElfMemSize(..)
     -- * ElfSegment
@@ -475,7 +477,15 @@ data ElfSection w = ElfSection
     , elfSectionInfo      :: !Word32
       -- ^ Contains extra information for the index, depending on type.
     , elfSectionAddrAlign :: !w
-      -- ^ Contains the required alignment of the section. Must be a power of two.
+      -- ^ Contains the required alignment of the section.  This should be a power of
+      -- two, and the address of the section should be a multiple of the alignment.
+      --
+      -- Note that when writing files, no effort is made to add padding so that the
+      -- alignment constraint is correct.  It is up to the user to insert raw data segments
+      -- as needed for padding.  We considered inserting padding automatically, but this
+      -- can result in extra bytes inadvertently appearing in loadable segments, thus
+      -- breaking layout constraints.  In particular, 'ld' sometimes generates files where
+      -- the '.bss' section address is not a multiple of the alignment.
     , elfSectionEntSize   :: !w
       -- ^ Size of entries if section has a table.
     , elfSectionData      :: !B.ByteString
@@ -496,6 +506,24 @@ data ElfGOT w = ElfGOT
 
 elfGotSize :: Num w => ElfGOT w -> w
 elfGotSize g = fromIntegral (B.length (elfGotData g))
+
+elfGotSectionFlags :: (Bits w, Num w) => ElfSectionFlags w
+elfGotSectionFlags = shf_write .|. shf_alloc
+
+-- | Convert a GOT section to a standard section.
+elfGotSection :: (Bits w, Num w) => ElfGOT w -> ElfSection w
+elfGotSection g =
+  ElfSection { elfSectionName = elfGotName g
+             , elfSectionType = SHT_PROGBITS
+             , elfSectionFlags = elfGotSectionFlags
+             , elfSectionAddr = elfGotAddr g
+             , elfSectionSize = elfGotSize g
+             , elfSectionLink = 0
+             , elfSectionInfo = 0
+             , elfSectionAddrAlign = elfGotAddrAlign g
+             , elfSectionEntSize = elfGotEntSize g
+             , elfSectionData = elfGotData g
+             }
 
 ------------------------------------------------------------------------
 -- ElfSegmentType
@@ -629,6 +657,12 @@ data ElfSegment w = ElfSegment
     -- be congruent to the segment offset in the file modulo 'elfSegmentAlign'.
     -- e.g., if file offset is 'o', alignment is 'n', and virtual address is 'a',
     -- then 'o mod n = a mod n'
+    --
+    -- Note that when writing files, no effort is made to add padding so that the
+    -- alignment property is expected.  It is up to the user to insert raw data segments
+    -- as needed for padding.  We considered inserting padding automatically, but this
+    -- can result in extra bytes inadvertently appearing in loadable segments, thus
+    -- breaking layout constraints.
   , elfSegmentMemSize   :: !(ElfMemSize w)
     -- ^ Size in memory (may be larger then segment data)
   , elfSegmentData     :: !(Seq.Seq (ElfDataRegion w))

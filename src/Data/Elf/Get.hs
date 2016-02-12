@@ -135,7 +135,7 @@ getPhdr32 d = do
           , elfSegmentPhysAddr  = p_paddr
           , elfSegmentAlign     = p_align
           , elfSegmentMemSize   = ElfAbsoluteSize p_memsz
-          , elfSegmentData     = Seq.empty
+          , elfSegmentData      = Seq.empty
           }
   return $! Phdr { phdrSegment   = s
                  , phdrFileStart = FileOffset p_offset
@@ -300,14 +300,16 @@ getSection' epi name_fn i = Get.runGet (getShdr epi name_fn)
 -- Region name
 
 elfDataRegionName :: ElfDataRegion w -> String
-elfDataRegionName ElfDataElfHeader = "elf header"
-elfDataRegionName ElfDataSegmentHeaders = "phdr table"
-elfDataRegionName (ElfDataSegment s) = show (elfSegmentType s) ++ " segment"
-elfDataRegionName ElfDataSectionHeaders = "shdr table"
-elfDataRegionName ElfDataSectionNameTable = "section name table"
-elfDataRegionName (ElfDataGOT g) = elfGotName g
-elfDataRegionName (ElfDataSection s) = elfSectionName s
-elfDataRegionName (ElfDataRaw _) = "elf raw"
+elfDataRegionName reg =
+  case reg of
+    ElfDataElfHeader        -> "elf header"
+    ElfDataSegmentHeaders   -> "phdr table"
+    ElfDataSegment s        -> show (elfSegmentType s) ++ " segment"
+    ElfDataSectionHeaders   -> "shdr table"
+    ElfDataSectionNameTable -> "section name table"
+    ElfDataGOT g            -> elfGotName g
+    ElfDataSection s        -> elfSectionName s
+    ElfDataRaw _            -> "elf raw"
 
 ------------------------------------------------------------------------
 -- Region parsing
@@ -554,13 +556,13 @@ parseElf32ParseInfo d ei_osabi ei_abiver b = do
                       , headerEntry      = e_entry
                       }
   return $! ElfHeaderInfo
-                  { header = hdr
-                  , ehdrSize = e_ehsize
-                  , phdrTable = TableLayout e_phoff e_phentsize e_phnum
-                  , getPhdr = getPhdr32 d
-                  , shdrNameIdx = e_shstrndx
-                  , shdrTable = TableLayout e_shoff e_shentsize e_shnum
-                  , getShdr = getShdr32 d b
+                  { header       = hdr
+                  , ehdrSize     = e_ehsize
+                  , phdrTable    = TableLayout e_phoff e_phentsize e_phnum
+                  , getPhdr      = getPhdr32 d
+                  , shdrNameIdx  = e_shstrndx
+                  , shdrTable    = TableLayout e_shoff e_shentsize e_shnum
+                  , getShdr      = getShdr32 d b
                   , fileContents = b
                   }
 

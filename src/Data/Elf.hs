@@ -35,6 +35,7 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfMachine(..)
                 , ElfDataRegion(..)
                 , ElfGOT(..)
+                , elfGotSection
                 , ElfWidth
                   -- ** Reading Elf files
                 , hasElfMagic
@@ -56,6 +57,9 @@ module Data.Elf ( -- * Top-level definitions
                 , ehdrSize
                 , phdrEntrySize
                 , shdrEntrySize
+                , buildElfHeader
+                , buildElfSegmentHeaderTable
+                , buildElfSectionHeaderTable
                   -- * Sections
                 , ElfSection(..)
                   -- ** Elf section type
@@ -188,6 +192,7 @@ module Data.Elf ( -- * Top-level definitions
                   -- * Common definitions
                 , Range
                 , hasPermissions
+                , stringTable
                 ) where
 
 import           Control.Lens hiding (enum)
