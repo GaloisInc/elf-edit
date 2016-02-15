@@ -115,11 +115,9 @@ tableEntry l i b = L.fromChunks [B.drop (fromIntegral o) b]
 ------------------------------------------------------------------------
 -- GetPhdr
 
--- | Type for reading a elf segment from binary data.
-type GetPhdrFn w = Get (Phdr w)
-
-getPhdr32 :: ElfData -> Get (Phdr Word32)
-getPhdr32 d = do
+-- | Given a
+getPhdr32 :: ElfData -> Word16 -> Get (Phdr Word32)
+getPhdr32 d idx = do
   p_type   <- ElfSegmentType  <$> getWord32 d
   p_offset <- getWord32 d
   p_vaddr  <- getWord32 d
@@ -131,6 +129,7 @@ getPhdr32 d = do
   let s = ElfSegment
           { elfSegmentType      = p_type
           , elfSegmentFlags     = p_flags
+          , elfSegmentIndex     = idx
           , elfSegmentVirtAddr  = p_vaddr
           , elfSegmentPhysAddr  = p_paddr
           , elfSegmentAlign     = p_align
@@ -143,8 +142,8 @@ getPhdr32 d = do
                  , phdrMemSize   = p_memsz
                  }
 
-getPhdr64 :: ElfData -> GetPhdrFn Word64
-getPhdr64 d = do
+getPhdr64 :: ElfData -> Word16 -> Get (Phdr Word64)
+getPhdr64 d idx = do
   p_type   <- ElfSegmentType  <$> getWord32 d
   p_flags  <- ElfSegmentFlags <$> getWord32 d
   p_offset <- getWord64 d
@@ -156,6 +155,7 @@ getPhdr64 d = do
   let s = ElfSegment
          { elfSegmentType     = p_type
          , elfSegmentFlags    = p_flags
+         , elfSegmentIndex    = idx
          , elfSegmentVirtAddr = p_vaddr
          , elfSegmentPhysAddr = p_paddr
          , elfSegmentAlign    = p_align
@@ -244,7 +244,7 @@ data ElfHeaderInfo w = ElfHeaderInfo {
        -- ^ Size of ehdr table
      , phdrTable :: !(TableLayout w)
        -- ^ Layout of segment header table.
-     , getPhdr :: !(GetPhdrFn w)
+     , getPhdr :: !(Word16 -> Get (Phdr w))
        -- ^ Function for reading elf segments.
      , shdrNameIdx :: !Word16
        -- ^ Index of section for storing section names.
@@ -284,17 +284,23 @@ segmentByIndex :: Integral w
                -> Word16 -- ^ Index
                -> Phdr w
 segmentByIndex epi i =
-  Get.runGet (getPhdr epi) (tableEntry (phdrTable epi) i (fileContents epi))
+  Get.runGet (getPhdr epi i) (tableEntry (phdrTable epi) i (fileContents epi))
 
 -- Return section
-getSection' :: Integral w
-            => ElfHeaderInfo w
+getSection' :: ElfHeaderInfo w
             -> (Word32 -> String) -- ^ Maps section index to name to use for section.
             -> Word16 -- ^ Index of section.
             -> (Range w, ElfSection w)
-getSection' epi name_fn i = Get.runGet (getShdr epi name_fn)
-                                       (tableEntry (shdrTable epi) i file)
+getSection' epi name_fn i =
+    elfClassInstances (headerClass (header epi)) $
+      Get.runGet (getShdr epi name_fn)
+                 (tableEntry (shdrTable epi) i file)
   where file = fileContents epi
+
+nameSectionInfo :: ElfHeaderInfo w
+                -> (Range w, B.ByteString)
+nameSectionInfo epi =
+  over _2 elfSectionData $ getSection' epi (\_ -> "") (shdrNameIdx epi)
 
 ------------------------------------------------------------------------
 -- Region name
@@ -451,13 +457,11 @@ getSectionTable epi = V.generate cnt $ getSection
 
         -- Return range used to store name index.
         names :: B.ByteString
-        names = elfClassIntegralInstance c $
-          elfSectionData $ snd $ getSection' epi (\_ -> "") (shdrNameIdx epi)
+        names = snd $ nameSectionInfo epi
 
         getSection :: Int -> ElfSection w
-        getSection i = elfClassIntegralInstance c $
+        getSection i = elfClassInstances c $
           snd $ getSection' epi (getSectionName names) (fromIntegral i)
-
 
 -- | Parse elf region.
 parseElfRegions :: forall w
@@ -468,7 +472,7 @@ parseElfRegions :: forall w
 parseElfRegions epi segments = final
   where -- Return range used to store name index.
         nameRange :: Range w
-        nameRange = fst $ getSection' epi (\_ -> "") (shdrNameIdx epi)
+        nameRange = fst $ nameSectionInfo epi
 
         sections :: [(Range w, ElfSection w)]
         sections = fmap (getSection' epi (getSectionName names))
@@ -506,7 +510,7 @@ parseElfRegions epi segments = final
 getElf :: (Bits w, Integral w, Show w)
        => ElfHeaderInfo w
        -> Elf w
-getElf  epi =
+getElf epi =
     Elf { elfData       = headerData       (header epi)
         , elfClass      = headerClass      (header epi)
         , elfOSABI      = headerOSABI      (header epi)

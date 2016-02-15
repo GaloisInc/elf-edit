@@ -17,6 +17,7 @@ module Data.Elf.Layout
   , buildElfHeader
   , buildElfSegmentHeaderTable
   , buildElfSectionHeaderTable
+  , elfRegionFileSize
     -- * Traversal
   , elfSections
   , updateSections
@@ -40,6 +41,7 @@ import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.UTF8 as B (fromString)
 import qualified Data.Foldable as F
 import           Data.List (sort)
+import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Monoid
 import qualified Data.Sequence as Seq
@@ -113,10 +115,11 @@ data ElfLayout w = ElfLayout {
         -- ^ Elf output size
       , _phdrTableOffset :: !(FileOffset w)
         -- ^ Offset to phdr table.
-      , _preLoadPhdrs :: Seq.Seq (Phdr w)
-        -- ^ Phdrs that must appear before loadable segments.
-      , _phdrs :: Seq.Seq (Phdr w)
-        -- ^ Phdrs that not required to appear before loadable segments.
+      , _phdrs :: !(Map Word16 (Phdr w))
+        -- ^ Map from phdr index to phdr.
+        --
+        -- Once the layout has been generated there should be an
+        -- entry for each index from '0' to the number of phdrs minus one.
       , _shdrTableOffset :: !(FileOffset w)
         -- ^ Offset to section header table.
       , _shstrndx :: Word16
@@ -135,10 +138,7 @@ elfOutputSize = lens _elfOutputSize (\s v -> s { _elfOutputSize = v })
 phdrTableOffset :: Simple Lens (ElfLayout w) (FileOffset w)
 phdrTableOffset = lens _phdrTableOffset (\s v -> s { _phdrTableOffset = v })
 
-preLoadPhdrs :: Simple Lens (ElfLayout w) (Seq.Seq (Phdr w))
-preLoadPhdrs = lens _preLoadPhdrs (\s v -> s { _preLoadPhdrs = v })
-
-phdrs :: Simple Lens (ElfLayout w) (Seq.Seq (Phdr w))
+phdrs :: Simple Lens (ElfLayout w) (Map Word16 (Phdr w))
 phdrs = lens _phdrs (\s v -> s { _phdrs = v })
 
 shdrTableOffset :: Simple Lens (ElfLayout w) (FileOffset w)
@@ -155,14 +155,14 @@ elfLayoutSize :: ElfLayout w -> w
 elfLayoutSize l = w
   where FileOffset w = l^.elfOutputSize
 
-allPhdrs :: ElfLayout w -> Seq.Seq (Phdr w)
-allPhdrs l = l^.preLoadPhdrs Seq.>< l^.phdrs
+allPhdrs :: ElfLayout w -> [Phdr w]
+allPhdrs l = Map.elems (l^.phdrs)
 
 -- | Returns number of segments in layout.
 phnum :: ElfLayout w -> Word16
 phnum l | r < 0 || r > 65536 = error "Number of segments is too large."
-        | otherwise          = fromIntegral $ r
-  where r = Seq.length (l^.preLoadPhdrs) + Seq.length (l^.phdrs)
+        | otherwise          = fromIntegral r
+  where r = Map.size (l^.phdrs)
 
 -- | Return number of sections in layout.
 shnum :: ElfLayout w -> Word16
@@ -232,7 +232,7 @@ buildElfHeader l = writeRecord2 (ehdrFields (headerClass hdr)) d l
 
 buildElfSegmentHeaderTable :: ElfLayout w -> Bld.Builder
 buildElfSegmentHeaderTable l =
-    mconcat $ writeRecord2 (phdrFields (headerClass hdr)) d <$> F.toList (allPhdrs l)
+    mconcat $ writeRecord2 (phdrFields (headerClass hdr)) d <$> allPhdrs l
   where hdr = elfLayoutHeader l
         d = headerData hdr
 
@@ -490,8 +490,11 @@ elfSections' f = updateSections' (fmap Just . f)
 ------------------------------------------------------------------------
 -- Section Elf Layout
 
+elfSectionFileSize :: Integral w => ElfSection w -> w
+elfSectionFileSize s = fromIntegral $ B.length $ elfSectionData s
+
 -- | Add section information to layout.
-addSectionToLayout :: ElfWidth w
+addSectionToLayout :: Integral w
                    => Map.Map String Word32 -- ^ Name to offset map.
                    -> ElfLayout w
                    -> ElfSection w
@@ -503,21 +506,23 @@ addSectionToLayout name_map l s = do
         cl = headerClass (elfLayoutHeader l)
         Just no = Map.lookup (elfSectionName s) name_map
         base =  l^.elfOutputSize
-        data_size = fromIntegral $ B.length $ elfSectionData s
+        data_size = elfSectionFileSize s
 
 ------------------------------------------------------------------------
 -- elfLayout
 
 addRelroToLayout :: Num w => Maybe (Range w) -> ElfLayout w -> ElfLayout w
 addRelroToLayout Nothing l = l
-addRelroToLayout (Just (f,c)) l = l & phdrs %~ (Seq.|> phdr)
-  where s = ElfSegment { elfSegmentType = PT_GNU_RELRO
-                       , elfSegmentFlags = pf_r
+addRelroToLayout (Just (f,c)) l = l & phdrs %~ Map.insert idx phdr
+  where idx = fromIntegral (Map.size (l^.phdrs))
+        s = ElfSegment { elfSegmentType     = PT_GNU_RELRO
+                       , elfSegmentFlags    = pf_r
+                       , elfSegmentIndex    = idx
                        , elfSegmentVirtAddr = f
                        , elfSegmentPhysAddr = f
-                       , elfSegmentAlign = 1
-                       , elfSegmentMemSize = ElfRelativeSize 0
-                       , elfSegmentData = Seq.empty
+                       , elfSegmentAlign    = 1
+                       , elfSegmentMemSize  = ElfRelativeSize 0
+                       , elfSegmentData     = Seq.empty
                        }
 
         phdr = Phdr { phdrSegment   = s
@@ -539,10 +544,23 @@ elfSectionCount e = F.foldl' f 0 (e^.elfFileData)
         f c ElfDataSection{}          = c + 1
         f c _                         = c
 
+-- | Return the size of a region given the elf region data.
+elfRegionFileSize :: ElfLayout w -> ElfDataRegion w -> w
+elfRegionFileSize l reg = elfClassInstances c $ do
+    case reg of
+      ElfDataElfHeader        -> fromIntegral (ehdrSize c)
+      ElfDataSegmentHeaders   -> fromIntegral (phnum l) * fromIntegral (phdrEntrySize c)
+      ElfDataSegment s        -> sum (elfRegionFileSize l <$> elfSegmentData s)
+      ElfDataSectionHeaders   -> fromIntegral (shnum l) * fromIntegral (shdrEntrySize c)
+      ElfDataSectionNameTable -> fromIntegral $ B.length $ elfLayoutSectionNameData l
+      ElfDataGOT g            -> elfGotSize g
+      ElfDataSection s        -> elfSectionFileSize s
+      ElfDataRaw b             -> fromIntegral (B.length b)
+  where c = elfLayoutClass l
+
 -- | Return layout information from elf file.
 elfLayout' :: forall w . ElfWidth w => Elf w -> ElfLayout w
-elfLayout' e = initl & flip (foldl layoutRegion) (e^.elfFileData)
-                     & addRelroToLayout (elfRelroRange e)
+elfLayout' e = final
   where c = elfClass e
         (name_data,name_map) = stringTable $
           elfSectionName <$> toListOf elfSections' e
@@ -555,8 +573,7 @@ elfLayout' e = initl & flip (foldl layoutRegion) (e^.elfFileData)
                           , elfLayoutSectionNameData = name_data
                           , _elfOutputSize = startOfFile
                           , _phdrTableOffset = startOfFile
-                          , _preLoadPhdrs = Seq.empty
-                          , _phdrs = Seq.empty
+                          , _phdrs = Map.empty
                           , _shdrTableOffset = startOfFile
                           , _shstrndx = 0
                           , _shdrs = Seq.empty
@@ -589,12 +606,12 @@ elfLayout' e = initl & flip (foldl layoutRegion) (e^.elfFileData)
                             , phdrFileSize  = seg_size
                             , phdrMemSize   = mem_size
                             }
+                idx = elfSegmentIndex s
                 -- Add segment to appropriate
                 l3 :: ElfLayout w
-                l3 | isPreloadPhdr (elfSegmentType s)
-                   = l2 & preLoadPhdrs %~ (Seq.|> phdr)
-                   | otherwise
-                   = l2 & phdrs        %~ (Seq.|> phdr)
+                l3 | Map.member idx (l2^.phdrs) =
+                     error $ "Segment index " ++ show idx ++ " already exists."
+                   | otherwise = l2 & phdrs %~ Map.insert idx phdr
         layoutRegion l ElfDataSectionHeaders =
              l & elfOutputSize   %~ (`incOffset` shdr_size)
                & shdrTableOffset .~ l^.elfOutputSize
@@ -607,6 +624,9 @@ elfLayout' e = initl & flip (foldl layoutRegion) (e^.elfFileData)
         layoutRegion l (ElfDataSection s) = addSectionToLayout name_map l s
         layoutRegion l (ElfDataRaw b) =
           l & elfOutputSize %~ (`incOffset` fromIntegral (B.length b))
+
+        final = initl & flip (foldl layoutRegion) (e^.elfFileData)
+                      & addRelroToLayout (elfRelroRange e)
 
 {-
 -- | Return true if the section headers are stored in a loadable part of

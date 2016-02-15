@@ -60,6 +60,7 @@ module Data.Elf ( -- * Top-level definitions
                 , buildElfHeader
                 , buildElfSegmentHeaderTable
                 , buildElfSectionHeaderTable
+                , elfRegionFileSize
                   -- * Sections
                 , ElfSection(..)
                   -- ** Elf section type
@@ -95,9 +96,15 @@ module Data.Elf ( -- * Top-level definitions
                 , pattern PT_NOTE
                 , pattern PT_SHLIB
                 , pattern PT_PHDR
+                , pattern PT_TLS
+                , pattern PT_NUM
+                , pattern PT_LOOS
                 , pattern PT_GNU_EH_FRAME
                 , pattern PT_GNU_STACK
                 , pattern PT_GNU_RELRO
+                , pattern PT_HIOS
+                , pattern PT_LOPROC
+                , pattern PT_HIPROC
                   -- ** Elf segment flags
                 , ElfSegmentFlags
                 , pf_none, pf_x, pf_w, pf_r
@@ -300,6 +307,22 @@ instance Show ElfSymbolVisibility where
 ------------------------------------------------------------------------
 -- ElfSymbolTableEntry
 
+-- | The symbol table entries consist of index information to be read from other
+-- parts of the ELF file.
+--
+-- Some of this information is automatically retrieved
+-- for your convenience (including symbol name, description of the enclosing
+-- section, and definition).
+data ElfSymbolTableEntry w = EST
+    { steName             :: String
+    , steType             :: ElfSymbolType
+    , steBind             :: ElfSymbolBinding
+    , steOther            :: Word8
+    , steIndex            :: ElfSectionIndex  -- ^ Section in which the def is held
+    , steValue            :: w -- ^ Value associated with symbol.
+    , steSize             :: w
+    } deriving (Eq, Show)
+
 symbolTableEntrySize :: ElfClass w -> w
 symbolTableEntrySize ELFCLASS32 = 16
 symbolTableEntrySize ELFCLASS64 = 24
@@ -342,22 +365,6 @@ getSymbolTableEntry ELFCLASS64 d nameFn = do
                , steValue = symVal
                , steSize = size
                }
-
--- | The symbol table entries consist of index information to be read from other
--- parts of the ELF file.
---
--- Some of this information is automatically retrieved
--- for your convenience (including symbol name, description of the enclosing
--- section, and definition).
-data ElfSymbolTableEntry w = EST
-    { steName             :: String
-    , steType             :: ElfSymbolType
-    , steBind             :: ElfSymbolBinding
-    , steOther            :: Word8
-    , steIndex            :: ElfSectionIndex  -- ^ Section in which the def is held
-    , steValue            :: w -- ^ Value associated with symbol.
-    , steSize             :: w
-    } deriving (Eq, Show)
 
 steEnclosingSection :: Elf w -> ElfSymbolTableEntry w -> Maybe (ElfSection w)
 steEnclosingSection e s = sectionByIndex e (steIndex s)
@@ -416,7 +423,7 @@ getSymbolTableEntries e s =
 -- If the size is zero, or the offset larger than the 'elfSectionData',
 -- then 'Nothing' is returned.
 findSymbolDefinition :: Elf w -> ElfSymbolTableEntry w -> Maybe B.ByteString
-findSymbolDefinition elf e = elfClassIntegralInstance (elfClass elf) $
+findSymbolDefinition elf e = elfClassInstances (elfClass elf) $
     let enclosingData = elfSectionData <$> steEnclosingSection elf e
         start = steValue e
         len = steSize e
@@ -680,7 +687,7 @@ addressToFile :: Monad m
               -> String
               -> w -- ^ Address in memory.
               -> m L.ByteString
-addressToFile l b nm w = elfClassIntegralInstance (elfLayoutClass l) $
+addressToFile l b nm w = elfClassInstances (elfLayoutClass l) $
   case fileOffsetOfAddr w l of
     [] -> fail $ "Could not find " ++ nm ++ "."
     [r] -> return (sliceL r b)
@@ -708,7 +715,7 @@ addressRangeToFile :: Monad m
                    -> String
                    -> Range w
                    -> m L.ByteString
-addressRangeToFile l b nm rMem = elfClassIntegralInstance (elfLayoutClass l) $
+addressRangeToFile l b nm rMem = elfClassInstances (elfLayoutClass l) $
   case fileOffsetOfRange rMem l of
     [] -> fail $ "Could not find " ++ nm ++ "."
     [r] -> return (sliceL r b)
@@ -758,7 +765,7 @@ dynSymTab :: Monad m
           -> L.ByteString
           -> DynamicMap w
           -> m [ElfSymbolTableEntry w]
-dynSymTab e l file m = elfClassIntegralInstance (elfClass e) $ do
+dynSymTab e l file m = elfClassInstances (elfClass e) $ do
   let cl = elfClass e
   -- Get string table.
   strTab <- dynStrTab l file m
@@ -1019,7 +1026,7 @@ dynamicEntries :: forall s tp m
                 . (IsRelocationType tp, Monad m)
                => Elf (ElfWordType (RelocationWidth tp))
                -> m (Maybe (DynamicSection (ElfWordType (RelocationWidth tp)) s tp))
-dynamicEntries e = elfClassIntegralInstance (elfClass e) $ do
+dynamicEntries e = elfClassInstances (elfClass e) $ do
   let w :: RelaWidth (RelocationWidth tp)
       w = relaWidth (undefined :: tp)
   let l :: ElfLayout (ElfWordType (RelocationWidth tp))

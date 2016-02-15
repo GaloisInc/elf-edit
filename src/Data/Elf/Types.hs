@@ -14,7 +14,7 @@ module Data.Elf.Types
   , fromElfClass
   , SomeElfClass(..)
   , toSomeElfClass
-  , elfClassIntegralInstance
+  , elfClassInstances
     -- **  ElfData
   , ElfData(..)
   , fromElfData
@@ -190,9 +190,11 @@ toSomeElfClass 1 = Just (SomeElfClass ELFCLASS32)
 toSomeElfClass 2 = Just (SomeElfClass ELFCLASS64)
 toSomeElfClass _ = Nothing
 
-elfClassIntegralInstance :: ElfClass w -> ((Bits w, Integral w) => a) -> a
-elfClassIntegralInstance ELFCLASS32 a = a
-elfClassIntegralInstance ELFCLASS64 a = a
+-- | Given a provides a way to access 'Bits', 'Integral' and 'Show' instances
+-- of underlying word types associated with an 'ElfClass'.
+elfClassInstances :: ElfClass w -> ((Bits w, Integral w, Show w) => a) -> a
+elfClassInstances ELFCLASS32 a = a
+elfClassInstances ELFCLASS64 a = a
 
 ------------------------------------------------------------------------
 -- ElfData
@@ -633,12 +635,22 @@ data ElfMemSize w
 ------------------------------------------------------------------------
 -- ElfSegment and ElfDataRegion
 
--- | Information about an elf segment (parameter is for type of data).
+-- | Information about an elf segment
+--
+-- The parameter should be a 'Word32' or 'Word64' depending on whether this
+-- is a 32 or 64-bit elf file.
 data ElfSegment w = ElfSegment
   { elfSegmentType      :: !ElfSegmentType
     -- ^ Segment type
   , elfSegmentFlags     :: !ElfSegmentFlags
     -- ^ Segment flags
+  , elfSegmentIndex     :: !Word16
+    -- ^ A 0-based index indicating the position of the segment in the Phdr table
+    --
+    -- The index of a segment should be unique and range from '0' to one less than
+    -- the number of segemnts in the Elf file.
+    -- Since the phdr table is typically stored in a loaded segment, the number of
+    -- entries affects the layout of binaries.
   , elfSegmentVirtAddr  :: !w
     -- ^ Virtual address for the segment
   , elfSegmentPhysAddr  :: !w
@@ -701,14 +713,15 @@ data ElfDataRegion w
 
 ppSegment :: (Bits w, Integral w, Show w) => ElfSegment w -> Doc
 ppSegment s =
-    text "type: " <+> ppShow (elfSegmentType s) <$$>
-    text "flags:" <+> ppShow (elfSegmentFlags s) <$$>
-    text "vaddr:" <+> text (ppHex (elfSegmentVirtAddr s)) <$$>
-    text "paddr:" <+> text (ppHex (elfSegmentPhysAddr s)) <$$>
-    text "align:" <+> ppShow (elfSegmentAlign s) <$$>
-    text "msize:" <+> ppShow (elfSegmentMemSize s) <$$>
-    text "data:"  <$$>
-    indent 2 (ppShow (F.toList (elfSegmentData s)))
+  text "type: " <+> ppShow (elfSegmentType s) <$$>
+  text "flags:" <+> ppShow (elfSegmentFlags s) <$$>
+  text "index:" <+> ppShow (elfSegmentIndex s) <$$>
+  text "vaddr:" <+> text (ppHex (elfSegmentVirtAddr s)) <$$>
+  text "paddr:" <+> text (ppHex (elfSegmentPhysAddr s)) <$$>
+  text "align:" <+> ppShow (elfSegmentAlign s) <$$>
+  text "msize:" <+> ppShow (elfSegmentMemSize s) <$$>
+  text "data:"  <$$>
+  indent 2 (ppShow (F.toList (elfSegmentData s)))
 
 instance (Bits w, Integral w, Show w) => Show (ElfSegment w) where
   show s = show (ppSegment s)
@@ -746,7 +759,7 @@ data Elf w = Elf
 
 -- | Create an empty elf file.
 emptyElf :: ElfData -> ElfClass w -> ElfType -> ElfMachine -> Elf w
-emptyElf d c tp m = elfClassIntegralInstance c $
+emptyElf d c tp m = elfClassInstances c $
   Elf { elfData       = d
       , elfClass      = c
       , elfOSABI      = ELFOSABI_SYSV
