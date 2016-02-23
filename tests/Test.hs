@@ -23,7 +23,9 @@ testIdentityTransform fp = do
       let ex = concat (parseSymbolTables e)
           act = concat (parseSymbolTables e')
       assertEqual "Symbol table sizes" (length ex) (length act)
-      return ()
+      int <- elfInterpreter e
+      int' <- elfInterpreter e'
+      assertEqual "Interpreter" int int'
 
 withElf :: B.ByteString -> (forall w . Elf w -> Assertion) -> Assertion
 withElf bs f =
