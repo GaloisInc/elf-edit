@@ -18,14 +18,15 @@ testIdentityTransform :: FilePath -> Assertion
 testIdentityTransform fp = do
   bs <- B.readFile fp
   withElf bs $ \e -> do
+    int0 <- elfInterpreter e
+    assertEqual "Interpreter Name" (Just "/lib64/ld-linux-x86-64.so.2\0") int0
     withElf (LB.toStrict (renderElf e)) $ \e' -> do
       assertEqual "Segment Count" (length (elfSegments e)) (length (elfSegments e'))
       let ex = concat (parseSymbolTables e)
           act = concat (parseSymbolTables e')
       assertEqual "Symbol table sizes" (length ex) (length act)
-      int <- elfInterpreter e
-      int' <- elfInterpreter e'
-      assertEqual "Interpreter" int int'
+      int1 <- elfInterpreter e'
+      assertEqual "Interpreter" int0 int1
 
 withElf :: B.ByteString -> (forall w . Elf w -> Assertion) -> Assertion
 withElf bs f =
