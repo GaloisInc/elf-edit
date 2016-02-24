@@ -399,6 +399,7 @@ insertSpecialRegion sizeOf r n segs =
         fn _ = error $ "Elf file contained a non-empty header that overlapped with another.\n"
                        ++ "  This is not supported by the Elf parser."
 
+-- | Insert a segment/phdr into a sequence of elf regions, returning the new sequence.
 insertSegment :: forall w
                . (Bits w, Integral w, Show w)
               => RegionSizeFn w
@@ -639,7 +640,7 @@ parseElfHeaderInfo b = parseElfResult $ flip Get.runGetOrFail (L.fromChunks [b])
   ei_version <- getWord8
   unless (ei_version == expectedElfVersion) $
     fail "Invalid version number for ELF"
-  ei_osabi    <- toElfOSABI <$> getWord8
+  ei_osabi    <- ElfOSABI <$> getWord8
   ei_abiver   <- getWord8
   skip 7
   case ei_class of

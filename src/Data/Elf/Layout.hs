@@ -43,9 +43,11 @@ import qualified Data.Foldable as F
 import           Data.List (sort)
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Maybe
 import           Data.Monoid
 import qualified Data.Sequence as Seq
 import           Data.Word
+import           Numeric
 
 import           Data.Elf.Types
 
@@ -88,6 +90,45 @@ data Phdr w = Phdr { phdrSegment   :: !(ElfSegment w)
                    , phdrFileSize  :: !w
                    , phdrMemSize   :: !w
                    }
+
+alignLeft :: Int -> String -> Char -> String
+alignLeft n s c | l < n = s ++ replicate (n - l) c
+                | otherwise = take n s
+  where l = length s
+
+alignRight :: Int -> Char -> String -> String
+alignRight n c s | l < n = replicate (n - l) c ++ s
+                 | otherwise = take n s
+  where l = length s
+
+fixedHex :: Integral a => Int -> a -> String
+fixedHex n v = alignRight n '0' s
+  where s = showHex (toInteger v) ""
+
+showSegFlags :: ElfSegmentFlags -> String
+showSegFlags f =
+    [ ' '
+    , set_if pf_r 'R'
+    , set_if pf_w 'W'
+    , set_if pf_x 'E'
+    ]
+  where set_if req c | f `hasPermissions` req = c
+                     | otherwise = ' '
+
+instance (Integral w) => Show (Phdr w) where
+  show p = unlines (unwords <$> [ col1, col2 ])
+    where seg = phdrSegment p
+          col1 = [ alignLeft 15 (show (elfSegmentType seg)) ' '
+                 , "0x" ++ fixedHex 16 (fromFileOffset (phdrFileStart p))
+                 , "0x" ++ fixedHex 16 (elfSegmentVirtAddr seg)
+                 , "0x" ++ fixedHex 16 (elfSegmentPhysAddr seg)
+                 ]
+          col2 = [ replicate 14 ' '
+                 , "0x" ++ fixedHex 16 (phdrFileSize p)
+                 , "0x" ++ fixedHex 16 (phdrMemSize  p)
+                 , alignLeft 7 (showSegFlags (elfSegmentFlags seg)) ' '
+                 , showHex (toInteger (elfSegmentAlign seg)) ""
+                 ]
 
 phdrFileRange :: Phdr w -> Range w
 phdrFileRange phdr = (fromFileOffset (phdrFileStart phdr), phdrFileSize phdr)
@@ -169,7 +210,6 @@ shnum :: ElfLayout w -> Word16
 shnum l | r > 65536 = error "Number of sections is too large."
         | otherwise = fromIntegral r
   where r = Seq.length $ l^.shdrs
-
 
 ------------------------------------------------------------------------
 -- ElfField
@@ -565,7 +605,11 @@ elfLayout' e = final
         (name_data,name_map) = stringTable $
           elfSectionName <$> toListOf elfSections' e
 
+        has_relro = isJust (elfRelroRange e)
+
         phdr_cnt = elfSegmentCount e
+                 + (if has_relro then 1 else 0)
+
         shdr_cnt = elfSectionCount e
 
         initl = ElfLayout { elfLayoutHeader = elfHeader e

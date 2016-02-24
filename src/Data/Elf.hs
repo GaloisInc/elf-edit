@@ -228,12 +228,6 @@ import           Data.Elf.Types
 ------------------------------------------------------------------------
 -- Utilities
 
-
--- | @p `hasPermissions` req@ returns true if all bits set in 'req' are set in 'p'.
-hasPermissions :: Bits b => b -> b -> Bool
-hasPermissions p req = (p .&. req) == req
-{-# INLINE hasPermissions #-}
-
 -- | Returns null-terminated string at given index in bytestring.
 lookupStringL :: Int64 -> L.ByteString -> L.ByteString
 lookupStringL o b = L.takeWhile (/= 0) $ L.drop o b

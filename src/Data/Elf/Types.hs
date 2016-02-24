@@ -21,7 +21,22 @@ module Data.Elf.Types
   , toElfData
     -- ** ElfOSABI
   , ElfOSABI(..)
-  , toElfOSABI
+  , pattern ELFOSABI_SYSV
+  , pattern ELFOSABI_HPUX
+  , pattern ELFOSABI_NETBSD
+  , pattern ELFOSABI_LINUX
+  , pattern ELFOSABI_SOLARIS
+  , pattern ELFOSABI_AIX
+  , pattern ELFOSABI_IRIS
+  , pattern ELFOSABI_FREEBSD
+  , pattern ELFOSABI_TRU64
+  , pattern ELFOSABI_MODESTO
+  , pattern ELFOSABI_OPENBSD
+  , pattern ELFOSABI_OPENVMS
+  , pattern ELFOSABI_NSK
+  , pattern ELFOSABI_AROS
+  , pattern ELFOSABI_ARM
+  , pattern ELFOSABI_STANDALONE
   , fromElfOSABI
     -- ** ElfType
   , ElfType(..)
@@ -102,6 +117,7 @@ module Data.Elf.Types
   , sliceL
     -- * Utilities
   , enumCnt
+  , hasPermissions
   , ppHex
   ) where
 
@@ -119,6 +135,11 @@ import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.Elf.TH
+
+-- | @p `hasPermissions` req@ returns true if all bits set in 'req' are set in 'p'.
+hasPermissions :: Bits b => b -> b -> Bool
+hasPermissions p req = (p .&. req) == req
+{-# INLINE hasPermissions #-}
 
 ------------------------------------------------------------------------
 -- Range
@@ -217,26 +238,56 @@ fromElfData ELFDATA2MSB = 2
 -- ElfOSABI
 
 -- | A flag identifying the OS or ABI specific Elf extensions used.
-[enum|
- ElfOSABI :: Word8
- ELFOSABI_SYSV         0 -- ^ No extensions or unspecified
- ELFOSABI_HPUX         1 -- ^ Hewlett-Packard HP-UX
- ELFOSABI_NETBSD       2 -- ^ NetBSD
- ELFOSABI_LINUX        3 -- ^ Linux
- ELFOSABI_SOLARIS      6 -- ^ Sun Solaris
- ELFOSABI_AIX          7 -- ^ AIX
- ELFOSABI_IRIX         8 -- ^ IRIX
- ELFOSABI_FREEBSD      9 -- ^ FreeBSD
- ELFOSABI_TRU64       10 -- ^ Compaq TRU64 UNIX
- ELFOSABI_MODESTO     11 -- ^ Novell Modesto
- ELFOSABI_OPENBSD     12 -- ^ Open BSD
- ELFOSABI_OPENVMS     13 -- ^ Open VMS
- ELFOSABI_NSK         14 -- ^ Hewlett-Packard Non-Stop Kernel
- ELFOSABI_AROS        15 -- ^ Amiga Research OS
- ELFOSABI_ARM         97 -- ^ ARM
- ELFOSABI_STANDALONE 255 -- ^ Standalone (embedded) application
- ELFOSABI_EXT          _ -- ^ Other
-|]
+newtype ElfOSABI = ElfOSABI { fromElfOSABI :: Word8 }
+  deriving (Eq, Ord, Show)
+
+-- | No extensions or unspecified
+pattern ELFOSABI_SYSV = ElfOSABI 0
+
+-- | Hewlett-Packard HP-UX
+pattern ELFOSABI_HPUX = ElfOSABI 1
+
+-- | NetBSD
+pattern ELFOSABI_NETBSD = ElfOSABI 2
+
+-- | Linux
+pattern ELFOSABI_LINUX = ElfOSABI 3
+
+-- | Sun Solaris
+pattern ELFOSABI_SOLARIS = ElfOSABI 6
+
+-- | AIX
+pattern ELFOSABI_AIX = ElfOSABI 7
+
+-- | IRIX
+pattern ELFOSABI_IRIS = ElfOSABI 8
+
+-- | FreeBSD
+pattern ELFOSABI_FREEBSD = ElfOSABI 9
+
+-- | Compat TRU64 Unix
+pattern ELFOSABI_TRU64 = ElfOSABI 10
+
+-- | Novell Modesto
+pattern ELFOSABI_MODESTO = ElfOSABI 11
+
+-- | Open BSD
+pattern ELFOSABI_OPENBSD = ElfOSABI 12
+
+-- | Open VMS
+pattern ELFOSABI_OPENVMS = ElfOSABI 13
+
+-- | Hewlett-Packard Non-Stop Kernel
+pattern ELFOSABI_NSK = ElfOSABI 14
+
+-- | Amiga Research OS
+pattern ELFOSABI_AROS = ElfOSABI 15
+
+-- | ARM
+pattern ELFOSABI_ARM = ElfOSABI 97
+
+-- | Standalone (embedded) application
+pattern ELFOSABI_STANDALONE = ElfOSABI 255
 
 ------------------------------------------------------------------------
 -- ElfType
