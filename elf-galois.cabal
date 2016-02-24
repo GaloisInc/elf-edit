@@ -45,9 +45,27 @@ library
 
 test-suite test-elf
   type: exitcode-stdio-1.0
-  main-is: tests/Test.hs
+  main-is: Test.hs
+  ghc-options: -Wall
+  hs-source-dirs: src,tests
+  other-modules:
+    Data.Elf.DynamicArrayTag
+    Data.Elf.Get
+    Data.Elf.Layout
+    Data.Elf.Lexer
+    Data.Elf.Parser
+    Data.Elf.Relocations
+    Data.Elf.TH
+    Data.Elf.Types
   build-depends:
     base,
     bytestring,
-    elf-galois,
-    HUnit
+    vector,
+    containers,
+    ansi-wl-pprint,
+    binary,
+    array,
+    utf8-string, template-haskell, lens,
+    tasty >= 0.9,
+    tasty-hunit >= 0.8,
+    tasty-quickcheck >= 0.8
