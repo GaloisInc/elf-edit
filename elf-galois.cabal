@@ -49,6 +49,7 @@ test-suite test-elf
   ghc-options: -Wall
   hs-source-dirs: src,tests
   other-modules:
+    Data.Elf
     Data.Elf.DynamicArrayTag
     Data.Elf.Get
     Data.Elf.Layout

@@ -28,7 +28,6 @@ testIdentityTransform fp = do
   bs <- B.readFile fp
   withElf bs $ \e -> do
     int0 <- elfInterpreter e
-    T.assertEqual "Interpreter Name" (Just "/lib64/ld-linux-x86-64.so.2\0") int0
     withElf (LB.toStrict (renderElf e)) $ \e' -> do
       T.assertEqual "Segment Count" (length (elfSegments e)) (length (elfSegments e'))
       let ex = concat (parseSymbolTables e)
@@ -58,6 +57,7 @@ withElf bs f =
 tests :: T.TestTree
 tests = T.testGroup "ELF Tests"
     [ T.testCase "Empty ELF" testEmptyElf
+    , T.testCase "Identity Transformation (simple static)" (testIdentityTransform "./tests/simple.static.elf")
     , T.testCase "Identity Transformation (simple)" (testIdentityTransform "./tests/simple.elf")
     , T.testProperty "stringTable consistency" stringTableConsistencyProp
     ]
