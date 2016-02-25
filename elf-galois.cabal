@@ -52,10 +52,7 @@ test-suite test-elf
     Data.Elf.Enums
     Data.Elf.Get
     Data.Elf.Layout
-    Data.Elf.Lexer
-    Data.Elf.Parser
     Data.Elf.Relocations
-    Data.Elf.TH
     Data.Elf.Types
   build-depends:
     base,
