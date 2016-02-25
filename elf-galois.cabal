@@ -62,7 +62,7 @@ test-suite test-elf
     ansi-wl-pprint,
     binary,
     array,
-    utf8-string, template-haskell, lens,
+    utf8-string, lens,
     tasty >= 0.9,
     tasty-hunit >= 0.8,
     tasty-quickcheck >= 0.8
