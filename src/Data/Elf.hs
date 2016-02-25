@@ -25,14 +25,7 @@ module Data.Elf ( -- * Top-level definitions
                   -- ** Top-level Elf information
                 , ElfClass(..)
                 , ElfData(..)
-                , ElfOSABI(..)
-                , ElfType(..)
-                , pattern ET_NONE
-                , pattern ET_REL
-                , pattern ET_EXEC
-                , pattern ET_DYN
-                , pattern ET_CORE
-                , ElfMachine(..)
+                , module Data.Elf.Enums
                 , ElfDataRegion(..)
                 , ElfGOT(..)
                 , elfGotSection
@@ -224,6 +217,7 @@ import           Data.Elf.DynamicArrayTag
 import           Data.Elf.Get
 import           Data.Elf.Layout
 import           Data.Elf.Relocations
+import           Data.Elf.Enums
 import           Data.Elf.Types
 
 ------------------------------------------------------------------------
