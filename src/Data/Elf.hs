@@ -63,6 +63,7 @@ module Data.Elf ( -- * Top-level definitions
                 , elfRegionFileSize
                   -- * Sections
                 , ElfSection(..)
+                , elfSectionFileSize
                   -- ** Elf section type
                 , ElfSectionType(..)
                 , pattern SHT_NULL
@@ -214,7 +215,7 @@ import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.Foldable as F
 import           Data.Int
 import           Data.List (genericDrop, foldl')
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import           Data.Maybe
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
