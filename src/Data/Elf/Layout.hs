@@ -21,6 +21,8 @@ module Data.Elf.Layout
     -- * Traversal
   , elfSections
   , updateSections
+  , traverseElfSegments
+  , updateSegments
     -- * Low level constants
   , elfMagic
   , ehdrSize
@@ -523,6 +525,20 @@ updateSections' fn e0 = elfFileData (updateSeq impl) e0
         impl (ElfDataSection s) = fmap norm <$> fn s
         impl d = pure (Just d)
 
+updateSegments' :: forall w f . (Monad f, Bits w, Num w)
+                => (ElfSegment w -> f (Maybe (ElfSegment w)))
+                -> Elf w
+                -> f (Elf w)
+updateSegments' fn = elfFileData (updateSeq impl)
+  where
+    impl (ElfDataSegment seg) =
+      let inner = updateSeq impl (elfSegmentData seg)
+          updateData s d = s { elfSegmentData = d }
+          newSeg :: (Monad f) => f (Maybe (ElfSegment w))
+          newSeg = fn =<< (fmap (updateData seg) inner)
+      in fmap ElfDataSegment <$> newSeg
+    impl d = pure (Just d)
+
 -- | Traverse elf sections
 elfSections' :: (Bits w, Num w) => Simple Traversal (Elf w) (ElfSection w)
 elfSections' f = updateSections' (fmap Just . f)
@@ -648,7 +664,7 @@ elfLayout' e = final
                 phdr = Phdr { phdrSegment = s
                             , phdrFileStart = seg_offset
                             , phdrFileSize  = seg_size
-                            , phdrMemSize   = mem_size
+                            , phdrMemSize   = mem_size -- FIXME: Not large enough -- things work if this is seg_size
                             }
                 idx = elfSegmentIndex s
                 -- Add segment to appropriate
@@ -864,9 +880,18 @@ updateSections :: Traversal (Elf w) (Elf w) (ElfSection w) (Maybe (ElfSection w)
 updateSections fn e0 = elfClassElfWidthInstance (elfClass e0) $
   updateSections' fn e0
 
+-- | Traverse segments in an ELF file and modify or delete them
+updateSegments :: (Monad f) => (ElfSegment w -> f (Maybe (ElfSegment w))) -> Elf w -> f (Elf w)
+updateSegments fn e0 = elfClassElfWidthInstance (elfClass e0) $
+  updateSegments' fn e0
+
 -- | Traverse elf sections
 elfSections :: Simple Traversal (Elf w) (ElfSection w)
 elfSections f = updateSections (fmap Just . f)
+
+-- | Traverse elf segments
+traverseElfSegments :: (Monad f) => (ElfSegment w -> f (ElfSegment w)) -> Elf w -> f (Elf w)
+traverseElfSegments f = updateSegments (fmap Just . f)
 
 -- | Return layout information from elf file.
 elfLayout :: Elf w -> ElfLayout w

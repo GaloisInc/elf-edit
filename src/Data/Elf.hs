@@ -17,6 +17,7 @@ module Data.Elf ( -- * Top-level definitions
                 , emptyElf
                 , elfFileData
                 , elfSegments
+                , traverseElfSegments
                 , elfSections
                 , findSectionByName
                 , removeSectionByName
