@@ -135,12 +135,6 @@ instance (Integral w) => Show (Phdr w) where
 phdrFileRange :: Phdr w -> Range w
 phdrFileRange phdr = (fromFileOffset (phdrFileStart phdr), phdrFileSize phdr)
 
--- | Returns true if the segment should appear before a loadable segment.
-isPreloadPhdr :: ElfSegmentType -> Bool
-isPreloadPhdr PT_PHDR = True
-isPreloadPhdr PT_INTERP = True
-isPreloadPhdr _ = False
-
 ------------------------------------------------------------------------
 -- ElfLayout
 
@@ -545,9 +539,6 @@ elfSections' f = updateSections' (fmap Just . f)
 
 ------------------------------------------------------------------------
 -- Section Elf Layout
-
-elfSectionFileSize :: Integral w => ElfSection w -> w
-elfSectionFileSize s = fromIntegral $ B.length $ elfSectionData s
 
 -- | Add section information to layout.
 addSectionToLayout :: Integral w

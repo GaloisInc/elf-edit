@@ -533,7 +533,7 @@ parseElf32ParseInfo :: ElfData
                     -> Get (ElfHeaderInfo Word32)
 parseElf32ParseInfo d ei_osabi ei_abiver b = do
   e_type      <- ElfType      <$> getWord16 d
-  e_machine   <- toElfMachine <$> getWord16 d
+  e_machine   <- ElfMachine   <$> getWord16 d
   e_version   <- getWord32 d
   when (fromIntegral expectedElfVersion /= e_version) $
     fail "ELF Version mismatch"
@@ -579,8 +579,8 @@ parseElf64ParseInfo :: ElfData
                     -> B.ByteString
                     -> Get (ElfHeaderInfo Word64)
 parseElf64ParseInfo d ei_osabi ei_abiver b = do
-  e_type      <- ElfType      <$> getWord16 d
-  e_machine   <- toElfMachine <$> getWord16 d
+  e_type      <- ElfType    <$> getWord16 d
+  e_machine   <- ElfMachine <$> getWord16 d
   e_version   <- getWord32 d
   when (fromIntegral expectedElfVersion /= e_version) $
     fail "ELF Version mismatch"

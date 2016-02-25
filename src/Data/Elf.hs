@@ -26,14 +26,7 @@ module Data.Elf ( -- * Top-level definitions
                   -- ** Top-level Elf information
                 , ElfClass(..)
                 , ElfData(..)
-                , ElfOSABI(..)
-                , ElfType(..)
-                , pattern ET_NONE
-                , pattern ET_REL
-                , pattern ET_EXEC
-                , pattern ET_DYN
-                , pattern ET_CORE
-                , ElfMachine(..)
+                , module Data.Elf.Enums
                 , ElfDataRegion(..)
                 , ElfGOT(..)
                 , elfGotSection
@@ -64,6 +57,7 @@ module Data.Elf ( -- * Top-level definitions
                 , elfRegionFileSize
                   -- * Sections
                 , ElfSection(..)
+                , elfSectionFileSize
                   -- ** Elf section type
                 , ElfSectionType(..)
                 , pattern SHT_NULL
@@ -215,7 +209,7 @@ import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.Foldable as F
 import           Data.Int
 import           Data.List (genericDrop, foldl')
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import           Data.Maybe
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
@@ -224,6 +218,7 @@ import           Data.Elf.DynamicArrayTag
 import           Data.Elf.Get
 import           Data.Elf.Layout
 import           Data.Elf.Relocations
+import           Data.Elf.Enums
 import           Data.Elf.Types
 
 ------------------------------------------------------------------------
