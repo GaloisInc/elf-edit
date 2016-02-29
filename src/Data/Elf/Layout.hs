@@ -419,22 +419,25 @@ type StringTable = (Map.Map B.ByteString Word32, Word32, Bld.Builder)
 
 insertTail :: B.ByteString
            -> Word32
-           -> Word32
            -> Map.Map B.ByteString Word32
            -> Map.Map B.ByteString Word32
-insertTail bs base i = Map.insertWith (\_n o -> o) (B.drop (fromIntegral i) bs) offset
-  where offset  = base + fromIntegral i
+insertTail bs base  m
+  | B.null bs = m
+  | otherwise =
+    insertTail (B.tail bs) (base + 1) $!
+      Map.insertWith (\_ -> id) bs base m
 
 -- | Insert bytestring in list of strings.
 insertString :: StringTable -> B.ByteString -> StringTable
 insertString a@(m, base, b) bs
     | Map.member bs m = a
-    | otherwise = (m', base',  b')
+    | otherwise = seq m' $ seq base' $ seq b' $ (m', base',  b')
   where -- Insert all tails of the bytestring into the map so that
         -- we can find the index later if needed.
-        m' = foldr (insertTail bs base) m (enumCnt 0 (base + 1))
+        l = B.length bs
+        m' = insertTail bs base m
         b' = b `mappend` Bld.byteString bs `mappend` Bld.word8 0
-        base' = base + fromIntegral (B.length bs) + 1
+        base' = base + fromIntegral l + 1
 
 -- | Create a string table from the list of strings, and return list of offsets.
 stringTable :: [String] -> (B.ByteString, Map.Map String Word32)
@@ -475,7 +478,11 @@ stringTable strings = (res, stringMap)
         myFind bs =
           case Map.lookup bs m of
             Just v -> v
-            Nothing -> error $ "internal: stringTable missing entry."
+            Nothing -> error $ "internal: stringTable missing entry:\n"
+              ++ unlines strings
+              ++ show bs ++ "\n"
+              ++ show entries ++ "\n"
+              ++ show m
         stringMap = Map.fromList $ strings `zip` map myFind bsl
 
         res = L.toStrict (Bld.toLazyByteString b)

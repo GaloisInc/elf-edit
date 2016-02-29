@@ -136,6 +136,7 @@ module Data.Elf ( -- * Top-level definitions
                   -- ** Elf symbol binding
                 , ElfSymbolBinding(..)
                 , ElfSectionIndex(..)
+                , pattern SHN_UNDEF
                   -- * Relocations
                 , IsRelocationType(..)
                 , RelaWidth(..)
@@ -210,6 +211,7 @@ import           Data.Int
 import           Data.List (genericDrop, foldl')
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
+import qualified Data.Vector as V
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
@@ -303,13 +305,19 @@ instance Show ElfSymbolVisibility where
 -- for your convenience (including symbol name, description of the enclosing
 -- section, and definition).
 data ElfSymbolTableEntry w = EST
-    { steName             :: String
-    , steType             :: ElfSymbolType
-    , steBind             :: ElfSymbolBinding
-    , steOther            :: Word8
-    , steIndex            :: ElfSectionIndex  -- ^ Section in which the def is held
-    , steValue            :: w -- ^ Value associated with symbol.
-    , steSize             :: w
+    { steName             :: !B.ByteString
+      -- ^ This is the name of the symbol
+      --
+      -- We use bytestrings for encoding the name rather than a 'Text' or 'String'
+      -- value because the elf format does not specify an encoding for symbol table
+      -- entries -- it only specifies that they are null-terminated.  This also
+      -- makes checking equality and reading symbol tables faster.
+    , steType             :: !ElfSymbolType
+    , steBind             :: !ElfSymbolBinding
+    , steOther            :: !Word8
+    , steIndex            :: !ElfSectionIndex  -- ^ Section in which the def is held
+    , steValue            :: !w -- ^ Value associated with symbol.
+    , steSize             :: !w
     } deriving (Eq, Show)
 
 symbolTableEntrySize :: ElfClass w -> w
@@ -318,7 +326,7 @@ symbolTableEntrySize ELFCLASS64 = 24
 
 getSymbolTableEntry :: ElfClass w
                     -> ElfData
-                    -> (Word32 -> String)
+                    -> (Word32 -> B.ByteString)
                          -- ^ Function for mapping offset in string table
                          -- to bytestring.
                       -> Get (ElfSymbolTableEntry w)
@@ -385,26 +393,30 @@ ppSymbolTableEntry i e =
   , show (steVisibility e)
     -- Ndx
   , show (steIndex e)
-  , steName e
+  , B.toString (steName e)
   ]
 
 -- | Parse the symbol table section into a list of symbol table entries. If
 -- no symbol table is found then an empty list is returned.
 -- This function does not consult flags to look for SHT_STRTAB (when naming symbols),
 -- it just looks for particular sections of ".strtab" and ".shstrtab".
-parseSymbolTables :: Elf w -> [[ElfSymbolTableEntry w]]
-parseSymbolTables e =
-  getSymbolTableEntries e <$> symbolTableSections e
+parseSymbolTables :: ElfHeaderInfo w -> [[ElfSymbolTableEntry w]]
+parseSymbolTables info =
+  fmap (getSymbolTableEntries info) $
+  filter (hasSectionType SHT_SYMTAB) $
+  V.toList $ getSectionTable info
 
--- | Assumes the given section is a symbol table, type SHT_SYMTAB
--- (guaranteed by parseSymbolTables).
-getSymbolTableEntries :: Elf w -> ElfSection w -> [ElfSymbolTableEntry w]
-getSymbolTableEntries e s =
+-- | Parse the section as a list of symbol table entries.
+getSymbolTableEntries :: ElfHeaderInfo w -> ElfSection w -> [ElfSymbolTableEntry w]
+getSymbolTableEntries info s =
   let link   = elfSectionLink s
-      strtab = lookup link (zip [0..] (toListOf elfSections e))
-      strs = fromMaybe B.empty (elfSectionData <$> strtab)
-      nameFn idx = B.toString (lookupString idx strs)
-   in runGetMany (getSymbolTableEntry (elfClass e) (elfData e) nameFn)
+      hdr = header info
+      sections =  getSectionTable info
+      strs | 0 <= link && link < fromIntegral (V.length sections)  =
+             elfSectionData (sections V.! fromIntegral link)
+           | otherwise = error "Could not find section string table."
+      nameFn = (`lookupString` strs)
+   in runGetMany (getSymbolTableEntry (headerClass hdr) (headerData hdr) nameFn)
                  (L.fromChunks [elfSectionData s])
 
 -- | Use the symbol offset and size to extract its definition
@@ -421,9 +433,6 @@ findSymbolDefinition elf e = elfClassInstances (elfClass elf) $
 
 hasSectionType :: ElfSectionType -> ElfSection w -> Bool
 hasSectionType tp s = elfSectionType s == tp
-
-symbolTableSections :: Elf w -> [ElfSection w]
-symbolTableSections = toListOf $ elfSections.filtered (hasSectionType SHT_SYMTAB)
 
 sectionByIndex :: Elf w
                -> ElfSectionIndex
@@ -757,7 +766,7 @@ dynSymTab :: Monad m
 dynSymTab e l file m = elfClassInstances (elfClass e) $ do
   let cl = elfClass e
   -- Get string table.
-  strTab <- dynStrTab l file m
+  strTab <- L.toStrict <$> dynStrTab l file m
 
   sym_off <- mandatoryDynamicEntry DT_SYMTAB m
   -- According to a comment in GNU Libc 2.19 (dl-fptr.c:175), you get the
@@ -772,7 +781,7 @@ dynSymTab e l file m = elfClassInstances (elfClass e) $ do
     fail "Unexpected symbol table entry size"
   let sym_sz = str_off - sym_off
   symtab <- addressRangeToFile l file "dynamic symbol table" (sym_off,sym_sz)
-  let nameFn idx = L.toString $ lookupStringL (fromIntegral idx) strTab
+  let nameFn idx = lookupString idx strTab
   return $ runGetMany (getSymbolTableEntry (elfClass e) (elfData e) nameFn) symtab
 
 ------------------------------
@@ -1173,17 +1182,16 @@ ppElfSymbolType tp =
       | otherwise -> "<unknown>: " ++ show w
 
 
-newtype ElfSectionIndex = ElfSectionIndex Word16
+newtype ElfSectionIndex = ElfSectionIndex { fromElfSectionIndex :: Word16 }
   deriving (Eq, Ord, Enum, Num, Real, Integral)
 
 asSectionIndex :: ElfSectionIndex -> Maybe Word16
 asSectionIndex si@(ElfSectionIndex w)
-  | shn_undef < si && si < shn_loreserve = Just (w-1)
+  | SHN_UNDEF < si && si < shn_loreserve = Just (w-1)
   | otherwise = Nothing
 
 -- | Undefined section
-shn_undef :: ElfSectionIndex
-shn_undef = ElfSectionIndex 0
+pattern SHN_UNDEF = ElfSectionIndex 0
 
 -- | Associated symbol is absolute.
 shn_abs :: ElfSectionIndex
@@ -1243,28 +1251,25 @@ ppElfSectionIndex :: ElfMachine
                   -> ElfSectionIndex
                   -> String
 ppElfSectionIndex m abi this_shnum tp@(ElfSectionIndex w)
-  | tp == shn_undef  = "UND"
-  | tp == shn_abs    = "ABS"
-  | tp == shn_common = "COM"
-  | tp == shn_ia_64_ansi_common
-  , m == EM_IA_64
-  , abi == ELFOSABI_HPUX = "ANSI_COM"
-  | tp == shn_x86_64_lcommon
-  , m `elem` [ EM_X86_64, EM_L1OM, EM_K1OM]
-  = "LARGE_COM"
-  | (tp,m) == (shn_mips_scommon, EM_MIPS)
-    || (tp,m) == (shn_tic6x_scommon, EM_TI_C6000)
-  = "SCOM"
-  | (tp,m) == (shn_mips_sundefined, EM_MIPS)
-  = "SUND"
-  | tp >= shn_loproc && tp <= shn_hiproc
-  = "PRC[0x" ++ showHex w "]"
-  | tp >= shn_loos && tp <= shn_hios
-  = "OS [0x" ++ showHex w "]"
-  | tp >= shn_loreserve
-  = "RSV[0x" ++ showHex w "]"
-  | w >= this_shnum = "bad section index[" ++ show w ++ "]"
-  | otherwise = show w
+  | otherwise =
+    case tp of
+      SHN_UNDEF -> "UND"
+      _
+        | tp == shn_abs                              -> "ABS"
+        | tp == shn_common                           -> "COM"
+        | tp == shn_ia_64_ansi_common
+        , m == EM_IA_64
+        , abi == ELFOSABI_HPUX                       -> "ANSI_COM"
+        | tp == shn_x86_64_lcommon
+        , m `elem` [ EM_X86_64, EM_L1OM, EM_K1OM]    -> "LARGE_COM"
+        | (tp,m) == (shn_mips_scommon, EM_MIPS)      -> "SCOM"
+        | (tp,m) == (shn_tic6x_scommon, EM_TI_C6000) -> "SCOM"
+        | (tp,m) == (shn_mips_sundefined, EM_MIPS)   -> "SUND"
+        | tp >= shn_loproc && tp <= shn_hiproc -> "PRC[0x" ++ showHex w "]"
+        | tp >= shn_loos && tp <= shn_hios     -> "OS [0x" ++ showHex w "]"
+        | tp >= shn_loreserve                  -> "RSV[0x" ++ showHex w "]"
+        | w >= this_shnum                      -> "bad section index[" ++ show w ++ "]"
+        | otherwise                            -> show w
 
 -- | Return elf interpreter in a PT_INTERP segment if one exists, or Nothing is no interpreter
 -- is defined.  This will call the Monad fail operation if the contents of the data cannot be
