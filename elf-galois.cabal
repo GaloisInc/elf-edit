@@ -52,10 +52,7 @@ test-suite test-elf
     Data.Elf.Enums
     Data.Elf.Get
     Data.Elf.Layout
-    Data.Elf.Lexer
-    Data.Elf.Parser
     Data.Elf.Relocations
-    Data.Elf.TH
     Data.Elf.Types
   build-depends:
     base,
@@ -65,7 +62,7 @@ test-suite test-elf
     ansi-wl-pprint,
     binary,
     array,
-    utf8-string, template-haskell, lens,
+    utf8-string, lens,
     tasty >= 0.9,
     tasty-hunit >= 0.8,
     tasty-quickcheck >= 0.8
