@@ -22,6 +22,7 @@ module Data.Elf.Layout
   , elfSections
   , updateSections
   , traverseElfSegments
+  , traverseElfDataRegions
   , updateSegments
     -- * Low level constants
   , elfMagic
@@ -533,6 +534,18 @@ updateSegments' fn = elfFileData (updateSeq impl)
       in fmap ElfDataSegment <$> newSeg
     impl d = pure (Just d)
 
+updateDataRegions' :: forall w f . (Monad f, Bits w, Num w)
+                   => (ElfDataRegion w -> f (Maybe (ElfDataRegion w)))
+                   -> Elf w
+                   -> f (Elf w)
+updateDataRegions' fn = elfFileData (updateSeq impl)
+  where
+    impl (ElfDataSegment seg) =
+      let inner = updateSeq impl (elfSegmentData seg)
+          updateData s d = s { elfSegmentData = d }
+      in fmap (updateData seg) inner >>= (fn . ElfDataSegment)
+    impl d = fn d
+
 -- | Traverse elf sections
 elfSections' :: (Bits w, Num w) => Simple Traversal (Elf w) (ElfSection w)
 elfSections' f = updateSections' (fmap Just . f)
@@ -876,6 +889,11 @@ updateSegments :: (Monad f) => (ElfSegment w -> f (Maybe (ElfSegment w))) -> Elf
 updateSegments fn e0 = elfClassElfWidthInstance (elfClass e0) $
   updateSegments' fn e0
 
+-- | Traverse the data regions in an ELF file and modify or delete them
+updateDataRegions :: (Monad f) => (ElfDataRegion w -> f (Maybe (ElfDataRegion w))) -> Elf w -> f (Elf w)
+updateDataRegions fn e0 = elfClassElfWidthInstance (elfClass e0) $
+  updateDataRegions' fn e0
+
 -- | Traverse elf sections
 elfSections :: Simple Traversal (Elf w) (ElfSection w)
 elfSections f = updateSections (fmap Just . f)
@@ -883,6 +901,11 @@ elfSections f = updateSections (fmap Just . f)
 -- | Traverse elf segments
 traverseElfSegments :: (Monad f) => (ElfSegment w -> f (ElfSegment w)) -> Elf w -> f (Elf w)
 traverseElfSegments f = updateSegments (fmap Just . f)
+
+-- | Traverse elf data regions
+traverseElfDataRegions :: (Monad f) => (ElfDataRegion w -> f (ElfDataRegion w)) -> Elf w -> f (Elf w)
+traverseElfDataRegions f = updateDataRegions (fmap Just . f)
+
 
 -- | Return layout information from elf file.
 elfLayout :: Elf w -> ElfLayout w
