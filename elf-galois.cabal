@@ -45,17 +45,10 @@ test-suite test-elf
   type: exitcode-stdio-1.0
   main-is: Test.hs
   ghc-options: -Wall
-  hs-source-dirs: src,tests
-  other-modules:
-    Data.Elf
-    Data.Elf.DynamicArrayTag
-    Data.Elf.Enums
-    Data.Elf.Get
-    Data.Elf.Layout
-    Data.Elf.Relocations
-    Data.Elf.Types
+  hs-source-dirs: tests
   build-depends:
     base,
+    elf-galois,
     bytestring,
     vector,
     containers,

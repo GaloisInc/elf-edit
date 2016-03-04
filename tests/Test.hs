@@ -30,9 +30,11 @@ testIdentityTransform fp = do
     int0 <- elfInterpreter e
     withElf (LB.toStrict (renderElf e)) $ \e' -> do
       T.assertEqual "Segment Count" (length (elfSegments e)) (length (elfSegments e'))
-      let ex = concat (parseSymbolTables e)
-          act = concat (parseSymbolTables e')
-      T.assertEqual "Symbol table sizes" (length ex) (length act)
+      withElfHeaderInfo bs $ \ehi -> do
+        withElfHeaderInfo (LB.toStrict (renderElf e)) $ \ehi' -> do
+          let ex = concat (parseSymbolTables ehi)
+              act = concat (parseSymbolTables ehi')
+          T.assertEqual "Symbol table sizes" (length ex) (length act)
       int1 <- elfInterpreter e'
       T.assertEqual "Interpreter" int0 int1
 
@@ -46,6 +48,13 @@ checkStringTableEntry :: C8.ByteString -> (String, Word32) -> Bool
 checkStringTableEntry bytes (str, off) = str == C8.unpack bstr
   where
     bstr = C8.take (length str) $ C8.drop (fromIntegral off) bytes
+
+withElfHeaderInfo :: B.ByteString -> (forall w . ElfHeaderInfo w -> T.Assertion) -> T.Assertion
+withElfHeaderInfo bs f =
+  case parseElfHeaderInfo bs of
+    Left e -> T.assertFailure ("Failed to parse elf header info: " ++ show e)
+    Right (Elf32 ehi32) -> f ehi32
+    Right (Elf64 ehi64) -> f ehi64
 
 withElf :: B.ByteString -> (forall w . Elf w -> T.Assertion) -> T.Assertion
 withElf bs f =
