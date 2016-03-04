@@ -7,6 +7,7 @@ module Data.Elf.Get
   , SomeElf(..)
     -- * elfHeaderInfo low-level interface
   , ElfHeaderInfo
+  , header
   , parseElfHeaderInfo
   , getElf
   , getSectionTable
@@ -543,14 +544,16 @@ parseElf32ParseInfo d ei_osabi ei_abiver b = do
   e_flags     <- getWord32 d
   e_ehsize    <- getWord16 d
   e_phentsize <- getWord16 d
-  when (e_phentsize /= phdrEntrySize ELFCLASS32) $ do
-    fail $ "Invalid segment entry size"
   e_phnum     <- getWord16 d
   e_shentsize <- getWord16 d
-  when (e_shentsize /= shdrEntrySize ELFCLASS32) $ do
-    fail $ "Invalid section entry size"
   e_shnum     <- getWord16 d
   e_shstrndx  <- getWord16 d
+  let expected_phdr_entry_size = phdrEntrySize ELFCLASS64
+  let expected_shdr_entry_size = shdrEntrySize ELFCLASS64
+  when (e_phnum /= 0 && e_phentsize /= expected_phdr_entry_size) $ do
+    fail $ "Invalid segment entry size"
+  when (e_shnum /= 0 && e_shentsize /= expected_shdr_entry_size) $ do
+    fail $ "Invalid section entry size"
   let hdr = ElfHeader { headerData       = d
                       , headerClass      = ELFCLASS32
                       , headerOSABI      = ei_osabi
@@ -563,10 +566,10 @@ parseElf32ParseInfo d ei_osabi ei_abiver b = do
   return $! ElfHeaderInfo
                   { header       = hdr
                   , ehdrSize     = e_ehsize
-                  , phdrTable    = TableLayout e_phoff e_phentsize e_phnum
+                  , phdrTable    = TableLayout e_phoff expected_phdr_entry_size e_phnum
                   , getPhdr      = getPhdr32 d
                   , shdrNameIdx  = e_shstrndx
-                  , shdrTable    = TableLayout e_shoff e_shentsize e_shnum
+                  , shdrTable    = TableLayout e_shoff expected_shdr_entry_size e_shnum
                   , getShdr      = getShdr32 d b
                   , fileContents = b
                   }
@@ -590,14 +593,17 @@ parseElf64ParseInfo d ei_osabi ei_abiver b = do
   e_flags     <- getWord32 d
   e_ehsize    <- getWord16 d
   e_phentsize <- getWord16 d
-  when (e_phentsize /= phdrEntrySize ELFCLASS64) $ do
-    fail $ "Invalid segment entry size"
   e_phnum     <- getWord16 d
   e_shentsize <- getWord16 d
-  when (e_shentsize /= shdrEntrySize ELFCLASS64) $ do
-    fail $ "Invalid section entry size"
   e_shnum     <- getWord16 d
   e_shstrndx  <- getWord16 d
+  let expected_phdr_entry_size = phdrEntrySize ELFCLASS64
+  let expected_shdr_entry_size = shdrEntrySize ELFCLASS64
+
+  when (e_phnum /= 0 && e_phentsize /= expected_phdr_entry_size) $ do
+    fail $ "Invalid segment entry size"
+  when (e_shnum /= 0 && e_shentsize /= expected_shdr_entry_size) $ do
+    fail $ "Invalid section entry size"
   let hdr = ElfHeader { headerData       = d
                       , headerClass      = ELFCLASS64
                       , headerOSABI      = ei_osabi
@@ -608,13 +614,13 @@ parseElf64ParseInfo d ei_osabi ei_abiver b = do
                       , headerEntry      = e_entry
                       }
   return $! ElfHeaderInfo
-                  { header      = hdr
-                  , ehdrSize    = e_ehsize
-                  , phdrTable   = TableLayout e_phoff e_phentsize e_phnum
-                  , getPhdr     = getPhdr64 d
-                  , shdrNameIdx = e_shstrndx
-                  , shdrTable   = TableLayout e_shoff e_shentsize e_shnum
-                  , getShdr     = getShdr64 d b
+                  { header       = hdr
+                  , ehdrSize     = e_ehsize
+                  , phdrTable    = TableLayout e_phoff expected_phdr_entry_size e_phnum
+                  , getPhdr      = getPhdr64 d
+                  , shdrNameIdx  = e_shstrndx
+                  , shdrTable    = TableLayout e_shoff expected_shdr_entry_size e_shnum
+                  , getShdr      = getShdr64 d b
                   , fileContents = b
                   }
 
