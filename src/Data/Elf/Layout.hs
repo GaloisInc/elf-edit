@@ -418,6 +418,8 @@ elfSectionAsGOT s = do
 shstrtab :: String
 shstrtab = ".shstrtab"
 
+-- | A string table contains a  map from offsets, the number of elements,
+-- and a builder with the current string.
 type StringTable = (Map.Map B.ByteString Word32, Word32, Bld.Builder)
 
 insertTail :: B.ByteString
@@ -470,13 +472,15 @@ stringTable strings = (res, stringMap)
         entries = compress $ fmap B.reverse $ sort $ fmap B.reverse bsl
 
         -- Insert strings into map (first string must be empty string)
-        empty_string = B.fromString ""
-        empty_table = (Map.empty, 0, mempty)
+        empty_table = (Map.singleton B.empty 0
+                      , 1
+                      , Bld.word8 0
+                      )
 
         -- We insert strings in order so that they will appear in sorted
         -- order in the bytestring.  This is likely not essential, but
         -- corresponds to ld's behavior.
-        (m,_,b) = F.foldl' insertString empty_table (empty_string : entries)
+        (m,_,b) = F.foldl' insertString empty_table entries
 
         myFind bs =
           case Map.lookup bs m of
@@ -489,7 +493,6 @@ stringTable strings = (res, stringMap)
         stringMap = Map.fromList $ strings `zip` map myFind bsl
 
         res = L.toStrict (Bld.toLazyByteString b)
-
 
 ------------------------------------------------------------------------
 -- Section traversal
