@@ -450,7 +450,8 @@ insertSegment sizeOf segs phdr =
 getSectionName :: B.ByteString -> Word32 -> String
 getSectionName names idx = B.toString $ lookupString idx names
 
--- | Get list of sections from Elf parse info
+-- | Get list of sections from Elf parse info.
+-- This includes the initial section
 getSectionTable :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection w)
 getSectionTable epi = V.generate cnt $ getSection
   where cnt = fromIntegral (entryNum (shdrTable epi)) :: Int
@@ -476,9 +477,10 @@ parseElfRegions epi segments = final
         nameRange :: Range w
         nameRange = fst $ nameSectionInfo epi
 
+        -- Get list of all sections other than the first section (which is skipped)
         sections :: [(Range w, ElfSection w)]
         sections = fmap (getSection' epi (getSectionName names))
-                 $ filter (/= shdrNameIdx epi)
+                 $ filter (\i -> i /= shdrNameIdx epi && i /= 0)
                  $ enumCnt 0 (entryNum (shdrTable epi))
           where names = slice nameRange (fileContents epi)
 

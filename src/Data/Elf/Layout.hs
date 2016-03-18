@@ -563,6 +563,21 @@ elfSections' f = updateSections' (fmap Just . f)
 ------------------------------------------------------------------------
 -- Section Elf Layout
 
+-- | Return a section corresponding to the initial elf section at index 0.
+emptyElfSection :: Num w => ElfSection w
+emptyElfSection =
+  ElfSection { elfSectionName  = ""
+             , elfSectionType  = SHT_NULL
+             , elfSectionFlags = shf_none
+             , elfSectionAddr  = 0
+             , elfSectionSize  = 0
+             , elfSectionLink  = 0
+             , elfSectionInfo  = 0
+             , elfSectionAddrAlign = 0
+             , elfSectionEntSize   = 0
+             , elfSectionData      = B.empty
+             }
+
 -- | Add section information to layout.
 addSectionToLayout :: Integral w
                    => Map.Map String Word32 -- ^ Name to offset map.
@@ -606,8 +621,12 @@ elfSegmentCount e = F.foldl' f 0 (e^.elfFileData)
   where f c (ElfDataSegment s) = F.foldl' f (c + 1) (elfSegmentData s)
         f c _ = c
 
+-- | Returns the number of sections in the elf file.
+--
+-- Note that this count includes the initial elf section empty section at index
+-- 0 which won't actually appear in the elf file data.
 elfSectionCount :: Elf w -> Int
-elfSectionCount e = F.foldl' f 0 (e^.elfFileData)
+elfSectionCount e = F.foldl' f 1 (e^.elfFileData)
   where f c (ElfDataSegment s) = F.foldl' f c (elfSegmentData s)
         f c ElfDataSectionNameTable{} = c + 1
         f c ElfDataGOT{}              = c + 1
@@ -632,6 +651,7 @@ elfRegionFileSize l reg = elfClassInstances c $ do
 elfLayout' :: forall w . ElfWidth w => Elf w -> ElfLayout w
 elfLayout' e = final
   where c = elfClass e
+        d = elfData e
         (name_data,name_map) = stringTable $
           elfSectionName <$> toListOf elfSections' e
 
@@ -650,7 +670,8 @@ elfLayout' e = final
                           , _phdrs = Map.empty
                           , _shdrTableOffset = startOfFile
                           , _shstrndx = 0
-                          , _shdrs = Seq.empty
+                          , _shdrs = Seq.singleton $
+                               writeRecord2 (shdrFields c) d (emptyElfSection, 0, 0)
                           }
 
         -- Process element.
@@ -671,14 +692,17 @@ elfLayout' e = final
                 -- Get bytes at start of elf
                 seg_offset = l^.elfOutputSize
                 seg_size   = rangeSize seg_offset (l2^.elfOutputSize)
+                -- Get memory size of segment
                 mem_size =
                   case elfSegmentMemSize s of
-                    ElfAbsoluteSize sz -> sz
+                    -- Absolute sizes are lower bounds
+                    ElfAbsoluteSize sz -> max seg_size sz
+                    -- Relative sizes are offsets of the computed sizes.
                     ElfRelativeSize o  -> seg_size + o
                 phdr = Phdr { phdrSegment = s
                             , phdrFileStart = seg_offset
                             , phdrFileSize  = seg_size
-                            , phdrMemSize   = mem_size -- FIXME: Not large enough -- things work if this is seg_size
+                            , phdrMemSize   = mem_size
                             }
                 idx = elfSegmentIndex s
                 -- Add segment to appropriate

@@ -468,7 +468,10 @@ pf_r = ElfSegmentFlags 4
 -- | This describes the size of a elf section or segment memory size.
 data ElfMemSize w
    = ElfAbsoluteSize !w
-     -- ^ The region  has the given absolute size
+     -- ^ The region  has the given absolute size.
+     --
+     -- Note that when writing out files, we will only use this size if it is larger
+     -- than the computed size, otherwise we use the computed size.
    | ElfRelativeSize !w
      -- ^ The given offset should be added to the computed size.
   deriving (Show)
@@ -493,13 +496,17 @@ data ElfSegment w = ElfSegment
     -- Since the phdr table is typically stored in a loaded segment, the number of
     -- entries affects the layout of binaries.
   , elfSegmentVirtAddr  :: !w
-    -- ^ Virtual address for the segment
+    -- ^ Virtual address for the segment.
+    --
+    -- The elf standard for some ABIs proscribes that the virtual address for a
+    -- file should be in ascending order of the segment addresses.  This does not
+    -- appear to be the case for the x86 ABI documents, but valgrind warns of it.
   , elfSegmentPhysAddr  :: !w
     -- ^ Physical address for the segment.
     --
     -- This contents are typically not used on executables and shared libraries
     -- as they are not loaded at fixed physical addresses.  The convention
-    -- seems to be to set 'eltSegmentPhysAddr' to 'elfSegmentVirtAddr'
+    -- seems to be to set the phyiscal address equal to the virtual address.
   , elfSegmentAlign     :: !w
     -- ^ The value to which this segment is aligned in memory and the file.
     -- This field is called @p_align@ in Elf documentation.

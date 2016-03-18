@@ -46,6 +46,7 @@ module Data.Elf ( -- * Top-level definitions
                   -- ** Layout information
                 , ElfLayout
                 , elfLayout
+                , elfLayoutClass
                 , elfLayoutBytes
                 , elfLayoutSize
                 , elfMagic
