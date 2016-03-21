@@ -24,6 +24,9 @@ module Data.Elf ( -- * Top-level definitions
                 , removeSectionByName
                 , updateSections
                 , elfInterpreter
+                  -- ** Elf header
+                , ElfHeader
+                , headerOSABI
                   -- ** Top-level Elf information
                 , ElfClass(..)
                 , ElfData(..)
@@ -37,6 +40,7 @@ module Data.Elf ( -- * Top-level definitions
                 , parseElf
                 , SomeElf(..)
                 , ElfHeaderInfo
+                , header
                 , parseElfHeaderInfo
                 , getElf
                 , getSectionTable
