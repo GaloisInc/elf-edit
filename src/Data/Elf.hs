@@ -24,6 +24,7 @@ module Data.Elf ( -- * Top-level definitions
                 , removeSectionByName
                 , updateSections
                 , elfInterpreter
+                , elfSymtab
                   -- ** Elf header
                 , ElfHeader
                 , headerOSABI
@@ -116,11 +117,13 @@ module Data.Elf ( -- * Top-level definitions
                 , Phdr(..)
                 , phdrFileRange
                   -- * Symbol Table Entries
+                , ElfSymbolTable(..)
                 , ElfSymbolTableEntry(..)
                 , ppSymbolTableEntries
                 , parseSymbolTables
-                , getSymbolTableEntries
-                , findSymbolDefinition
+                , Data.Elf.Get.getSymbolTableEntries
+                , symbolTableEntrySize
+--                , findSymbolDefinition
                   -- ** Elf symbol visibility
                 , steVisibility
                 , ElfSymbolVisibility(..)
@@ -128,22 +131,6 @@ module Data.Elf ( -- * Top-level definitions
                 , pattern STV_INTERNAL
                 , pattern STV_HIDDEN
                 , pattern STV_PROTECTED
-                  -- ** Elf symbol type
-                , ElfSymbolType(..)
-                , pattern STT_NOTYPE
-                , pattern STT_OBJECT
-                , pattern STT_FUNC
-                , pattern STT_SECTION
-                , pattern STT_FILE
-                , pattern STT_COMMON
-                , pattern STT_TLS
-                , pattern STT_RELC
-                , pattern STT_SRELC
-                , pattern STT_GNU_IFUNC
-                  -- ** Elf symbol binding
-                , ElfSymbolBinding(..)
-                , ElfSectionIndex(..)
-                , pattern SHN_UNDEF
                   -- * Relocations
                 , IsRelocationType(..)
                 , RelaWidth(..)
@@ -215,7 +202,6 @@ import qualified Data.ByteString.Lazy.UTF8 as L (toString)
 import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.Foldable as F
 import           Data.Int
-import           Data.List (genericDrop, foldl')
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
 import qualified Data.Vector as V
@@ -305,73 +291,6 @@ instance Show ElfSymbolVisibility where
 ------------------------------------------------------------------------
 -- ElfSymbolTableEntry
 
--- | The symbol table entries consist of index information to be read from other
--- parts of the ELF file.
---
--- Some of this information is automatically retrieved
--- for your convenience (including symbol name, description of the enclosing
--- section, and definition).
-data ElfSymbolTableEntry w = EST
-    { steName             :: !B.ByteString
-      -- ^ This is the name of the symbol
-      --
-      -- We use bytestrings for encoding the name rather than a 'Text' or 'String'
-      -- value because the elf format does not specify an encoding for symbol table
-      -- entries -- it only specifies that they are null-terminated.  This also
-      -- makes checking equality and reading symbol tables faster.
-    , steType             :: !ElfSymbolType
-    , steBind             :: !ElfSymbolBinding
-    , steOther            :: !Word8
-    , steIndex            :: !ElfSectionIndex  -- ^ Section in which the def is held
-    , steValue            :: !w -- ^ Value associated with symbol.
-    , steSize             :: !w
-    } deriving (Eq, Show)
-
-symbolTableEntrySize :: ElfClass w -> w
-symbolTableEntrySize ELFCLASS32 = 16
-symbolTableEntrySize ELFCLASS64 = 24
-
-getSymbolTableEntry :: ElfClass w
-                    -> ElfData
-                    -> (Word32 -> B.ByteString)
-                         -- ^ Function for mapping offset in string table
-                         -- to bytestring.
-                      -> Get (ElfSymbolTableEntry w)
-getSymbolTableEntry ELFCLASS32 d nameFn = do
-  nameIdx <- getWord32 d
-  value <- getWord32 d
-  size  <- getWord32 d
-  info  <- getWord8
-  other <- getWord8
-  sTlbIdx <- ElfSectionIndex <$> getWord16 d
-  let (typ,bind) = infoToTypeAndBind info
-  return $ EST { steName = nameFn nameIdx
-               , steType  = typ
-               , steBind  = bind
-               , steOther = other
-               , steIndex = sTlbIdx
-               , steValue = value
-               , steSize  = size
-               }
-getSymbolTableEntry ELFCLASS64 d nameFn = do
-  nameIdx <- getWord32 d
-  info <- getWord8
-  other <- getWord8
-  sTlbIdx <- ElfSectionIndex <$> getWord16 d
-  symVal <- getWord64 d
-  size <- getWord64 d
-  let (typ,bind) = infoToTypeAndBind info
-  return $ EST { steName = nameFn nameIdx
-               , steType = typ
-               , steBind = bind
-               , steOther = other
-               , steIndex = sTlbIdx
-               , steValue = symVal
-               , steSize = size
-               }
-
-steEnclosingSection :: Elf w -> ElfSymbolTableEntry w -> Maybe (ElfSection w)
-steEnclosingSection e s = sectionByIndex e (steIndex s)
 
 steVisibility :: ElfSymbolTableEntry w -> ElfSymbolVisibility
 steVisibility e = ElfSymbolVisibility (steOther e .&. 0x3)
@@ -395,7 +314,7 @@ ppSymbolTableEntry i e =
   [ show i ++ ":"
   , ppHex (steValue e)
   , show (steSize e)
-  , ppElfSymbolType (steType e)
+  , show (steType e)
   , show (steBind e)
   , show (steVisibility e)
     -- Ndx
@@ -406,47 +325,20 @@ ppSymbolTableEntry i e =
 -- | Parse the symbol table section into a list of symbol table entries. If
 -- no symbol table is found then an empty list is returned.
 -- This function does not consult flags to look for SHT_STRTAB (when naming symbols),
--- it just looks for particular sections of ".strtab" and ".shstrtab".
+-- it just looks for particular sections of ".symtab".
 parseSymbolTables :: ElfHeaderInfo w -> [[ElfSymbolTableEntry w]]
 parseSymbolTables info =
   fmap (getSymbolTableEntries info) $
   filter (hasSectionType SHT_SYMTAB) $
   V.toList $ getSectionTable info
 
--- | Parse the section as a list of symbol table entries.
-getSymbolTableEntries :: ElfHeaderInfo w -> ElfSection w -> [ElfSymbolTableEntry w]
-getSymbolTableEntries info s =
-  let link   = elfSectionLink s
-      hdr = header info
-      sections =  getSectionTable info
-      strs | 0 <= link && link < fromIntegral (V.length sections)  =
-             elfSectionData (sections V.! fromIntegral link)
-           | otherwise = error "Could not find section string table."
-      nameFn = (`lookupString` strs)
-   in runGetMany (getSymbolTableEntry (headerClass hdr) (headerData hdr) nameFn)
-                 (L.fromChunks [elfSectionData s])
-
--- | Use the symbol offset and size to extract its definition
--- (in the form of a ByteString).
--- If the size is zero, or the offset larger than the 'elfSectionData',
--- then 'Nothing' is returned.
-findSymbolDefinition :: Elf w -> ElfSymbolTableEntry w -> Maybe B.ByteString
-findSymbolDefinition elf e = elfClassInstances (elfClass elf) $
-    let enclosingData = elfSectionData <$> steEnclosingSection elf e
-        start = steValue e
-        len = steSize e
-        def = slice (start, len) <$> enclosingData
-    in if def == Just B.empty then Nothing else def
-
+-- | Return symbol table in Elf file.
+elfSymtab :: Elf w -> Maybe (ElfSymbolTable w)
+elfSymtab = asumDataRegions f
+  where f (ElfDataSymtab s) = Just s
+        f _ = Nothing
 hasSectionType :: ElfSectionType -> ElfSection w -> Bool
 hasSectionType tp s = elfSectionType s == tp
-
-sectionByIndex :: Elf w
-               -> ElfSectionIndex
-               -> Maybe (ElfSection w)
-sectionByIndex e si = do
-  i <- asSectionIndex si
-  listToMaybe $ genericDrop i (e^..elfSections)
 
 ------------------------------------------------------------------------
 -- I386_RelocationType
@@ -1044,7 +936,7 @@ dynamicEntries e = elfClassInstances (elfClass e) $ do
       let elts :: [Dynamic (ElfWordType (RelocationWidth tp))]
           elts = runGet (dynamicList w (elfData e)) (sliceL p file)
       let m :: DynamicMap (ElfWordType (RelocationWidth tp))
-          m = foldl' (flip insertDynamic) Map.empty elts
+          m = F.foldl' (flip insertDynamic) Map.empty elts
 
       strTab <- dynStrTab l file m
 
@@ -1089,195 +981,6 @@ dynamicEntries e = elfClassInstances (elfClass e) $ do
 ------------------------------------------------------------------------
 -- Elf symbol information
 
--- | Symbol bi nding type
-newtype ElfSymbolBinding = ElfSymbolBinding { fromElfSymbolBinding :: Word8 }
-  deriving (Eq, Ord)
-
-pattern STB_LOCAL  = ElfSymbolBinding  0
-pattern STB_GLOBAL = ElfSymbolBinding  1
-pattern STB_WEAK   = ElfSymbolBinding  2
-pattern STB_NUM    = ElfSymbolBinding  3
-
--- | Lower bound for OS specific symbol bindings.
-pattern STB_LOOS   = ElfSymbolBinding 10
--- | Upper bound for OS specific symbol bindings.
-pattern STB_HIOS   = ElfSymbolBinding 12
--- | GNU-specific override that makes symbol unique even with local
--- dynamic loading.
-pattern STB_GNU_UNIQUE = ElfSymbolBinding 10
-
-pattern STB_LOPROC = ElfSymbolBinding 13
-pattern STB_HIPROC = ElfSymbolBinding 15
-
-
-instance Show ElfSymbolBinding where
-  show STB_LOCAL  = "STB_LOCAL"
-  show STB_GLOBAL = "STB_GLOBAL"
-  show STB_WEAK   = "STB_WEAK"
-  show STB_NUM    = "STB_NUM"
-  show STB_GNU_UNIQUE = "STB_GNU_UNIQUE"
-  show b | STB_LOOS   <= b && b <= STB_HIOS   = "<OS specific>: " ++ show w
-         | STB_LOPROC <= b && b <= STB_HIPROC = "<processor specific>: " ++ show w
-         | otherwise = "<unknown>: " ++ show w
-   where w = fromElfSymbolBinding b
-
-infoToTypeAndBind :: Word8 -> (ElfSymbolType,ElfSymbolBinding)
-infoToTypeAndBind i =
-  let tp = ElfSymbolType (i .&. 0x0F)
-      b = (i `shiftR` 4) .&. 0xF
-   in (tp, ElfSymbolBinding b)
-
-newtype ElfSymbolType = ElfSymbolType Word8
-  deriving (Eq, Ord)
-
--- | Symbol type is unspecified
-pattern STT_NOTYPE = ElfSymbolType 0
-
--- | Symbol is a data object
-pattern STT_OBJECT = ElfSymbolType 1
-
--- | Symbol is a code object
-pattern STT_FUNC   = ElfSymbolType 2
-
--- | Symbol associated with a section.
-pattern STT_SECTION = ElfSymbolType 3
-
--- | Symbol gives a file name.
-pattern STT_FILE = ElfSymbolType 4
-
--- | An uninitialised common block.
-pattern STT_COMMON = ElfSymbolType 5
-
--- | Thread local data object.
-pattern STT_TLS = ElfSymbolType 6
-
--- | Complex relocation expression.
-pattern STT_RELC = ElfSymbolType 8
-
--- | Signed Complex relocation expression.
-pattern STT_SRELC = ElfSymbolType 9
-
--- | Symbol is an indirect code object.
-pattern STT_GNU_IFUNC = ElfSymbolType 10
-
--- | Returns true if this is an OF specififc symbol type.
-isOSSpecificSymbolType :: ElfSymbolType -> Bool
-isOSSpecificSymbolType (ElfSymbolType w) = 10 <= w && w <= 12
-
-isProcSpecificSymbolType :: ElfSymbolType -> Bool
-isProcSpecificSymbolType (ElfSymbolType w) = 13 <= w && w <= 15
-
-instance Show ElfSymbolType where
-   show = ppElfSymbolType
-
-ppElfSymbolType :: ElfSymbolType -> String
-ppElfSymbolType tp =
-  case tp of
-    STT_NOTYPE  -> "NOTYPE"
-    STT_OBJECT  -> "OBJECT"
-    STT_FUNC    -> "FUNC"
-    STT_SECTION -> "SECTION"
-    STT_FILE    -> "FILE"
-    STT_COMMON  -> "COMMON"
-    STT_TLS     -> "TLS"
-    STT_RELC    -> "RELC"
-    STT_SRELC   -> "SRELC"
-    STT_GNU_IFUNC -> "IFUNC"
-    ElfSymbolType w
-      | isOSSpecificSymbolType tp   -> "<OS specific>: " ++ show w
-      | isProcSpecificSymbolType tp -> "<processor specific>: " ++ show w
-      | otherwise -> "<unknown>: " ++ show w
-
-
-newtype ElfSectionIndex = ElfSectionIndex { fromElfSectionIndex :: Word16 }
-  deriving (Eq, Ord, Enum, Num, Real, Integral)
-
-asSectionIndex :: ElfSectionIndex -> Maybe Word16
-asSectionIndex si@(ElfSectionIndex w)
-  | SHN_UNDEF < si && si < shn_loreserve = Just (w-1)
-  | otherwise = Nothing
-
--- | Undefined section
-pattern SHN_UNDEF = ElfSectionIndex 0
-
--- | Associated symbol is absolute.
-shn_abs :: ElfSectionIndex
-shn_abs = ElfSectionIndex 0xfff1
-
--- | Associated symbol is common.
-shn_common :: ElfSectionIndex
-shn_common = ElfSectionIndex 0xfff2
-
--- | Start of reserved indices.
-shn_loreserve :: ElfSectionIndex
-shn_loreserve = ElfSectionIndex 0xff00
-
--- | Start of processor specific.
-shn_loproc :: ElfSectionIndex
-shn_loproc = shn_loreserve
-
--- | Like SHN_COMMON but symbol in .lbss
-shn_x86_64_lcommon :: ElfSectionIndex
-shn_x86_64_lcommon = ElfSectionIndex 0xff02
-
--- | Only used by HP-UX, because HP linker gives
--- weak symbols precdence over regular common symbols.
-shn_ia_64_ansi_common :: ElfSectionIndex
-shn_ia_64_ansi_common = shn_loreserve
-
--- | Small common symbols
-shn_mips_scommon :: ElfSectionIndex
-shn_mips_scommon = ElfSectionIndex 0xff03
-
--- | Small undefined symbols
-shn_mips_sundefined  :: ElfSectionIndex
-shn_mips_sundefined = ElfSectionIndex 0xff04
-
--- | Small data area common symbol.
-shn_tic6x_scommon :: ElfSectionIndex
-shn_tic6x_scommon = shn_loreserve
-
--- | End of processor specific.
-shn_hiproc :: ElfSectionIndex
-shn_hiproc = ElfSectionIndex 0xff1f
-
--- | Start of OS-specific.
-shn_loos :: ElfSectionIndex
-shn_loos = ElfSectionIndex 0xff20
-
--- | End of OS-specific.
-shn_hios :: ElfSectionIndex
-shn_hios = ElfSectionIndex 0xff3f
-
-instance Show ElfSectionIndex where
-  show i = ppElfSectionIndex EM_NONE ELFOSABI_SYSV maxBound i
-
-ppElfSectionIndex :: ElfMachine
-                  -> ElfOSABI
-                  -> Word16 -- ^ Number of sections.
-                  -> ElfSectionIndex
-                  -> String
-ppElfSectionIndex m abi this_shnum tp@(ElfSectionIndex w)
-  | otherwise =
-    case tp of
-      SHN_UNDEF -> "UND"
-      _
-        | tp == shn_abs                              -> "ABS"
-        | tp == shn_common                           -> "COM"
-        | tp == shn_ia_64_ansi_common
-        , m == EM_IA_64
-        , abi == ELFOSABI_HPUX                       -> "ANSI_COM"
-        | tp == shn_x86_64_lcommon
-        , m `elem` [ EM_X86_64, EM_L1OM, EM_K1OM]    -> "LARGE_COM"
-        | (tp,m) == (shn_mips_scommon, EM_MIPS)      -> "SCOM"
-        | (tp,m) == (shn_tic6x_scommon, EM_TI_C6000) -> "SCOM"
-        | (tp,m) == (shn_mips_sundefined, EM_MIPS)   -> "SUND"
-        | tp >= shn_loproc && tp <= shn_hiproc -> "PRC[0x" ++ showHex w "]"
-        | tp >= shn_loos && tp <= shn_hios     -> "OS [0x" ++ showHex w "]"
-        | tp >= shn_loreserve                  -> "RSV[0x" ++ showHex w "]"
-        | w >= this_shnum                      -> "bad section index[" ++ show w ++ "]"
-        | otherwise                            -> show w
-
 -- | Return elf interpreter in a PT_INTERP segment if one exists, or Nothing is no interpreter
 -- is defined.  This will call the Monad fail operation if the contents of the data cannot be
 -- parsed.
@@ -1289,6 +992,3 @@ elfInterpreter e =
       case F.toList (elfSegmentData seg) of
         [ElfDataSection s] -> return (Just (B.toString (elfSectionData s)))
         _ -> fail "Could not parse elf section."
-
-_unused :: a
-_unused = undefined fromElfSymbolBinding

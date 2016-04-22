@@ -51,27 +51,8 @@ import           GHC.TypeLits (Nat)
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
-import           Data.Elf.Get (getWord32, getWord64)
+import           Data.Elf.Get (getWord32, getWord64, runGetMany)
 import           Data.Elf.Types (ElfData, ppHex)
-
--------------------------------------------------------------------------
--- Utilities
-
--- | Apply the get operation repeatedly to bystring until all bits are done.
---
--- This returns a list contain all the values read, and calls 'error' if
--- a failure occurs.
-runGetMany :: forall a . Get a -> L.ByteString -> [a]
-runGetMany g0 bs0 = start g0 (L.toChunks bs0)
-  where go :: Get a -> [B.ByteString] -> Decoder a -> [a]
-        go _ _ (Fail _ _ msg)  = error $ "runGetMany: " ++ msg
-        go g [] (Partial f)    = go g [] (f Nothing)
-        go g (h:r) (Partial f) = go g r (f (Just h))
-        go g l (Done bs _ v)   = v : start g (bs:l)
-
-        start _ [] = []
-        start g (h:r) | B.null h = start g r
-        start g l = go g l (runGetIncremental g)
 
 -------------------------------------------------------------------------
 -- ColumnAlignmentFn

@@ -21,6 +21,7 @@ module Data.Elf.Types
   , toElfData
     -- * ElfDataRegion
   , ElfDataRegion(..)
+  , asumDataRegions
     -- * ElfSection
   , ElfSection(..)
   , elfSectionFileSize
@@ -51,6 +52,11 @@ module Data.Elf.Types
   , elfGotSize
   , elfGotSection
   , elfGotSectionFlags
+    -- ** Symbol Table
+  , ElfSymbolTable(..)
+  , ElfSymbolTableEntry(..)
+  , infoToTypeAndBind
+  , typeAndBindToInfo
     --  * Memory size
   , ElfMemSize(..)
     -- * ElfSegment
@@ -93,6 +99,7 @@ module Data.Elf.Types
   , module Data.Elf.Enums
   ) where
 
+import           Control.Applicative
 import           Control.Lens hiding (enum)
 import           Data.Bits
 import qualified Data.ByteString as B
@@ -299,12 +306,14 @@ shf_tls = ElfSectionFlags 0x400
 
 -- | A section in the Elf file.
 data ElfSection w = ElfSection
-    { elfSectionName      :: !String
-      -- ^ Identifies the name of the section.
+    { elfSectionIndex     :: !Word16
+      -- ^ Index of the section
+    , elfSectionName      :: !String
+      -- ^ Name of the section.
     , elfSectionType      :: !ElfSectionType
-      -- ^ Identifies the type of the section.
+      -- ^ Type of the section.
     , elfSectionFlags     :: !(ElfSectionFlags w)
-      -- ^ Identifies the attributes of the section.
+      -- ^ Attributes of the section.
     , elfSectionAddr      :: !w
       -- ^ The virtual address of the beginning of the section in memory.
       --
@@ -340,7 +349,8 @@ elfSectionFileSize = fromIntegral . B.length . elfSectionData
 
 -- | A global offset table section.
 data ElfGOT w = ElfGOT
-    { elfGotName      :: !String -- ^ Name of section.
+    { elfGotIndex     :: !Word16
+    , elfGotName      :: !String -- ^ Name of section.
     , elfGotAddr      :: !w
     , elfGotAddrAlign :: !w
     , elfGotEntSize   :: !w
@@ -356,7 +366,8 @@ elfGotSectionFlags = shf_write .|. shf_alloc
 -- | Convert a GOT section to a standard section.
 elfGotSection :: (Bits w, Num w) => ElfGOT w -> ElfSection w
 elfGotSection g =
-  ElfSection { elfSectionName = elfGotName g
+  ElfSection { elfSectionIndex = elfGotIndex g
+             , elfSectionName = elfGotName g
              , elfSectionType = SHT_PROGBITS
              , elfSectionFlags = elfGotSectionFlags
              , elfSectionAddr = elfGotAddr g
@@ -367,6 +378,57 @@ elfGotSection g =
              , elfSectionEntSize = elfGotEntSize g
              , elfSectionData = elfGotData g
              }
+
+------------------------------------------------------------------------
+-- ElfSymbolTableEntry
+
+-- | The symbol table entries consist of index information to be read from other
+-- parts of the ELF file.
+--
+-- Some of this information is automatically retrieved
+-- for your convenience (including symbol name, description of the enclosing
+-- section, and definition).
+data ElfSymbolTableEntry w = EST
+    { steName             :: !B.ByteString
+      -- ^ This is the name of the symbol
+      --
+      -- We use bytestrings for encoding the name rather than a 'Text' or 'String'
+      -- value because the elf format does not specify an encoding for symbol table
+      -- entries -- it only specifies that they are null-terminated.  This also
+      -- makes checking equality and reading symbol tables faster.
+    , steType             :: !ElfSymbolType
+    , steBind             :: !ElfSymbolBinding
+    , steOther            :: !Word8
+    , steIndex            :: !ElfSectionIndex  -- ^ Section in which the def is held
+    , steValue            :: !w -- ^ Value associated with symbol.
+    , steSize             :: !w
+    } deriving (Eq, Show)
+
+-- | Convert 8-bit symbol info to symbol type and binding.
+infoToTypeAndBind :: Word8 -> (ElfSymbolType,ElfSymbolBinding)
+infoToTypeAndBind i =
+  let tp = ElfSymbolType (i .&. 0x0F)
+      b = (i `shiftR` 4) .&. 0xF
+   in (tp, ElfSymbolBinding b)
+
+-- | Convert type and binding information to symbol info field.
+typeAndBindToInfo :: ElfSymbolType -> ElfSymbolBinding -> Word8
+typeAndBindToInfo (ElfSymbolType tp) (ElfSymbolBinding b) = tp .|. (b `shiftL` 4)
+
+------------------------------------------------------------------------
+-- ElfSymbolTable
+
+-- | This entry corresponds to the symbol table index.
+data ElfSymbolTable w
+  = ElfSymbolTable { elfSymbolTableIndex :: !Word16
+                   , elfSymbolTableEntries :: !(V.Vector (ElfSymbolTableEntry w))
+                     -- ^ Vector of symbol table entries.
+                     --
+                     -- Local entries should appear before global entries in vector.
+                   , elfSymbolTableLocalEntries :: !Word32
+                     -- ^ Number of local entries in table.
+                     -- First entry should be a local entry.
+                   } deriving (Show)
 
 ------------------------------------------------------------------------
 -- ElfSegmentType
@@ -542,22 +604,36 @@ data ElfDataRegion w
      --
      -- This is represented explicitly as an elf data region as it may be part of
      -- an elf segment, and thus we need to know whether a segment contains it.
-   | ElfDataSegment (ElfSegment w)
+   | ElfDataSegment !(ElfSegment w)
      -- ^ A segment that contains other segments.
    | ElfDataSectionHeaders
      -- ^ Identifies the section header table.
      --
      -- This is represented explicitly as an elf data region as it may be part of
      -- an elf segment, and thus we need to know whether a segment contains it.
-   | ElfDataSectionNameTable
+   | ElfDataSectionNameTable !Word16
      -- ^ The section for storing the section names.
-   | ElfDataGOT (ElfGOT w)
+     --
+     -- The contents are auto-generated, so we only need to know which index to give
+     -- it.
+   | ElfDataGOT !(ElfGOT w)
      -- ^ A global offset table.
-   | ElfDataSection (ElfSection w)
+   | ElfDataStrtab !Word16
+     -- ^ Elf strtab section (with index)
+   | ElfDataSymtab !(ElfSymbolTable w)
+     -- ^ Elf symtab section
+   | ElfDataSection !(ElfSection w)
      -- ^ A section that has no special interpretation.
    | ElfDataRaw B.ByteString
      -- ^ Identifies an uninterpreted array of bytes.
   deriving Show
+
+-- | This applies a function to each data region in an elf file, returning
+-- the sum using 'Alternative' operations for combining results.
+asumDataRegions :: Alternative f => (ElfDataRegion w -> f a) -> Elf w -> f a
+asumDataRegions f e = F.asum $ g <$> e^.elfFileData
+  where g r@(ElfDataSegment s) = f r <|> F.asum (g <$> elfSegmentData s)
+        g r = f r
 
 ppSegment :: (Bits w, Integral w, Show w) => ElfSegment w -> Doc
 ppSegment s =
