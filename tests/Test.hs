@@ -1,18 +1,20 @@
 {-# LANGUAGE RankNTypes #-}
 module Main where
 
-import Control.Applicative
+import           Control.Applicative
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.Map as Map
-import Data.Word ( Word32 )
+import           Data.String
+import qualified Data.Vector as V
+import           Data.Word ( Word32 )
 import qualified System.IO as IO
 import qualified Test.Tasty as T
 import qualified Test.Tasty.HUnit as T
 import qualified Test.Tasty.QuickCheck as T
 
-import Prelude
+import           Prelude
 
 import           Data.Elf
 
@@ -30,11 +32,13 @@ testIdentityTransform fp = do
     int0 <- elfInterpreter e
     withElf (LB.toStrict (renderElf e)) $ \e' -> do
       T.assertEqual "Segment Count" (length (elfSegments e)) (length (elfSegments e'))
-      withElfHeaderInfo bs $ \ehi -> do
-        withElfHeaderInfo (LB.toStrict (renderElf e)) $ \ehi' -> do
-          let ex = concat (parseSymbolTables ehi)
-              act = concat (parseSymbolTables ehi')
-          T.assertEqual "Symbol table sizes" (length ex) (length act)
+      withElf bs $ \ehi -> do
+        withElf (LB.toStrict (renderElf e)) $ \ehi' -> do
+          let [st1] = elfSymtab ehi
+              [st2] = elfSymtab ehi'
+          let cnt1 = V.length (elfSymbolTableEntries st1)
+          let cnt2 = V.length (elfSymbolTableEntries st2)
+          T.assertEqual "Symbol table sizes" cnt1 cnt2
       int1 <- elfInterpreter e'
       T.assertEqual "Interpreter" int0 int1
 
@@ -44,10 +48,10 @@ stringTableConsistencyProp strings =
   where
     (bytes, tab) = stringTable (map unwrapAsciiString strings)
 
-checkStringTableEntry :: C8.ByteString -> (String, Word32) -> Bool
-checkStringTableEntry bytes (str, off) = str == C8.unpack bstr
+checkStringTableEntry :: C8.ByteString -> (B.ByteString, Word32) -> Bool
+checkStringTableEntry bytes (str, off) = str == bstr
   where
-    bstr = C8.take (length str) $ C8.drop (fromIntegral off) bytes
+    bstr = C8.take (B.length str) $ C8.drop (fromIntegral off) bytes
 
 withElfHeaderInfo :: B.ByteString -> (forall w . ElfHeaderInfo w -> T.Assertion) -> T.Assertion
 withElfHeaderInfo bs f =
@@ -74,11 +78,11 @@ tests = T.testGroup "ELF Tests"
 main :: IO ()
 main = T.defaultMain tests
 
-newtype AsciiString = AsciiString { unwrapAsciiString :: String }
+newtype AsciiString = AsciiString { unwrapAsciiString :: B.ByteString }
                     deriving (Show)
 
 instance T.Arbitrary AsciiString where
-  arbitrary = AsciiString <$> genAsciiString
+  arbitrary = AsciiString . fromString <$> genAsciiString
 
 genAsciiString :: T.Gen String
 genAsciiString = T.listOf genAsciiChar
