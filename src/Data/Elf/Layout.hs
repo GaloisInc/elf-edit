@@ -383,9 +383,7 @@ buildElfSegmentHeaderTable l =
         d = headerData hdr
 
 buildElfSectionHeaderTable :: ElfLayout w -> Bld.Builder
-buildElfSectionHeaderTable l =
-  mconcat (Map.elems (l^.shdrs))
-
+buildElfSectionHeaderTable l = mconcat (Map.elems (l^.shdrs))
 
 -- | Return the data bytes associated with a given list of regions.
 buildRegions :: ElfWidth w
@@ -687,7 +685,8 @@ addSectionToLayout :: Integral w
                    -> ElfLayout w
 addSectionToLayout name_map l s
     | Map.member idx (l^.shdrs) =
-      error $ "Segment index " ++ show idx ++ " already exists"
+      error $ "Section index " ++ show idx ++ " already exists; cannot add "
+        ++ elfSectionName s ++ "."
     | otherwise =
       l & elfOutputSize %~ (`incOffset` data_size)
         & shdrs %~ Map.insert idx dta

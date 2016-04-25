@@ -40,6 +40,8 @@ module Data.Elf ( -- * Top-level definitions
                 , hasElfMagic
                 , parseElf
                 , SomeElf(..)
+                , ElfParseError(..)
+                , ElfInsertError(..)
                 , ElfHeaderInfo
                 , header
                 , parseElfHeaderInfo
@@ -120,10 +122,7 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfSymbolTable(..)
                 , ElfSymbolTableEntry(..)
                 , ppSymbolTableEntries
-                , parseSymbolTables
-                , Data.Elf.Get.getSymbolTableEntries
                 , symbolTableEntrySize
---                , findSymbolDefinition
                   -- ** Elf symbol visibility
                 , steVisibility
                 , ElfSymbolVisibility(..)
@@ -196,7 +195,6 @@ import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get as G
 import           Data.Bits
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L (toString)
 import qualified Data.ByteString.UTF8 as B (toString)
@@ -204,7 +202,6 @@ import qualified Data.Foldable as F
 import           Data.Int
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
-import qualified Data.Vector as V
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
@@ -322,23 +319,15 @@ ppSymbolTableEntry i e =
   , B.toString (steName e)
   ]
 
--- | Parse the symbol table section into a list of symbol table entries. If
--- no symbol table is found then an empty list is returned.
--- This function does not consult flags to look for SHT_STRTAB (when naming symbols),
--- it just looks for particular sections of ".symtab".
-parseSymbolTables :: ElfHeaderInfo w -> [[ElfSymbolTableEntry w]]
-parseSymbolTables info =
-  fmap (getSymbolTableEntries info) $
-  filter (hasSectionType SHT_SYMTAB) $
-  V.toList $ getSectionTable info
-
--- | Return symbol table in Elf file.
-elfSymtab :: Elf w -> Maybe (ElfSymbolTable w)
+-- | Return symbol tables in Elf file.
+--
+-- These are sections labeled, ".symtab" with type SHT_SYMTAB.
+-- There should be at most one symbol table, but we return a list in case the
+-- elf file happens to contain multiple symbol tables.
+elfSymtab :: Elf w -> [ElfSymbolTable w]
 elfSymtab = asumDataRegions f
-  where f (ElfDataSymtab s) = Just s
-        f _ = Nothing
-hasSectionType :: ElfSectionType -> ElfSection w -> Bool
-hasSectionType tp s = elfSectionType s == tp
+  where f (ElfDataSymtab s) = [s]
+        f _ = []
 
 ------------------------------------------------------------------------
 -- I386_RelocationType
