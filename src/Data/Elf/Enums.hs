@@ -485,7 +485,10 @@ pattern SHN_UNDEF = ElfSectionIndex 0
 -- | Associated symbol is absolute.
 pattern SHN_ABS = ElfSectionIndex 0xfff1
 
--- | Associated symbol is common.
+-- | This identifies a symbol in a relocatable file that is not yet allocated.
+--
+-- The linker should allocate space for this symbol at an address that is a
+-- aligned to the symbol value ('steValue').
 pattern SHN_COMMON = ElfSectionIndex 0xfff2
 
 -- | Start of reserved indices.
