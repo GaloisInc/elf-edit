@@ -1,17 +1,18 @@
-{-
-Module           : Data.Elf.Enums
+{-|
+Module           : Data.ElfEdit.Layout
 Copyright        : (c) Galois, Inc 2016
 Maintainer       : Joe Hendrix <jhendrix@galois.com>
+License          : BSD3
 
-Defines a large collection of constants used in defining elf values.
+This defines the 'ElfLayout' class which is used for writing elf files.
 -}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Data.Elf.Layout
+{-# LANGUAGE Trustworthy #-} -- Use Control.Lens and Data.Vector
+module Data.ElfEdit.Layout
   ( -- * ElfLayout
     ElfLayout
   , elfLayoutClass
@@ -68,7 +69,8 @@ import qualified Data.Vector as V
 import           Data.Word
 import           Numeric
 
-import           Data.Elf.Types
+import           Data.ElfEdit.Enums
+import           Data.ElfEdit.Types
 
 ------------------------------------------------------------------------
 -- Utilities
@@ -621,7 +623,7 @@ updateSections' fn e0 = elfFileData (updateSeq impl) e0
           | elfSectionName s == shstrtab = ElfDataSectionNameTable (elfSectionIndex s)
           | elfSectionName s `elem` [".got", ".got.plt"] =
             case elfSectionAsGOT s of
-              Left e -> error $ "Error in Data.Elf.updateSections: " ++ e
+              Left e -> error $ "Error in Data.ElfEdit.updateSections: " ++ e
               Right v -> ElfDataGOT v
           | otherwise = ElfDataSection s
 
@@ -1061,77 +1063,3 @@ traverseElfDataRegions f = updateDataRegions (fmap Just . f)
 -- | Return layout information from elf file.
 elfLayout :: Elf w -> ElfLayout w
 elfLayout e = elfClassElfWidthInstance (elfClass e) $ elfLayout' e
-
-{-
-------------------------------------------------------------------------
--- ElfSegmentUpdater
-
--- | This provides information and operations for modifying the contents of a
--- loadable segment without modifying the position in memory of existing code.
-data ElfSegmentUpdater w
-   = ElfSegmentUpdater { updaterVirtEnd :: !w
-                         -- ^ The virtual address for the end of the segment.
-                       , updaterAppendSection :: !(ElfSection w -> Elf w)
-                         -- ^ This appends a section to the selected segment, and
-                         -- returns a new elf file.
-                         --
-                         -- Note: This is not allowed if the section headers are
-                         -- loadable (which is atypical), and 'error' will be
-                         -- called if this is the case.
-                       , updaterAppendData :: !(B.ByteString -> Elf w)
-                         -- ^ This appends raw data to the selected segment, and
-                         -- returns a new elf file.
-                       }
-
--- | Given an elf file and a predicate on segments, this looks for the first
--- segment matching the predicate, and returns a 'ElfSegmentUpdater' that
--- allows changes to the segment that do not change the position of
--- any data in memory.
-updateElfLoadableSegment :: Elf w
-                         -> (ElfSegment w -> Bool)
-                         -> Maybe (ElfSegmentUpdater w)
-updateElfLoadableSegment  e isSegment =
-    elfClassIntegralInstance (elfClass e) $
-      updateElfLoadableSegment' e (elfLayout e) isSegment Seq.empty startOfFile (e^.elfFileData)
-
-updateElfLoadableSegment' :: (Bits w, Integral w)
-                          => Elf w
-                          -> ElfLayout w
-                          -> (ElfSegment w -> Bool)
-                          -> Seq.Seq (ElfDataRegion w)
-                          -> FileOffset w
-                          -> Seq.Seq (ElfDataRegion w)
-                          -> Maybe (ElfSegmentUpdater w)
-updateElfLoadableSegment' e l isSegment prev o s =
-  case Seq.viewl s of
-    Seq.EmptyL -> Nothing
-    h Seq.:< r
-      | ElfDataSegment seg <- h
-      , elfSegmentType seg == PT_LOAD
-      , isSegment seg -> do
-        let appendData new = e & elfFileData .~ prev Seq.>< (seg' Seq.<| r)
-              where seg' = ElfDataSegment $
-                       seg { elfSegmentMemSize = undefined
-                           , elfSegmentData = elfSegmentData seg Seq.|> new
-                           }
---            seg_start = nextRegionOffset l o (ElfDataSegment seg)
---            seg_end   = fileOffsetAfterRegions l seg_start (elfSegmentData seg)
-
---            seg_length = rangeSize seg_start seg_end
-
-            -- Compute address where the new segment will be loaded.
-            new_addr = elfSegmentVirtAddr seg + elfSegmentMemSize seg
-
-            appendSection sec
-              | loadableSectionHeaders e =
-                error "Cannot create section when section headers are loadable."
-              | otherwise = appendData (ElfDataSection sec)
-            updater = ElfSegmentUpdater { updaterVirtEnd = new_addr
-                                        , updaterAppendSection = appendSection
-                                        , updaterAppendData = appendData . ElfDataRaw
-                                        }
-        return $! updater
-      | otherwise ->
-        let next_offset = fileOffsetAfterRegion l o h
-         in updateElfLoadableSegment' e l isSegment (prev Seq.|> h) next_offset r
--}

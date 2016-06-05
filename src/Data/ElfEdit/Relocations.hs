@@ -1,5 +1,5 @@
 {-|
-Module      : Data.Elf.Relocations
+Module      : Data.ElfEdit.Relocations
 Copyright   : (c) Galois Inc, 2016
 License     : BSD
 Maintainer  : jhendrix@galois.com
@@ -12,7 +12,7 @@ This contains definitions and utilities used for relocations.
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
-module Data.Elf.Relocations
+module Data.ElfEdit.Relocations
   ( -- * Relocation types
     IsRelocationType(..)
   , RelaEntry(..)
@@ -51,8 +51,8 @@ import           GHC.TypeLits (Nat)
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
-import           Data.Elf.Get (getWord32, getWord64, runGetMany)
-import           Data.Elf.Types (ElfData, ppHex)
+import           Data.ElfEdit.Get (getWord32, getWord64, runGetMany)
+import           Data.ElfEdit.Types (ElfData, ppHex)
 
 -------------------------------------------------------------------------
 -- ColumnAlignmentFn

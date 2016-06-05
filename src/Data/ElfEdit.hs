@@ -1,18 +1,17 @@
-{-# LANGUAGE CPP #-}
+{-|
+Module           : Data.ElfEdit.Layout
+Copyright        : (c) Galois, Inc 2016
+Maintainer       : Joe Hendrix <jhendrix@galois.com>
+License          : BSD3
+
+Operations for querying and manipulating elf files.
+-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
--- | Data.Elf provides an interface for querying and manipulating Elf files.
-module Data.Elf ( -- * Top-level definitions
+module Data.ElfEdit ( -- * Top-level definitions
                   Elf (..)
                 , emptyElf
                 , elfFileData
@@ -31,7 +30,7 @@ module Data.Elf ( -- * Top-level definitions
                   -- ** Top-level Elf information
                 , ElfClass(..)
                 , ElfData(..)
-                , module Data.Elf.Enums
+                , module Data.ElfEdit.Enums
                 , ElfDataRegion(..)
                 , ElfGOT(..)
                 , elfGotSection
@@ -47,7 +46,6 @@ module Data.Elf ( -- * Top-level definitions
                 , parseElfHeaderInfo
                 , getElf
                 , getSectionTable
-                , G.ByteOffset
                   -- ** Writing Elf files
                 , renderElf
                   -- ** Layout information
@@ -114,9 +112,10 @@ module Data.Elf ( -- * Top-level definitions
                 , pf_none, pf_x, pf_w, pf_r
                   -- ** ElfMemSize
                 , ElfMemSize(..)
-                  -- ** Getting data from Elf segments
+                  -- ** Layout information from Elf segments
                 , allPhdrs
                 , Phdr(..)
+                , FileOffset(..)
                 , phdrFileRange
                   -- * Symbol Table Entries
                 , ElfSymbolTable(..)
@@ -178,7 +177,7 @@ module Data.Elf ( -- * Top-level definitions
                 , ElfIntType
                   -- * Dynamic symbol table and relocations
                 , DynamicSection(..)
-                , module Data.Elf.DynamicArrayTag
+                , module Data.ElfEdit.DynamicArrayTag
                 , VersionDef(..)
                 , VersionReq(..)
                 , VersionReqAux
@@ -190,10 +189,10 @@ module Data.Elf ( -- * Top-level definitions
                 , stringTable
                 ) where
 
-import           Control.Lens hiding (enum)
+import           Control.Lens ((^.), (^..), filtered, over)
 import           Control.Monad
 import           Data.Binary
-import           Data.Binary.Get as G
+import           Data.Binary.Get
 import           Data.Bits
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L (toString)
@@ -205,12 +204,12 @@ import           Data.Maybe
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
-import           Data.Elf.DynamicArrayTag
-import           Data.Elf.Get
-import           Data.Elf.Layout
-import           Data.Elf.Relocations
-import           Data.Elf.Enums
-import           Data.Elf.Types
+import           Data.ElfEdit.DynamicArrayTag
+import           Data.ElfEdit.Get
+import           Data.ElfEdit.Layout
+import           Data.ElfEdit.Relocations
+import           Data.ElfEdit.Enums
+import           Data.ElfEdit.Types
 
 ------------------------------------------------------------------------
 -- Utilities

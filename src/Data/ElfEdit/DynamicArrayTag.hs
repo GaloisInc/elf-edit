@@ -1,5 +1,14 @@
+{-
+Module           : Data.ElfEdit.DynamicArrayTag
+Copyright        : (c) Galois, Inc 2016
+Maintainer       : Joe Hendrix <jhendrix@galois.com>
+
+Defines a large collection of constants used in defining elf values.
+-}
 {-# LANGUAGE PatternSynonyms #-}
-module Data.Elf.DynamicArrayTag where
+module Data.ElfEdit.DynamicArrayTag
+  ( module Data.ElfEdit.DynamicArrayTag
+  ) where
 
 import           Data.Foldable
 import           Data.Map (Map)

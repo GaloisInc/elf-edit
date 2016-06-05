@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
-module Data.Elf.Types
+{-# LANGUAGE Trustworthy #-} -- Cannot be Safe due to GeneralizedNewtypeDeriving
+module Data.ElfEdit.Types
   ( -- * Top leve ldeclaration
     Elf(..)
   , emptyElf
@@ -96,7 +96,6 @@ module Data.Elf.Types
   , enumCnt
   , hasPermissions
   , ppHex
-  , module Data.Elf.Enums
   ) where
 
 import           Control.Applicative
@@ -113,7 +112,7 @@ import           Data.Word
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
-import           Data.Elf.Enums
+import           Data.ElfEdit.Enums
 
 -- | @p `hasPermissions` req@ returns true if all bits set in 'req' are set in 'p'.
 hasPermissions :: Bits b => b -> b -> Bool

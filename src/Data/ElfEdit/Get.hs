@@ -1,7 +1,8 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Data.Elf.Get
+{-# LANGUAGE Trustworthy #-}
+module Data.ElfEdit.Get
   ( -- * parseElf
     parseElf
   , SomeElf(..)
@@ -25,6 +26,8 @@ module Data.Elf.Get
 import           Control.Exception ( assert )
 import           Control.Lens
 import           Control.Monad
+import           Data.Binary
+import           Data.Binary.Get
 import qualified Data.Binary.Get as Get
 import           Data.Bits
 import qualified Data.ByteString as B
@@ -33,10 +36,10 @@ import qualified Data.ByteString.UTF8 as B (toString)
 import           Data.Foldable (foldl')
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
-import           Data.Word
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
-import           Data.Elf.Layout
+import           Data.ElfEdit.Enums
+import           Data.ElfEdit.Layout
   ( FileOffset(..)
   , Phdr(..)
   , phdrFileRange
@@ -45,10 +48,8 @@ import           Data.Elf.Layout
   , shdrEntrySize
   , symbolTableSize
   )
-import           Data.Elf.Types
+import           Data.ElfEdit.Types
 
-import           Data.Binary
-import           Data.Binary.Get as G
 
 ------------------------------------------------------------------------
 -- Utilities

@@ -1,45 +1,38 @@
-Name:          elf-galois
+Name:          elf-edit
 Version:       0.28
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
 Author:        Galois, Inc and Erik Charlebois
-Copyright:     Galois, Inc and Erik Charlebois
 Maintainer:    Joe Hendrix <jhendrix@galois.com>
 Stability:     unstable
 Cabal-Version: >= 1.8
-Homepage:      http://github.com/GaloisInc/elf
+Homepage:      http://github.com/GaloisInc/elf-edit
 Build-Type:    Simple
-Synopsis:      Parser for ELF object format.
-Description:   Parser for ELF object format.
+Synopsis:      Datatype for ELF files with serialization and deserialization.
 Data-Files:    tests/empty.elf tests/Test.hs
 
 library
   build-depends:
-    base >= 2 && < 5,
+    base >= 4.8 && < 5,
     ansi-wl-pprint,
-    array,
-    binary >= 0.6.0.0,
+    binary,
     bytestring,
     containers,
     lens,
-    template-haskell,
     utf8-string,
     vector
-  build-tools:
-    alex>= 3.0,
-    happy
   ghc-options : -Wall
   hs-source-dirs:  src
   exposed-modules:
-    Data.Elf
+    Data.ElfEdit
   other-modules:
-    Data.Elf.DynamicArrayTag
-    Data.Elf.Enums
-    Data.Elf.Get
-    Data.Elf.Layout
-    Data.Elf.Relocations
-    Data.Elf.Types
+    Data.ElfEdit.DynamicArrayTag
+    Data.ElfEdit.Enums
+    Data.ElfEdit.Get
+    Data.ElfEdit.Layout
+    Data.ElfEdit.Relocations
+    Data.ElfEdit.Types
 
 test-suite test-elf
   type: exitcode-stdio-1.0
@@ -48,14 +41,10 @@ test-suite test-elf
   hs-source-dirs: tests
   build-depends:
     base,
-    elf-galois,
     bytestring,
-    vector,
     containers,
-    ansi-wl-pprint,
-    binary,
-    array,
-    utf8-string, lens,
-    tasty >= 0.9,
-    tasty-hunit >= 0.8,
-    tasty-quickcheck >= 0.8
+    elf-edit,
+    tasty,
+    tasty-hunit,
+    tasty-quickcheck,
+    vector

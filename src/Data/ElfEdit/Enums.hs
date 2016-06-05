@@ -1,5 +1,5 @@
 {-
-Module           : Data.Elf.Enums
+Module           : Data.ElfEdit.Enums
 Copyright        : (c) Galois, Inc 2016
 Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
@@ -8,7 +8,7 @@ Defines a large collection of constants used in defining elf values.
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE PatternSynonyms #-}
-module Data.Elf.Enums
+module Data.ElfEdit.Enums
   (  -- * ElfOSABI
     ElfOSABI(..)
   , pattern ELFOSABI_SYSV
@@ -264,108 +264,200 @@ instance Show ElfType where
 newtype ElfMachine = ElfMachine { fromElfMachine :: Word16 }
   deriving (Eq, Ord)
 
-pattern EM_NONE = ElfMachine 0 -- ^ No machine
-pattern EM_M32 = ElfMachine 1 -- ^ AT&T WE 32100
-pattern EM_SPARC = ElfMachine 2 -- ^ SPARC
-pattern EM_386 = ElfMachine 3 -- ^ Intel 80386
-pattern EM_68K = ElfMachine 4 -- ^ Motorola 68000
-pattern EM_88K = ElfMachine 5  -- ^ Motorola 88000
-pattern EM_486 = ElfMachine 6 -- ^ Intel i486 (DO NOT USE THIS ONE)
-pattern EM_860 = ElfMachine 7 -- ^ Intel 80860
-pattern EM_MIPS = ElfMachine 8 -- ^ MIPS I Architecture
-pattern EM_S370 = ElfMachine 9 -- ^ IBM System/370 Processor
-pattern EM_MIPS_RS3_LE = ElfMachine 10 -- ^ MIPS RS3000 Little-endian
-pattern EM_SPARC64 = ElfMachine 11 -- ^ SPARC 64-bit
-pattern EM_PARISC = ElfMachine 15 -- ^ Hewlett-Packard PA-RISC
-pattern EM_VPP500 = ElfMachine 17 -- ^ Fujitsu VPP500
-pattern EM_SPARC32PLUS = ElfMachine 18 -- ^ Enhanced instruction set SPARC
-pattern EM_960 = ElfMachine 19 -- ^ Intel 80960
-pattern EM_PPC = ElfMachine 20 -- ^ PowerPC
-pattern EM_PPC64 = ElfMachine 21 -- ^ 64-bit PowerPC
-pattern EM_S390  = ElfMachine 22 -- ^ IBM System/390 Processor
-pattern EM_SPU   = ElfMachine 23 -- ^ Cell SPU
-pattern EM_V800  = ElfMachine 36 -- ^ NEC V800
-pattern EM_FR20  = ElfMachine 37 -- ^ Fujitsu FR20
-pattern EM_RH32  = ElfMachine 38 -- ^ TRW RH-32
-pattern EM_RCE   = ElfMachine 39 -- ^ Motorola RCE
-pattern EM_ARM   = ElfMachine 40 -- ^ Advanced RISC Machines ARM
-pattern EM_ALPHA = ElfMachine 41 -- ^ Digital Alpha
-pattern EM_SH    = ElfMachine 42 -- ^ Hitachi SH
-pattern EM_SPARCV9  = ElfMachine 43 -- ^ SPARC Version 9
-pattern EM_TRICORE  = ElfMachine 44 -- ^ Siemens TriCore embedded processor
-pattern EM_ARC      = ElfMachine 45 -- ^ Argonaut RISC Core, Argonaut Technologies Inc.
-pattern EM_H8_300   = ElfMachine 46 -- ^ Hitachi H8/300
-pattern EM_H8_300H  = ElfMachine 47 -- ^ Hitachi H8/300H
-pattern EM_H8S      = ElfMachine 48 -- ^ Hitachi H8S
-pattern EM_H8_500   = ElfMachine 49 -- ^ Hitachi H8/500
-pattern EM_IA_64    = ElfMachine 50 -- ^ Intel IA-64 processor architecture
-pattern EM_MIPS_X   = ElfMachine 51 -- ^ Stanford MIPS-X
-pattern EM_COLDFIRE = ElfMachine 52 -- ^ Motorola ColdFire
-pattern EM_68HC12   = ElfMachine 53 -- ^ Motorola M68HC12
-pattern EM_MMA      = ElfMachine 54 -- ^ Fujitsu MMA Multimedia Accelerator
-pattern EM_PCP      = ElfMachine 55 -- ^ Siemens PCP
-pattern EM_NCPU     = ElfMachine 56 -- ^ Sony nCPU embedded RISC processor
-pattern EM_NDR1     = ElfMachine 57 -- ^ Denso NDR1 microprocessor
-pattern EM_STARCORE = ElfMachine 58 -- ^ Motorola Star*Core processor
-pattern EM_ME16     = ElfMachine 59 -- ^ Toyota ME16 processor
-pattern EM_ST100    = ElfMachine 60 -- ^ STMicroelectronics ST100 processor
-pattern EM_TINYJ    = ElfMachine 61 -- ^ Advanced Logic Corp. TinyJ embedded processor family
-pattern EM_X86_64   = ElfMachine 62 -- ^ AMD x86-64 architecture
-pattern EM_PDSP     = ElfMachine 63 -- ^ Sony DSP Processor
-pattern EM_FX66     = ElfMachine 66 -- ^ Siemens FX66 microcontroller
-pattern EM_ST9PLUS  = ElfMachine 67 -- ^ STMicroelectronics ST9+ 8/16 bit microcontroller
-pattern EM_ST7      = ElfMachine 68 -- ^ STMicroelectronics ST7 8-bit microcontroller
-pattern EM_68HC16   = ElfMachine 69 -- ^ Motorola MC68HC16 Microcontroller
-pattern EM_68HC11      = ElfMachine 70 -- ^ Motorola MC68HC11 Microcontroller
-pattern EM_68HC08      = ElfMachine 71 -- ^ Motorola MC68HC08 Microcontroller
-pattern EM_68HC05      = ElfMachine 72 -- ^ Motorola MC68HC05 Microcontroller
-pattern EM_SVX         = ElfMachine 73 -- ^ Silicon Graphics SVx
-pattern EM_ST19        = ElfMachine 74 -- ^ STMicroelectronics ST19 8-bit microcontroller
-pattern EM_VAX         = ElfMachine 75 -- ^ Digital VAX
-pattern EM_CRIS        = ElfMachine 76 -- ^ Axis Communications 32-bit embedded processor
-pattern EM_JAVELIN     = ElfMachine 77 -- ^ Infineon Technologies 32-bit embedded processor
-pattern EM_FIREPATH    = ElfMachine 78 -- ^ Element 14 64-bit DSP Processor
-pattern EM_ZSP         = ElfMachine 79 -- ^ LSI Logic 16-bit DSP Processor
-pattern EM_MMIX        = ElfMachine 80 -- ^ Donald Knuth's educational 64-bit processor
-pattern EM_HUANY       = ElfMachine 81 -- ^ Harvard University machine-independent object files
-pattern EM_PRISM       = ElfMachine 82 -- ^ SiTera Prism
-pattern EM_AVR         = ElfMachine 83 -- ^ Atmel AVR 8-bit microcontroller
-pattern EM_FR30        = ElfMachine 84 -- ^ Fujitsu FR30
-pattern EM_D10V        = ElfMachine 85 -- ^ Mitsubishi D10V
-pattern EM_D30V        = ElfMachine 86 -- ^ Mitsubishi D30V
-pattern EM_V850        = ElfMachine 87  -- ^ NEC v850
-pattern EM_M32R        = ElfMachine 88 -- ^ Mitsubishi M32R
-pattern EM_MN10300     = ElfMachine 89 -- ^ Matsushita MN10300
-pattern EM_MN10200     = ElfMachine 90 -- ^ Matsushita MN10200
-pattern EM_PJ          = ElfMachine 91 -- ^ picoJava
-pattern EM_OPENRISC    = ElfMachine 92 -- ^ OpenRISC 32-bit embedded processor
-pattern EM_ARC_A5      = ElfMachine 93 -- ^ ARC Cores Tangent-A5
-pattern EM_XTENSA      = ElfMachine 94 -- ^ Tensilica Xtensa Architecture
-pattern EM_VIDEOCORE   = ElfMachine 95 -- ^ Alphamosaic VideoCore processor
-pattern EM_TMM_GPP     = ElfMachine 96 -- ^ Thompson Multimedia General Purpose Processor
-pattern EM_NS32K       = ElfMachine 97 -- ^ National Semiconductor 32000 series
-pattern EM_TPC         = ElfMachine 98 -- ^ Tenor Network TPC processor
-pattern EM_SNP1K       = ElfMachine 99 -- ^ Trebia SNP 1000 processor
-pattern EM_ST200      = ElfMachine 100 -- ^ STMicroelectronics (www.st.com) ST200 microcontroller
-pattern EM_IP2K       = ElfMachine 101 -- ^ Ubicom IP2xxx microcontroller family
-pattern EM_MAX        = ElfMachine 102 -- ^ MAX Processor
-pattern EM_CR         = ElfMachine 103 -- ^ National Semiconductor CompactRISC microprocessor
-pattern EM_F2MC16     = ElfMachine 104 -- ^ Fujitsu F2MC16
-pattern EM_MSP430     = ElfMachine 105 -- ^ Texas Instruments embedded microcontroller msp430
-pattern EM_BLACKFIN   = ElfMachine 106 -- ^ Analog Devices Blackfin (DSP) processor
-pattern EM_SE_C33     = ElfMachine 107 -- ^ S1C33 Family of Seiko Epson processors
-pattern EM_SEP        = ElfMachine 108 -- ^ Sharp embedded microprocessor
-pattern EM_ARCA       = ElfMachine 109 -- ^ Arca RISC Microprocessor
-pattern EM_UNICORE    = ElfMachine 110
+pattern EM_NONE = ElfMachine 0
+-- ^ No machine
+
+pattern EM_M32 = ElfMachine 1
+-- ^ AT&T WE 32100
+
+pattern EM_SPARC = ElfMachine 2
+-- ^ SPARC
+pattern EM_386 = ElfMachine 3
+-- ^ Intel 80386
+pattern EM_68K = ElfMachine 4
+-- ^ Motorola 68000
+pattern EM_88K = ElfMachine 5
+-- ^ Motorola 88000
+pattern EM_486 = ElfMachine 6
+-- ^ Intel i486 (DO NOT USE THIS ONE)
+pattern EM_860 = ElfMachine 7
+-- ^ Intel 80860
+pattern EM_MIPS = ElfMachine 8
+-- ^ MIPS I Architecture
+pattern EM_S370 = ElfMachine 9
+-- ^ IBM System/370 Processor
+pattern EM_MIPS_RS3_LE = ElfMachine 10
+-- ^ MIPS RS3000 Little-endian
+pattern EM_SPARC64 = ElfMachine 11
+-- ^ SPARC 64-bit
+pattern EM_PARISC = ElfMachine 15
+-- ^ Hewlett-Packard PA-RISC
+pattern EM_VPP500 = ElfMachine 17
+-- ^ Fujitsu VPP500
+pattern EM_SPARC32PLUS = ElfMachine 18
+-- ^ Enhanced instruction set SPARC
+pattern EM_960 = ElfMachine 19
+-- ^ Intel 80960
+pattern EM_PPC = ElfMachine 20
+-- ^ PowerPC
+pattern EM_PPC64 = ElfMachine 21
+-- ^ 64-bit PowerPC
+pattern EM_S390  = ElfMachine 22
+-- ^ IBM System/390 Processor
+pattern EM_SPU   = ElfMachine 23
+-- ^ Cell SPU
+pattern EM_V800  = ElfMachine 36
+-- ^ NEC V800
+pattern EM_FR20  = ElfMachine 37
+-- ^ Fujitsu FR20
+pattern EM_RH32  = ElfMachine 38
+-- ^ TRW RH-32
+pattern EM_RCE   = ElfMachine 39
+-- ^ Motorola RCE
+pattern EM_ARM   = ElfMachine 40
+-- ^ Advanced RISC Machines ARM
+pattern EM_ALPHA = ElfMachine 41
+-- ^ Digital Alpha
+pattern EM_SH    = ElfMachine 42
+-- ^ Hitachi SH
+pattern EM_SPARCV9  = ElfMachine 43
+-- ^ SPARC Version 9
+pattern EM_TRICORE  = ElfMachine 44
+-- ^ Siemens TriCore embedded processor
+pattern EM_ARC      = ElfMachine 45
+-- ^ Argonaut RISC Core, Argonaut Technologies Inc.
+pattern EM_H8_300   = ElfMachine 46
+-- ^ Hitachi H8/300
+pattern EM_H8_300H  = ElfMachine 47
+-- ^ Hitachi H8/300H
+pattern EM_H8S      = ElfMachine 48
+-- ^ Hitachi H8S
+pattern EM_H8_500   = ElfMachine 49
+-- ^ Hitachi H8/500
+pattern EM_IA_64    = ElfMachine 50
+-- ^ Intel IA-64 processor architecture
+pattern EM_MIPS_X   = ElfMachine 51
+-- ^ Stanford MIPS-X
+pattern EM_COLDFIRE = ElfMachine 52
+-- ^ Motorola ColdFire
+pattern EM_68HC12   = ElfMachine 53
+-- ^ Motorola M68HC12
+pattern EM_MMA      = ElfMachine 54
+-- ^ Fujitsu MMA Multimedia Accelerator
+pattern EM_PCP      = ElfMachine 55
+-- ^ Siemens PCP
+pattern EM_NCPU     = ElfMachine 56
+-- ^ Sony nCPU embedded RISC processor
+pattern EM_NDR1     = ElfMachine 57
+-- ^ Denso NDR1 microprocessor
+pattern EM_STARCORE = ElfMachine 58
+-- ^ Motorola Star*Core processor
+pattern EM_ME16     = ElfMachine 59
+-- ^ Toyota ME16 processor
+pattern EM_ST100    = ElfMachine 60
+-- ^ STMicroelectronics ST100 processor
+pattern EM_TINYJ    = ElfMachine 61
+-- ^ Advanced Logic Corp. TinyJ embedded processor family
+pattern EM_X86_64   = ElfMachine 62
+-- ^ AMD x86-64 architecture
+pattern EM_PDSP     = ElfMachine 63
+-- ^ Sony DSP Processor
+pattern EM_FX66     = ElfMachine 66
+-- ^ Siemens FX66 microcontroller
+pattern EM_ST9PLUS  = ElfMachine 67
+-- ^ STMicroelectronics ST9+ 8/16 bit microcontroller
+pattern EM_ST7      = ElfMachine 68
+-- ^ STMicroelectronics ST7 8-bit microcontroller
+pattern EM_68HC16   = ElfMachine 69
+-- ^ Motorola MC68HC16 Microcontroller
+pattern EM_68HC11      = ElfMachine 70
+-- ^ Motorola MC68HC11 Microcontroller
+pattern EM_68HC08      = ElfMachine 71
+-- ^ Motorola MC68HC08 Microcontroller
+pattern EM_68HC05      = ElfMachine 72
+-- ^ Motorola MC68HC05 Microcontroller
+pattern EM_SVX         = ElfMachine 73
+-- ^ Silicon Graphics SVx
+pattern EM_ST19        = ElfMachine 74
+-- ^ STMicroelectronics ST19 8-bit microcontroller
+pattern EM_VAX         = ElfMachine 75
+-- ^ Digital VAX
+pattern EM_CRIS        = ElfMachine 76
+-- ^ Axis Communications 32-bit embedded processor
+pattern EM_JAVELIN     = ElfMachine 77
+-- ^ Infineon Technologies 32-bit embedded processor
+pattern EM_FIREPATH    = ElfMachine 78
+-- ^ Element 14 64-bit DSP Processor
+pattern EM_ZSP         = ElfMachine 79
+-- ^ LSI Logic 16-bit DSP Processor
+pattern EM_MMIX        = ElfMachine 80
+-- ^ Donald Knuth's educational 64-bit processor
+pattern EM_HUANY       = ElfMachine 81
+-- ^ Harvard University machine-independent object files
+pattern EM_PRISM       = ElfMachine 82
+-- ^ SiTera Prism
+pattern EM_AVR         = ElfMachine 83
+-- ^ Atmel AVR 8-bit microcontroller
+pattern EM_FR30        = ElfMachine 84
+-- ^ Fujitsu FR30
+pattern EM_D10V        = ElfMachine 85
+-- ^ Mitsubishi D10V
+pattern EM_D30V        = ElfMachine 86
+-- ^ Mitsubishi D30V
+pattern EM_V850        = ElfMachine 87
+-- ^ NEC v850
+pattern EM_M32R        = ElfMachine 88
+-- ^ Mitsubishi M32R
+pattern EM_MN10300     = ElfMachine 89
+-- ^ Matsushita MN10300
+pattern EM_MN10200     = ElfMachine 90
+-- ^ Matsushita MN10200
+pattern EM_PJ          = ElfMachine 91
+-- ^ picoJava
+pattern EM_OPENRISC    = ElfMachine 92
+-- ^ OpenRISC 32-bit embedded processor
+pattern EM_ARC_A5      = ElfMachine 93
+-- ^ ARC Cores Tangent-A5
+pattern EM_XTENSA      = ElfMachine 94
+-- ^ Tensilica Xtensa Architecture
+pattern EM_VIDEOCORE   = ElfMachine 95
+-- ^ Alphamosaic VideoCore processor
+pattern EM_TMM_GPP     = ElfMachine 96
+-- ^ Thompson Multimedia General Purpose Processor
+pattern EM_NS32K       = ElfMachine 97
+-- ^ National Semiconductor 32000 series
+pattern EM_TPC         = ElfMachine 98
+-- ^ Tenor Network TPC processor
+pattern EM_SNP1K       = ElfMachine 99
+-- ^ Trebia SNP 1000 processor
+pattern EM_ST200       = ElfMachine 100
+-- ^ STMicroelectronics (www.st.com) ST200 microcontroller
+pattern EM_IP2K        = ElfMachine 101
+-- ^ Ubicom IP2xxx microcontroller family
+pattern EM_MAX         = ElfMachine 102
+-- ^ MAX Processor
+pattern EM_CR          = ElfMachine 103
+-- ^ National Semiconductor CompactRISC microprocessor
+pattern EM_F2MC16      = ElfMachine 104
+-- ^ Fujitsu F2MC16
+pattern EM_MSP430      = ElfMachine 105
+-- ^ Texas Instruments embedded microcontroller msp430
+pattern EM_BLACKFIN    = ElfMachine 106
+-- ^ Analog Devices Blackfin (DSP) processor
+pattern EM_SE_C33      = ElfMachine 107
+-- ^ S1C33 Family of Seiko Epson processors
+pattern EM_SEP         = ElfMachine 108
+-- ^ Sharp embedded microprocessor
+pattern EM_ARCA        = ElfMachine 109
+-- ^ Arca RISC Microprocessor
+pattern EM_UNICORE     = ElfMachine 110
 -- ^ Microprocessor series from PKU-Unity Ltd. and MPRC of Peking University
-pattern EM_TI_C6000   = ElfMachine 140
+pattern EM_TI_C6000    = ElfMachine 140
 -- ^ Texas Instruments TMS320C6000 DSP family
-pattern EM_L1OM       = ElfMachine 180
+pattern EM_L1OM        = ElfMachine 180
 -- ^ Intel L10M
-pattern EM_K1OM       = ElfMachine 181
+pattern EM_K1OM        = ElfMachine 181
 -- ^ Intel K10M
-
-
 
 instance Show ElfMachine where
   show m =
