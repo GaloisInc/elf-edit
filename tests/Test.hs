@@ -16,7 +16,7 @@ import qualified Test.Tasty.QuickCheck as T
 
 import           Prelude
 
-import           Data.Elf
+import           Data.ElfEdit
 
 testEmptyElf :: T.Assertion
 testEmptyElf = IO.withBinaryFile "./tests/empty.elf" IO.ReadMode $ \h -> do
