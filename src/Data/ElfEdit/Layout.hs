@@ -6,6 +6,7 @@ License          : BSD3
 
 This defines the 'ElfLayout' class which is used for writing elf files.
 -}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
@@ -157,9 +158,10 @@ phdrFileRange phdr = (fromFileOffset (phdrFileStart phdr), phdrFileSize phdr)
 ------------------------------------------------------------------------
 -- ElfLayout
 
--- | This provides information about the layout of an Elf file.
+-- | This maintains information about the layout of an elf file.
 --
--- It can be used to obtain precise information about Elf file layout.
+-- It can be used when constructing an Elf file to obtain precise
+-- control over the layout so that alignment restrictions are maintained.
 data ElfLayout w = ElfLayout {
         elfLayoutHeader :: !(ElfHeader w)
         -- ^ Header information for elf file
@@ -292,9 +294,7 @@ type Ehdr w = ElfLayout w
 -- | Contains Elf section data, name offset, and data offset.
 type Shdr w = (ElfSection w, Word32, w)
 
--- | @ElfWidth w@ is used to capture the constraint that Elf files are
--- either 32 or 64 bit.  It is not meant to be implemented by others.
-class (Bits w, Integral w, Show w) => ElfWidth w where
+type ElfWidth w = (Bits w, Integral w, Show w)
 
 ------------------------------------------------------------------------
 -- Symbol table
@@ -373,21 +373,24 @@ symtabSection cl d name_map this_strtab_idx symtab = s
 ------------------------------------------------------------------------
 -- elfLayoutBytes
 
+-- | Render the main ELF header.
 buildElfHeader :: ElfLayout w -> Bld.Builder
 buildElfHeader l = writeRecord2 (ehdrFields (headerClass hdr)) d l
   where hdr = elfLayoutHeader l
         d = headerData hdr
 
+-- | Render the ELF segment header table.
 buildElfSegmentHeaderTable :: ElfLayout w -> Bld.Builder
 buildElfSegmentHeaderTable l =
     mconcat $ writeRecord2 (phdrFields (headerClass hdr)) d <$> allPhdrs l
   where hdr = elfLayoutHeader l
         d = headerData hdr
 
+-- | Render the ELF section header table.
 buildElfSectionHeaderTable :: ElfLayout w -> Bld.Builder
 buildElfSectionHeaderTable l = mconcat (Map.elems (l^.shdrs))
 
--- | Return the data bytes associated with a given list of regions.
+-- | Render the given list of regions at a particular file offeset.
 buildRegions :: ElfWidth w
              => ElfLayout w
              -> FileOffset w
@@ -846,26 +849,10 @@ elfLayout' e = final
         final = initl & flip (foldl layoutRegion) (e^.elfFileData)
                       & addRelroToLayout (elfRelroRange e)
 
-{-
--- | Return true if the section headers are stored in a loadable part of
--- memory.
-loadableSectionHeaders :: Elf w -> Bool
-loadableSectionHeaders e = any containsLoadableSectionHeaders (e^.elfFileData)
-  where containsLoadableSectionHeaders :: ElfDataRegion w -> Bool
-        containsLoadableSectionHeaders (ElfDataSegment s)
-          | elfSegmentType s == PT_LOAD =
-              any containsSectionHeaders (elfSegmentData s)
-        containsLoadableSectionHeaders _ = False
-
-        containsSectionHeaders :: ElfDataRegion w -> Bool
-        containsSectionHeaders ElfDataSectionHeaders = True
-        containsSectionHeaders (ElfDataSegment s) =
-          any containsSectionHeaders (elfSegmentData s)
-        containsSectionHeaders _ = False
--}
 ------------------------------------------------------------------------
 -- Elf Width instances
 
+-- | The 4-byte strict expected at the start of an Elf file '(0x7f)ELF'
 elfMagic :: B.ByteString
 elfMagic = B.fromString "\DELELF"
 
@@ -898,17 +885,17 @@ shdrEntrySize32 = sizeOfRecord shdr32Fields
 shdrEntrySize64 :: Word16
 shdrEntrySize64 = sizeOfRecord shdr64Fields
 
--- | Return the size of the main elf header table.
+-- | Size of the main elf header table for given width.
 ehdrSize :: ElfClass w -> Word16
 ehdrSize ELFCLASS32 = ehdrSize32
 ehdrSize ELFCLASS64 = ehdrSize64
 
--- | Return size of entry in Elf programs header table.
+-- | Size of entry in Elf program header table for given width.
 phdrEntrySize :: ElfClass w -> Word16
 phdrEntrySize ELFCLASS32 = phdrEntrySize32
 phdrEntrySize ELFCLASS64 = phdrEntrySize64
 
--- | Return size of entry in Elf section header table.
+-- | Size of entry in Elf section header table for given width.
 shdrEntrySize :: ElfClass w -> Word16
 shdrEntrySize ELFCLASS32 = shdrEntrySize32
 shdrEntrySize ELFCLASS64 = shdrEntrySize64
@@ -1014,9 +1001,6 @@ shdr64Fields =
 shdrFields :: ElfClass w -> ElfRecord (Shdr w)
 shdrFields ELFCLASS32 = shdr32Fields
 shdrFields ELFCLASS64 = shdr64Fields
-
-instance ElfWidth Word32 where
-instance ElfWidth Word64 where
 
 elfClassElfWidthInstance :: ElfClass w -> (ElfWidth w => a) -> a
 elfClassElfWidthInstance ELFCLASS32 a = a

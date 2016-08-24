@@ -4,190 +4,192 @@ Copyright        : (c) Galois, Inc 2016
 Maintainer       : Joe Hendrix <jhendrix@galois.com>
 License          : BSD3
 
-Operations for querying and manipulating elf files.
+This module provides facilities for manipulating ELF files.  It includes
+operations for both reading and writing files a well as inspecting their
+contents.
+
+To read an existing ELF file, see the documentation for 'parseElf' and the
+operations on the 'Elf' datatype.  To write an existing file, see the
+documentation for 'renderElf'.  If more control is desired for generating an Elf
+file with specific layout constraints, see the documentation for the 'ElfLayout'
+datatype.
 -}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
-module Data.ElfEdit ( -- * Top-level definitions
-                  Elf (..)
-                , emptyElf
-                , elfFileData
-                , elfSegments
-                , traverseElfSegments
-                , traverseElfDataRegions
-                , elfSections
-                , findSectionByName
-                , removeSectionByName
-                , updateSections
-                , elfInterpreter
-                , elfSymtab
-                  -- ** Elf header
-                , ElfHeader
-                , headerOSABI
-                  -- ** Top-level Elf information
-                , ElfClass(..)
-                , ElfData(..)
-                , module Data.ElfEdit.Enums
-                , ElfDataRegion(..)
-                , ElfGOT(..)
-                , elfGotSection
-                , ElfWidth
-                  -- ** Reading Elf files
-                , hasElfMagic
-                , parseElf
-                , SomeElf(..)
-                , ElfParseError(..)
-                , ElfInsertError(..)
-                , ElfHeaderInfo
-                , header
-                , parseElfHeaderInfo
-                , getElf
-                , getSectionTable
-                  -- ** Writing Elf files
-                , renderElf
-                  -- ** Layout information
-                , ElfLayout
-                , elfLayout
-                , elfLayoutClass
-                , elfLayoutBytes
-                , elfLayoutSize
-                , elfMagic
-                , ehdrSize
-                , phdrEntrySize
-                , shdrEntrySize
-                , buildElfHeader
-                , buildElfSegmentHeaderTable
-                , buildElfSectionHeaderTable
-                , elfRegionFileSize
-                  -- * Sections
-                , ElfSection(..)
-                , elfSectionFileSize
-                  -- ** Elf section type
-                , ElfSectionType(..)
-                , pattern SHT_NULL
-                , pattern SHT_PROGBITS
-                , pattern SHT_SYMTAB
-                , pattern SHT_STRTAB
-                , pattern SHT_RELA
-                , pattern SHT_HASH
-                , pattern SHT_DYNAMIC
-                , pattern SHT_NOTE
-                , pattern SHT_NOBITS
-                , pattern SHT_REL
-                , pattern SHT_SHLIB
-                , pattern SHT_DYNSYM
-                  -- ** Elf section flags
-                , ElfSectionFlags
-                , shf_none
-                , shf_write
-                , shf_alloc
-                , shf_execinstr
-                , shf_merge
-                , shf_tls
-                  -- * Segment operations.
-                , ElfSegment(..)
-                  -- ** Elf segment type
-                , ElfSegmentType(..)
-                , pattern PT_NULL
-                , pattern PT_LOAD
-                , pattern PT_DYNAMIC
-                , pattern PT_INTERP
-                , pattern PT_NOTE
-                , pattern PT_SHLIB
-                , pattern PT_PHDR
-                , pattern PT_TLS
-                , pattern PT_NUM
-                , pattern PT_LOOS
-                , pattern PT_GNU_EH_FRAME
-                , pattern PT_GNU_STACK
-                , pattern PT_GNU_RELRO
-                , pattern PT_HIOS
-                , pattern PT_LOPROC
-                , pattern PT_HIPROC
-                  -- ** Elf segment flags
-                , ElfSegmentFlags
-                , pf_none, pf_x, pf_w, pf_r
-                  -- ** ElfMemSize
-                , ElfMemSize(..)
-                  -- ** Layout information from Elf segments
-                , allPhdrs
-                , Phdr(..)
-                , FileOffset(..)
-                , phdrFileRange
-                  -- * Symbol Table Entries
-                , ElfSymbolTable(..)
-                , ElfSymbolTableEntry(..)
-                , ppSymbolTableEntries
-                , symbolTableEntrySize
-                  -- ** Elf symbol visibility
-                , steVisibility
-                , ElfSymbolVisibility(..)
-                , pattern STV_DEFAULT
-                , pattern STV_INTERNAL
-                , pattern STV_HIDDEN
-                , pattern STV_PROTECTED
-                  -- * Relocations
-                , IsRelocationType(..)
-                , RelaWidth(..)
-                , RelaEntry(..)
-                , ppRelaEntries
-                  -- ** 32-bit x86 relocations
-                , I386_RelocationType(..)
-                , elfRelaEntries
-                  -- ** 64-bit 386 relocations
-                , X86_64_RelocationType(..)
-                , pattern R_X86_64_NONE
-                , pattern R_X86_64_64
-                , pattern R_X86_64_PC32
-                , pattern R_X86_64_GOT32
-                , pattern R_X86_64_PLT32
-                , pattern R_X86_64_COPY
-                , pattern R_X86_64_GLOB_DAT
-                , pattern R_X86_64_JUMP_SLOT
-                , pattern R_X86_64_RELATIVE
-                , pattern R_X86_64_GOTPCREL
-                , pattern R_X86_64_32
-                , pattern R_X86_64_32S
-                , pattern R_X86_64_16
-                , pattern R_X86_64_PC16
-                , pattern R_X86_64_8
-                , pattern R_X86_64_PC8
-                , pattern R_X86_64_DTPMOD64
-                , pattern R_X86_64_DTPOFF64
-                , pattern R_X86_64_TPOFF64
-                , pattern R_X86_64_TLSGD
-                , pattern R_X86_64_TLSLD
-                , pattern R_X86_64_DTPOFF32
-                , pattern R_X86_64_GOTTPOFF
-                , pattern R_X86_64_TPOFF32
-                , pattern R_X86_64_PC64
-                , pattern R_X86_64_GOTOFF64
-                , pattern R_X86_64_GOTPC32
-                , pattern R_X86_64_SIZE32
-                , pattern R_X86_64_SIZE64
-                , pattern R_X86_64_GOTPC32_TLSDESC
-                , pattern R_X86_64_TLSDESC_CALL
-                , pattern R_X86_64_TLSDESC
-                , pattern R_X86_64_IRELATIVE
-                  -- ** Relocation utilitis
-                , ElfWordType
-                , ElfIntType
-                  -- * Dynamic symbol table and relocations
-                , DynamicSection(..)
-                , module Data.ElfEdit.DynamicArrayTag
-                , VersionDef(..)
-                , VersionReq(..)
-                , VersionReqAux
-                , DynamicMap
-                , dynamicEntries
-                  -- * Common definitions
-                , Range
-                , hasPermissions
-                , stringTable
-                ) where
+module Data.ElfEdit
+  ( -- * Top-level definitions
+    Elf (..)
+  , ElfClass(..)
+  , ElfData(..)
+  , emptyElf
+  , elfFileData
+  , elfSegments
+  , traverseElfSegments
+  , traverseElfDataRegions
+  , elfSections
+  , findSectionByName
+  , removeSectionByName
+  , updateSections
+  , elfInterpreter
+  , elfSymtab
+  , module Data.ElfEdit.Enums
+    -- * Elf data region
+  , ElfDataRegion(..)
+    -- * Elf GOT
+  , ElfGOT(..)
+  , elfGotSection
+    -- * Reading Elf files
+  , hasElfMagic
+  , ElfGetResult(..)
+  , ElfParseError(..)
+  , ElfInsertError(..)
+  , parseElf
+  , SomeElf(..)
+    -- * Writing Elf files
+  , renderElf
+    -- ** Layout information
+  , ElfLayout
+  , elfLayout
+  , elfLayoutClass
+  , elfLayoutBytes
+  , elfLayoutSize
+  , elfMagic
+  , ehdrSize
+  , phdrEntrySize
+  , shdrEntrySize
+  , buildElfHeader
+  , buildElfSegmentHeaderTable
+  , buildElfSectionHeaderTable
+  , elfRegionFileSize
+    -- * Sections
+  , ElfSection(..)
+  , elfSectionFileSize
+    -- ** Elf section type
+  , ElfSectionType(..)
+  , pattern SHT_NULL
+  , pattern SHT_PROGBITS
+  , pattern SHT_SYMTAB
+  , pattern SHT_STRTAB
+  , pattern SHT_RELA
+  , pattern SHT_HASH
+  , pattern SHT_DYNAMIC
+  , pattern SHT_NOTE
+  , pattern SHT_NOBITS
+  , pattern SHT_REL
+  , pattern SHT_SHLIB
+  , pattern SHT_DYNSYM
+    -- ** Elf section flags
+  , ElfSectionFlags
+  , shf_none
+  , shf_write
+  , shf_alloc
+  , shf_execinstr
+  , shf_merge
+  , shf_tls
+    -- * Segment operations.
+  , ElfSegment(..)
+    -- ** Elf segment type
+  , ElfSegmentType(..)
+  , pattern PT_NULL
+  , pattern PT_LOAD
+  , pattern PT_DYNAMIC
+  , pattern PT_INTERP
+  , pattern PT_NOTE
+  , pattern PT_SHLIB
+  , pattern PT_PHDR
+  , pattern PT_TLS
+  , pattern PT_NUM
+  , pattern PT_LOOS
+  , pattern PT_GNU_EH_FRAME
+  , pattern PT_GNU_STACK
+  , pattern PT_GNU_RELRO
+  , pattern PT_HIOS
+  , pattern PT_LOPROC
+  , pattern PT_HIPROC
+    -- ** Elf segment flags
+  , ElfSegmentFlags
+  , pf_none, pf_x, pf_w, pf_r
+    -- ** ElfMemSize
+  , ElfMemSize(..)
+    -- ** Layout information from Elf segments
+  , allPhdrs
+  , Phdr(..)
+  , FileOffset(..)
+  , phdrFileRange
+    -- * Symbol Table Entries
+  , ElfSymbolTable(..)
+  , ElfSymbolTableEntry(..)
+  , ppSymbolTableEntries
+  , symbolTableEntrySize
+    -- ** Elf symbol visibility
+  , steVisibility
+  , ElfSymbolVisibility(..)
+  , pattern STV_DEFAULT
+  , pattern STV_INTERNAL
+  , pattern STV_HIDDEN
+  , pattern STV_PROTECTED
+    -- * Relocations
+  , IsRelocationType(..)
+  , RelaWidth(..)
+  , RelaEntry(..)
+  , ppRelaEntries
+    -- ** 32-bit x86 relocations
+  , I386_RelocationType(..)
+  , elfRelaEntries
+    -- ** 64-bit 386 relocations
+  , X86_64_RelocationType(..)
+  , pattern R_X86_64_NONE
+  , pattern R_X86_64_64
+  , pattern R_X86_64_PC32
+  , pattern R_X86_64_GOT32
+  , pattern R_X86_64_PLT32
+  , pattern R_X86_64_COPY
+  , pattern R_X86_64_GLOB_DAT
+  , pattern R_X86_64_JUMP_SLOT
+  , pattern R_X86_64_RELATIVE
+  , pattern R_X86_64_GOTPCREL
+  , pattern R_X86_64_32
+  , pattern R_X86_64_32S
+  , pattern R_X86_64_16
+  , pattern R_X86_64_PC16
+  , pattern R_X86_64_8
+  , pattern R_X86_64_PC8
+  , pattern R_X86_64_DTPMOD64
+  , pattern R_X86_64_DTPOFF64
+  , pattern R_X86_64_TPOFF64
+  , pattern R_X86_64_TLSGD
+  , pattern R_X86_64_TLSLD
+  , pattern R_X86_64_DTPOFF32
+  , pattern R_X86_64_GOTTPOFF
+  , pattern R_X86_64_TPOFF32
+  , pattern R_X86_64_PC64
+  , pattern R_X86_64_GOTOFF64
+  , pattern R_X86_64_GOTPC32
+  , pattern R_X86_64_SIZE32
+  , pattern R_X86_64_SIZE64
+  , pattern R_X86_64_GOTPC32_TLSDESC
+  , pattern R_X86_64_TLSDESC_CALL
+  , pattern R_X86_64_TLSDESC
+  , pattern R_X86_64_IRELATIVE
+    -- ** Relocation utilities
+  , ElfWordType
+  , ElfIntType
+    -- * Dynamic symbol table and relocations
+  , DynamicSection(..)
+  , module Data.ElfEdit.DynamicArrayTag
+  , VersionDef(..)
+  , VersionReq(..)
+  , VersionReqAux
+  , DynamicMap
+  , dynamicEntries
+    -- * Common definitions
+  , Range
+  , hasPermissions
+  , stringTable
+  ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)
 import           Control.Monad
@@ -967,7 +969,7 @@ dynamicEntries e = elfClassInstances (elfClass e) $ do
 
 
 ------------------------------------------------------------------------
--- Elf symbol information
+-- Elf interpreter
 
 -- | Return elf interpreter in a PT_INTERP segment if one exists, or Nothing is no interpreter
 -- is defined.  This will call the Monad fail operation if the contents of the data cannot be

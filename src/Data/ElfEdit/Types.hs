@@ -613,8 +613,8 @@ data ElfDataRegion w
    | ElfDataSectionNameTable !Word16
      -- ^ The section for storing the section names.
      --
-     -- The contents are auto-generated, so we only need to know which index to give
-     -- it.
+     -- The contents are auto-generated, so we only need to know which section
+     -- index to give it.
    | ElfDataGOT !(ElfGOT w)
      -- ^ A global offset table.
    | ElfDataStrtab !Word16

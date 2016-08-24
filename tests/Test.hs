@@ -1,5 +1,7 @@
 {-# LANGUAGE RankNTypes #-}
-module Main where
+module Main
+  ( main
+  ) where
 
 import           Control.Applicative
 import qualified Data.ByteString as B
@@ -22,8 +24,8 @@ testEmptyElf :: T.Assertion
 testEmptyElf = IO.withBinaryFile "./tests/empty.elf" IO.ReadMode $ \h -> do
   fil <- B.hGetContents h
   case parseElf fil of
-    Left  _e -> return ()
-    Right _a -> T.assertFailure "Empty ELF did not cause an exception."
+    ElfHeaderError{} -> return ()
+    _ -> T.assertFailure "Empty ELF did not cause an exception."
 
 testIdentityTransform :: FilePath -> T.Assertion
 testIdentityTransform fp = do
@@ -53,19 +55,13 @@ checkStringTableEntry bytes (str, off) = str == bstr
   where
     bstr = C8.take (B.length str) $ C8.drop (fromIntegral off) bytes
 
-withElfHeaderInfo :: B.ByteString -> (forall w . ElfHeaderInfo w -> T.Assertion) -> T.Assertion
-withElfHeaderInfo bs f =
-  case parseElfHeaderInfo bs of
-    Left e -> T.assertFailure ("Failed to parse elf header info: " ++ show e)
-    Right (Elf32 ehi32) -> f ehi32
-    Right (Elf64 ehi64) -> f ehi64
-
 withElf :: B.ByteString -> (forall w . Elf w -> T.Assertion) -> T.Assertion
 withElf bs f =
   case parseElf bs of
-    Left e -> T.assertFailure ("Failed to parse elf file: " ++ show e)
-    Right (Elf32 e32) -> f e32
-    Right (Elf64 e64) -> f e64
+    Elf32Res err e32 | null err  -> f e32
+    Elf64Res err e64 | null err  -> f e64
+    ElfHeaderError _ e -> T.assertFailure $ "Failed to parse elf file: " ++ show e
+    _ -> T.assertFailure "Failed to parse elf file"
 
 tests :: T.TestTree
 tests = T.testGroup "ELF Tests"
