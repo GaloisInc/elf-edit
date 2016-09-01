@@ -34,7 +34,7 @@ import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.UTF8 as B (toString)
-import           Data.Foldable (foldl', foldrM)
+import           Data.Foldable (foldl', foldlM, foldrM)
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
@@ -548,15 +548,11 @@ insertSegment :: forall w
               => ElfSizingInfo w
               -> Seq.Seq (ElfDataRegion w)
               -> Phdr w
-              -> Seq.Seq (ElfDataRegion w)
-insertSegment esi segs phdr =
-    case insertAtOffset (regionSize esi) (\_ -> gather szd Seq.empty) rng segs of
-      GetResult (OverlapSegment r _:_) _ -> do
-        let phdr_idx = show (elfSegmentIndex (phdrSegment phdr))
-        error $ "Attempt to insert segment " ++ phdr_idx ++ " that overlaps with "
-          ++ regionName r ++ "."
-      GetResult (OutOfRange : _)     _ -> error "Invalid segment region"
-      GetResult [] result -> result
+              -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
+insertSegment esi segs phdr = do
+    -- TODO: See if we can do better than dropping the segment.
+    mapError (ElfInsertError (ElfDataSegment (phdrSegment phdr))) $
+      insertAtOffset (regionSize esi) (\_ -> gather szd Seq.empty) rng segs
   where d = phdrSegment phdr
         rng = phdrFileRange phdr
         szd = phdrFileSize  phdr
@@ -637,10 +633,10 @@ parseElfRegions :: forall w
                 => ElfHeaderInfo w -- ^ Information for parsing.
                 -> [Phdr w] -- ^ List of segments
                 -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
-parseElfRegions info segments = addSegs <$> minitial
+parseElfRegions info segments = addSegs =<< minitial
   where addSegs initial =
           -- Add in segments
-          foldl' (insertSegment esi) initial $
+          foldlM (insertSegment esi) initial $
             -- Strip out relro segment (stored in `elfRelroRange')
             filter (not . isRelroPhdr) segments
 
@@ -710,14 +706,14 @@ parseElfRegions info segments = addSegs <$> minitial
                in ElfDataSymtab symtab
           | otherwise = ElfDataSection s
 
-        insertRegion' :: (Range w, ElfDataRegion w)
+        insertRegion :: (Range w, ElfDataRegion w)
                       -> Seq.Seq (ElfDataRegion w)
                       -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
-        insertRegion' (r, n) segs =
+        insertRegion (r, n) segs =
           mapError (ElfInsertError n) $ insertSpecialRegion esi r n segs
 
         -- Define initial region list without segments.
-        minitial  = foldrM insertRegion'
+        minitial  = foldrM insertRegion
                            (insertRawRegion (fileContents info) Seq.empty)
                            (headers ++ fmap (over _2 dataSection) sections)
 
