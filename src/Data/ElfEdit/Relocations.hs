@@ -141,12 +141,11 @@ getRelaInt :: RelaWidth w -> ElfData -> Get (ElfIntType w)
 getRelaInt Rela32 d = fromIntegral <$> getWord32 d
 getRelaInt Rela64 d = fromIntegral <$> getWord64 d
 
-
 -------------------------------------------------------------------------
 -- IsRelocationType
 
--- | @IsRelocationType tp@ is used to provide methods associated with
--- relocations on a particular architecture identified by @tp@.
+-- | 'IsRelocationType tp' provide methods associated with
+-- relocations on a particular architecture identified by 'tp'.
 --
 -- Each architecture uses either a 32 or 64-bit Elf encoding, and
 -- this is associated via a type family 'RelocationWidth'

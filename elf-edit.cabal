@@ -32,6 +32,8 @@ library
     Data.ElfEdit.Get
     Data.ElfEdit.Layout
     Data.ElfEdit.Relocations
+    Data.ElfEdit.Relocations.I386
+    Data.ElfEdit.Relocations.X86_64
     Data.ElfEdit.Types
 
 test-suite test-elf
