@@ -306,7 +306,7 @@ shf_tls = ElfSectionFlags 0x400
 -- | A section in the Elf file.
 data ElfSection w = ElfSection
     { elfSectionIndex     :: !Word16
-      -- ^ Index of the section
+      -- ^ Unique index to identify section.
     , elfSectionName      :: !String
       -- ^ Name of the section.
     , elfSectionType      :: !ElfSectionType
@@ -398,8 +398,10 @@ data ElfSymbolTableEntry w = EST
     , steType             :: !ElfSymbolType
     , steBind             :: !ElfSymbolBinding
     , steOther            :: !Word8
-    , steIndex            :: !ElfSectionIndex  -- ^ Section in which the def is held
-    , steValue            :: !w -- ^ Value associated with symbol.
+    , steIndex            :: !ElfSectionIndex
+      -- ^ Section in which the def is held
+    , steValue            :: !w
+      -- ^ Value associated with symbol.
     , steSize             :: !w
     } deriving (Eq, Show)
 
@@ -420,6 +422,7 @@ typeAndBindToInfo (ElfSymbolType tp) (ElfSymbolBinding b) = tp .|. (b `shiftL` 4
 -- | This entry corresponds to the symbol table index.
 data ElfSymbolTable w
   = ElfSymbolTable { elfSymbolTableIndex :: !Word16
+                     -- ^ Index of section storing symbol table
                    , elfSymbolTableEntries :: !(V.Vector (ElfSymbolTableEntry w))
                      -- ^ Vector of symbol table entries.
                      --

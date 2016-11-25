@@ -174,8 +174,8 @@ module Data.ElfEdit.Enums
   ) where
 
 import qualified Data.Map.Strict as Map
-import Data.Word
-import Numeric (showHex)
+import           Data.Word
+import           Numeric (showHex)
 
 ------------------------------------------------------------------------
 -- ElfOSABI

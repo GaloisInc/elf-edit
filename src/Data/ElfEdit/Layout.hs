@@ -21,6 +21,8 @@ module Data.ElfEdit.Layout
   , phdrFileRange
   , phdrs
   , allPhdrs
+  , Shdr
+  , shdrs
   , elfLayout
   , elfLayoutBytes
   , elfLayoutSize
@@ -190,8 +192,8 @@ data ElfLayout w = ElfLayout {
         -- ^ Offset to section header table.
       , _shstrndx :: !Word16
         -- ^ Index of section for string table.
-      , _shdrs :: !(Map Word16 Bld.Builder)
-        -- ^ List of section headers found so far.
+      , _shdrs :: !(Map Word16 (Shdr w))
+        -- ^ Map each section index to the section header entry for that section.
       }
 
 elfLayoutClass :: ElfLayout w -> ElfClass w
@@ -213,7 +215,7 @@ shdrTableOffset = lens _shdrTableOffset (\s v -> s { _shdrTableOffset = v })
 shstrndx :: Simple Lens (ElfLayout w) Word16
 shstrndx = lens _shstrndx (\s v -> s { _shstrndx = v })
 
-shdrs :: Simple Lens (ElfLayout w) (Map Word16 Bld.Builder)
+shdrs :: Simple Lens (ElfLayout w) (Map Word16 (Shdr w))
 shdrs = lens _shdrs (\s v -> s { _shdrs = v })
 
 -- | Return total size of elf file.
@@ -388,7 +390,10 @@ buildElfSegmentHeaderTable l =
 
 -- | Render the ELF section header table.
 buildElfSectionHeaderTable :: ElfLayout w -> Bld.Builder
-buildElfSectionHeaderTable l = mconcat (Map.elems (l^.shdrs))
+buildElfSectionHeaderTable l = mconcat (f <$> Map.elems (l^.shdrs))
+  where f  = writeRecord2 (shdrFields cl) d
+        d  = headerData (elfLayoutHeader l)
+        cl = headerClass (elfLayoutHeader l)
 
 -- | Render the given list of regions at a particular file offeset.
 buildRegions :: ElfWidth w
@@ -694,14 +699,11 @@ addSectionToLayout name_map l s
         ++ elfSectionName s ++ "."
     | otherwise =
       l & elfOutputSize %~ (`incOffset` data_size)
-        & shdrs %~ Map.insert idx dta
-  where d = headerData (elfLayoutHeader l)
-        cl = headerClass (elfLayoutHeader l)
-        Just no = Map.lookup (B.fromString (elfSectionName s)) name_map
+        & shdrs %~ Map.insert idx (s, no, fromFileOffset base)
+  where Just no = Map.lookup (B.fromString (elfSectionName s)) name_map
         base =  l^.elfOutputSize
         data_size = elfSectionFileSize s
         idx = elfSectionIndex s
-        dta = writeRecord2 (shdrFields cl) d (s, no, fromFileOffset base)
 
 ------------------------------------------------------------------------
 -- elfLayout
@@ -789,8 +791,7 @@ elfLayout' e = final
                           , _phdrs = Map.empty
                           , _shdrTableOffset = startOfFile
                           , _shstrndx = 0
-                          , _shdrs = Map.singleton 0 $
-                               writeRecord2 (shdrFields c) d (emptyElfSection, 0, 0)
+                          , _shdrs = Map.singleton 0 $ (emptyElfSection, 0, 0)
                           }
 
         -- Process element.

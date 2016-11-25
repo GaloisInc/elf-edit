@@ -64,6 +64,8 @@ module Data.ElfEdit
   , buildElfSegmentHeaderTable
   , buildElfSectionHeaderTable
   , elfRegionFileSize
+  , Shdr
+  , shdrs
     -- * Sections
   , ElfSection(..)
   , elfSectionFileSize
