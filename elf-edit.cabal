@@ -20,6 +20,7 @@ library
     bytestring,
     containers,
     lens,
+    mtl,
     utf8-string,
     vector
   ghc-options : -Wall
@@ -27,7 +28,8 @@ library
   exposed-modules:
     Data.ElfEdit
   other-modules:
-    Data.ElfEdit.DynamicArrayTag
+    Data.ElfEdit.Dynamic
+    Data.ElfEdit.Dynamic.Tag
     Data.ElfEdit.Enums
     Data.ElfEdit.Get
     Data.ElfEdit.Layout

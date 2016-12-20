@@ -17,6 +17,7 @@ module Data.ElfEdit.Layout
   ( -- * ElfLayout
     ElfLayout
   , elfLayoutClass
+  , elfLayoutData
   , Phdr(..)
   , phdrFileRange
   , phdrs
@@ -198,6 +199,9 @@ data ElfLayout w = ElfLayout {
 
 elfLayoutClass :: ElfLayout w -> ElfClass w
 elfLayoutClass = headerClass . elfLayoutHeader
+
+elfLayoutData :: ElfLayout w -> ElfData
+elfLayoutData = headerData . elfLayoutHeader
 
 -- | Lens containing size of sections processed so far in layout.
 elfOutputSize :: Simple Lens (ElfLayout w) (FileOffset w)

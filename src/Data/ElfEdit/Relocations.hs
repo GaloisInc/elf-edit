@@ -15,6 +15,7 @@ This contains definitions and utilities used for relocations.
 module Data.ElfEdit.Relocations
   ( -- * Relocation types
     IsRelocationType(..)
+  , RelocationWord
   , RelaEntry(..)
   , isRelativeRelaEntry
   , ppRelaEntries
@@ -48,7 +49,6 @@ import           Data.Int
 import           Data.List (transpose)
 import           Data.Word
 import           GHC.TypeLits (Nat)
-import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.ElfEdit.Get (getWord32, getWord64, runGetMany)
@@ -92,14 +92,18 @@ type instance ElfWordType 32 = Word32
 type instance ElfWordType 64 = Word64
 
 elfWordInstances :: RelaWidth w
-                     -> (( Bits (ElfWordType w)
-                        , Integral (ElfWordType w)
-                        , Show (ElfWordType w)
-                        )
+                 -> (( Bits (ElfWordType w)
+                     , Integral (ElfWordType w)
+                     , Show (ElfWordType w)
+                     )
                      => a)
-                     -> a
+                 -> a
 elfWordInstances Rela32 a = a
 elfWordInstances Rela64 a = a
+
+ppElfWordHex :: RelaWidth w -> ElfWordType w -> String
+ppElfWordHex Rela32 = ppHex
+ppElfWordHex Rela64 = ppHex
 
 -------------------------------------------------------------------------
 -- ElfIntType
@@ -164,12 +168,14 @@ class Show tp => IsRelocationType tp where
   -- | Return true if this is a relative relocation type.
   isRelative :: tp -> Bool
 
+type RelocationWord tp = ElfWordType (RelocationWidth tp)
+
 -------------------------------------------------------------------------
 -- RelaEntry
 
 -- | A relocation entry
 data RelaEntry tp
-   = Rela { r_offset :: !(ElfWordType (RelocationWidth tp))
+   = Rela { r_offset :: !(RelocationWord tp)
             -- ^ Offset in section/segment where relocation should be applied.
           , r_sym    :: !Word32
             -- ^ Offset in symbol table entry relocation refers to.
@@ -185,7 +191,7 @@ instance IsRelocationType tp => Show (RelaEntry tp) where
     where w :: RelaWidth (RelocationWidth tp)
           w = relaWidth (r_type r)
           s = showString "Rela "
-            . elfWordInstances w (showsPrec 10 (r_offset r))
+            . showString (ppElfWordHex w (r_offset r))
             . showChar ' '
             . showsPrec 10 (r_sym r)
             . showChar ' '
@@ -206,8 +212,7 @@ getRelaEntry d = do
   offset <- getRelaWord w d
   info   <- getRelaWord w d
   addend <- getRelaInt  w d
-  let msg = elfWordInstances w  $ do
-              "Could not parse relocation type: " ++ showHex info ""
+  let msg = "Could not parse relocation type: " ++ ppElfWordHex w info
   tp <- maybe (fail msg) return $ relaType info
   return Rela { r_offset = offset
               , r_sym    = relaSym w info
@@ -216,7 +221,10 @@ getRelaEntry d = do
               }
 
 -- | Return relocation entries from byte string.
-elfRelaEntries :: IsRelocationType tp => ElfData -> B.ByteString -> [RelaEntry tp]
+elfRelaEntries :: IsRelocationType tp
+               => ElfData
+               -> B.ByteString
+               -> Either String [RelaEntry tp]
 elfRelaEntries d entries = runGetMany (getRelaEntry d) (L.fromStrict entries)
 
 -- | Pretty-print a table of relocation entries.
@@ -234,7 +242,7 @@ ppRelaEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
 ppRelaEntry :: IsRelocationType tp => Int -> RelaEntry tp -> [String]
 ppRelaEntry i e =
   [ shows i ":"
-  , elfWordInstances (relaWidth (r_type e)) $ ppHex (r_offset e)
+  , ppElfWordHex (relaWidth (r_type e)) (r_offset e)
   , show (r_sym e)
   , show (r_type e)
   , showElfInt (relaWidth (r_type e)) $ show (r_addend e)
