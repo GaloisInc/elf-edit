@@ -138,7 +138,9 @@ module Data.ElfEdit
     -- * Relocations
   , IsRelocationType(..)
   , RelaWidth(..)
+  , relaClass
   , RelaEntry(..)
+  , RelocationWord
   , ppRelaEntries
   , elfRelaEntries
     -- ** 32-bit x86 relocations
@@ -158,10 +160,10 @@ module Data.ElfEdit
   ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)
-import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Bits
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.Foldable as F
@@ -180,17 +182,17 @@ import           Data.ElfEdit.Types
 -- Elf Layout
 
 -- | Return true if section has the given name.
-hasSectionName :: ElfSection w -> String -> Bool
+hasSectionName :: ElfSection w -> B.ByteString -> Bool
 hasSectionName section name = elfSectionName section == name
 
 -- | Given a section name, returns sections matching that name.
 --
 -- Section names in elf are not necessarily unique.
-findSectionByName :: String -> Elf w -> [ElfSection w]
+findSectionByName :: B.ByteString -> Elf w -> [ElfSection w]
 findSectionByName name e  = e^..elfSections.filtered (`hasSectionName` name)
 
 -- | Remove section with given name.
-removeSectionByName :: String -> Elf w -> Elf w
+removeSectionByName :: B.ByteString -> Elf w -> Elf w
 removeSectionByName nm = over updateSections fn
   where fn s | s `hasSectionName` nm = Nothing
              | otherwise = Just s
@@ -203,10 +205,8 @@ elfSegments e = concatMap impl (e^.elfFileData)
 
 -- | Return true if this bytestring has the 4 bytes "\DELELF" at the start.
 hasElfMagic :: L.ByteString -> Bool
-hasElfMagic l = either (const False) (const True) $ flip runGetOrFail l $ do
-  ei_magic    <- getByteString 4
-  unless (ei_magic == elfMagic) $
-    fail "Invalid magic number for ELF"
+hasElfMagic l = either (\_ -> False) (\(_,_,ei_magic) -> ei_magic == elfMagic) $
+  runGetOrFail (getByteString 4) l
 
 ------------------------------------------------------------------------
 -- ElfLayout

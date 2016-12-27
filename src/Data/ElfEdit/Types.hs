@@ -151,15 +151,18 @@ showFlags names d w =
   where orPrec = 5
         nl = V.length names
         unknown = w .&. complement (1 `shiftR` nl - 1)
-        l = map (names V.!) (filter (testBit w) (enumCnt 0 nl))
-              ++ (if unknown /= 0 then ["0x" ++ showHex unknown ""] else [])
+        unknown_val | unknown > 0  = ["0x" ++ showHex unknown ""]
+                    | unknown == 0 = []
+                    | unknown < 0  = error "showFlags given negative value"
+        l = map (names V.!) (filter (testBit w) (enumCnt 0 nl)) ++ unknown_val
 
 
 ppShow :: Show v => v -> Doc
 ppShow = text . show
 
 ppHex :: (Bits a, Integral a, Show a) => a -> String
-ppHex v = "0x" ++ fixLength (bitSizeMaybe v) (showHex v "")
+ppHex v | v >= 0 = "0x" ++ fixLength (bitSizeMaybe v) (showHex v "")
+        | otherwise = error "ppHex given negative value"
   where fixLength (Just n) s | r == 0 && w > l = replicate (w - l) '0' ++ s
           where (w,r) = n `quotRem` 4
                 l = length s
@@ -307,7 +310,7 @@ shf_tls = ElfSectionFlags 0x400
 data ElfSection w = ElfSection
     { elfSectionIndex     :: !Word16
       -- ^ Unique index to identify section.
-    , elfSectionName      :: !String
+    , elfSectionName      :: !B.ByteString
       -- ^ Name of the section.
     , elfSectionType      :: !ElfSectionType
       -- ^ Type of the section.
@@ -349,7 +352,7 @@ elfSectionFileSize = fromIntegral . B.length . elfSectionData
 -- | A global offset table section.
 data ElfGOT w = ElfGOT
     { elfGotIndex     :: !Word16
-    , elfGotName      :: !String -- ^ Name of section.
+    , elfGotName      :: !B.ByteString -- ^ Name of section.
     , elfGotAddr      :: !w
     , elfGotAddrAlign :: !w
     , elfGotEntSize   :: !w

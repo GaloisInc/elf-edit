@@ -61,7 +61,6 @@ import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as Bld
 import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.UTF8 as B (fromString)
 import qualified Data.Foldable as F
 import           Data.List (sort)
 import           Data.Map.Strict (Map)
@@ -127,7 +126,8 @@ alignRight n c s | l < n = replicate (n - l) c ++ s
   where l = length s
 
 fixedHex :: Integral a => Int -> a -> String
-fixedHex n v = alignRight n '0' s
+fixedHex n v | v >= 0    = alignRight n '0' s
+             | otherwise = error "fixedHex given negative value"
   where s = showHex (toInteger v) ""
 
 showSegFlags :: ElfSegmentFlags -> String
@@ -152,7 +152,7 @@ instance (Integral w) => Show (Phdr w) where
                  , "0x" ++ fixedHex 16 (phdrFileSize p)
                  , "0x" ++ fixedHex 16 (phdrMemSize  p)
                  , alignLeft 7 (showSegFlags (elfSegmentFlags seg)) ' '
-                 , showHex (toInteger (elfSegmentAlign seg)) ""
+                 , fixedHex 0 (toInteger (elfSegmentAlign seg))
                  ]
 
 phdrFileRange :: Phdr w -> Range w
@@ -477,7 +477,7 @@ nextRegionOffset l o reg = do
 
 -- | Create a section for the section name table from the data.
 strtabSection :: Num w
-              => String
+              => B.ByteString
                  -- ^ Name of section
               -> Word16
                  -- ^ Index of section
@@ -532,7 +532,7 @@ elfSectionAsGOT s = do
 -- StringTable
 
 -- | Name of shstrtab (used to reduce spelling errors).
-shstrtab :: String
+shstrtab :: B.ByteString
 shstrtab = ".shstrtab"
 
 -- | A string table contains a  map from offsets, the number of elements,
@@ -617,12 +617,12 @@ elfSectionNames e = concatMap regionNames (F.toList (e^.elfFileData))
   where regionNames :: ElfDataRegion w -> [B.ByteString]
         regionNames (ElfDataSegment s) =
           concatMap regionNames (F.toList (elfSegmentData s))
-        regionNames (ElfDataSectionNameTable _) = [".shstrtab"]
-        regionNames (ElfDataGOT g)          = [B.fromString (elfGotName g)]
-        regionNames (ElfDataStrtab _)       = [".strtab"]
-        regionNames (ElfDataSymtab _)       = [".symtab"]
-        regionNames (ElfDataSection s)      = [B.fromString (elfSectionName s)]
-        regionNames _                       = []
+        regionNames (ElfDataSectionNameTable _) = [shstrtab]
+        regionNames (ElfDataGOT g)              = [elfGotName g]
+        regionNames (ElfDataStrtab _)           = [".strtab"]
+        regionNames (ElfDataSymtab _)           = [".symtab"]
+        regionNames (ElfDataSection s)          = [elfSectionName s]
+        regionNames _                           = []
 
 -- | Traverse sections in Elf file and modify or delete them.
 updateSections' :: (Bits w, Num w)
@@ -700,11 +700,11 @@ addSectionToLayout :: Integral w
 addSectionToLayout name_map l s
     | Map.member idx (l^.shdrs) =
       error $ "Section index " ++ show idx ++ " already exists; cannot add "
-        ++ elfSectionName s ++ "."
+        ++ show (elfSectionName s) ++ "."
     | otherwise =
       l & elfOutputSize %~ (`incOffset` data_size)
         & shdrs %~ Map.insert idx (s, no, fromFileOffset base)
-  where Just no = Map.lookup (B.fromString (elfSectionName s)) name_map
+  where Just no = Map.lookup (elfSectionName s) name_map
         base =  l^.elfOutputSize
         data_size = elfSectionFileSize s
         idx = elfSectionIndex s
@@ -859,7 +859,7 @@ elfLayout' e = final
 
 -- | The 4-byte strict expected at the start of an Elf file '(0x7f)ELF'
 elfMagic :: B.ByteString
-elfMagic = B.fromString "\DELELF"
+elfMagic = "\DELELF"
 
 elfIdentBuilder :: ElfHeader w -> Bld.Builder
 elfIdentBuilder e =

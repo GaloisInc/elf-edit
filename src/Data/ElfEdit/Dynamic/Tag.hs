@@ -117,6 +117,7 @@ pattern DT_VERNEED         = ElfDynamicTag 0x6ffffffe
 -- | Number of needed versions.
 pattern DT_VERNEEDNUM      = ElfDynamicTag 0x6fffffff
 
+
 instance Show ElfDynamicTag where
   show = \tag -> case Map.lookup tag elfDynamicTagNameMap of
                    Just r -> r

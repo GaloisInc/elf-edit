@@ -11,6 +11,7 @@ This contains definitions and utilities used for relocations.
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 module Data.ElfEdit.Relocations
   ( -- * Relocation types
@@ -20,10 +21,10 @@ module Data.ElfEdit.Relocations
   , isRelativeRelaEntry
   , ppRelaEntries
   , elfRelaEntries
-  , getRelaEntry
     -- ** Relocation width
   , RelaWidth(..)
   , relaEntSize
+  , relaClass
   , getRelaWord
     -- * Utilities
     -- ** ElfWordType
@@ -43,16 +44,16 @@ module Data.ElfEdit.Relocations
 
 import           Data.Binary.Get
 import           Data.Bits
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import           Data.Int
 import           Data.List (transpose)
+import qualified Data.Vector as V
 import           Data.Word
 import           GHC.TypeLits (Nat)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.ElfEdit.Get (getWord32, getWord64, runGetMany)
-import           Data.ElfEdit.Types (ElfData, ppHex)
+import           Data.ElfEdit.Types (ElfData, ppHex, ElfSymbolTableEntry, ElfClass(..))
 
 -------------------------------------------------------------------------
 -- ColumnAlignmentFn
@@ -84,12 +85,14 @@ fix_table_columns colFns rows = vcat (hsep . fmap text <$> fixed_rows)
 
 
 -------------------------------------------------------------------------
--- ElfWordType
+-- RelaWidth
 
--- | An unsigned value of a given width
-type family ElfWordType (w::Nat) :: *
-type instance ElfWordType 32 = Word32
-type instance ElfWordType 64 = Word64
+-- | Flags whether relocation uses 32 or 64 bit encoding.
+data RelaWidth (n::Nat) where
+  Rela32 :: RelaWidth 32
+  Rela64 :: RelaWidth 64
+
+deriving instance Show (RelaWidth w)
 
 elfWordInstances :: RelaWidth w
                  -> (( Bits (ElfWordType w)
@@ -101,30 +104,21 @@ elfWordInstances :: RelaWidth w
 elfWordInstances Rela32 a = a
 elfWordInstances Rela64 a = a
 
+relaClass :: RelaWidth w -> ElfClass (ElfWordType w)
+relaClass Rela32 = ELFCLASS32
+relaClass Rela64 = ELFCLASS64
+
+-------------------------------------------------------------------------
+-- ElfWordType
+
+-- | An unsigned value of a given width
+type family ElfWordType (w::Nat) :: *
+type instance ElfWordType 32 = Word32
+type instance ElfWordType 64 = Word64
+
 ppElfWordHex :: RelaWidth w -> ElfWordType w -> String
 ppElfWordHex Rela32 = ppHex
 ppElfWordHex Rela64 = ppHex
-
--------------------------------------------------------------------------
--- ElfIntType
-
--- | A signed value of a given width
-type family ElfIntType (w::Nat) :: *
-type instance ElfIntType 32 = Int32
-type instance ElfIntType 64 = Int64
-
--- | Provide a show intance for the ElfIntType
-showElfInt :: RelaWidth w -> (Show (ElfIntType w) => a) -> a
-showElfInt Rela32 a = a
-showElfInt Rela64 a = a
-
--------------------------------------------------------------------------
--- RelaWidth
-
--- | Flags whether relocation uses 32 or 64 bit encoding.
-data RelaWidth (n::Nat) where
-  Rela32 :: RelaWidth 32
-  Rela64 :: RelaWidth 64
 
 -- | Size of one relocation entry.
 relaEntSize :: RelaWidth w -> ElfWordType w
@@ -140,6 +134,19 @@ getRelaWord :: RelaWidth w -> ElfData -> Get (ElfWordType w)
 getRelaWord Rela32 = getWord32
 getRelaWord Rela64 = getWord64
 
+-------------------------------------------------------------------------
+-- ElfIntType
+
+-- | A signed value of a given width
+type family ElfIntType (w::Nat) :: *
+type instance ElfIntType 32 = Int32
+type instance ElfIntType 64 = Int64
+
+-- | Provide a show intance for the ElfIntType
+showElfInt :: RelaWidth w -> (Show (ElfIntType w) => a) -> a
+showElfInt Rela32 a = a
+showElfInt Rela64 a = a
+
 -- | Read a signed relocation integer.
 getRelaInt :: RelaWidth w -> ElfData -> Get (ElfIntType w)
 getRelaInt Rela32 d = fromIntegral <$> getWord32 d
@@ -153,7 +160,7 @@ getRelaInt Rela64 d = fromIntegral <$> getWord64 d
 --
 -- Each architecture uses either a 32 or 64-bit Elf encoding, and
 -- this is associated via a type family 'RelocationWidth'
-class Show tp => IsRelocationType tp where
+class (Show tp, Show (RelocationWord tp)) => IsRelocationType tp where
   -- How many bits are used in encoding relocation type.
   type RelocationWidth tp :: Nat
 
@@ -177,8 +184,8 @@ type RelocationWord tp = ElfWordType (RelocationWidth tp)
 data RelaEntry tp
    = Rela { r_offset :: !(RelocationWord tp)
             -- ^ Offset in section/segment where relocation should be applied.
-          , r_sym    :: !Word32
-            -- ^ Offset in symbol table entry relocation refers to.
+          , r_sym    :: Word32
+            -- ^ Index in symbol table this relocation refers to.
           , r_type   :: !tp
             -- ^ The type of relocation entry
           , r_addend :: !(ElfIntType (RelocationWidth tp))
@@ -203,10 +210,12 @@ instance IsRelocationType tp => Show (RelaEntry tp) where
 isRelativeRelaEntry :: IsRelocationType tp => RelaEntry tp -> Bool
 isRelativeRelaEntry r = isRelative (r_type r)
 
-
 -- | Read a relocation entry.
-getRelaEntry :: forall tp . IsRelocationType tp => ElfData -> Get (RelaEntry tp)
-getRelaEntry d = do
+getRelaEntry :: forall tp
+             .  IsRelocationType tp
+             => ElfData
+             -> Get (RelaEntry tp)
+getRelaEntry d  = do
   let w :: RelaWidth (RelocationWidth tp)
       w = relaWidth (undefined :: tp)
   offset <- getRelaWord w d
@@ -222,10 +231,10 @@ getRelaEntry d = do
 
 -- | Return relocation entries from byte string.
 elfRelaEntries :: IsRelocationType tp
-               => ElfData
-               -> B.ByteString
+               => ElfData -- ^ Endianess of encodings
+               -> L.ByteString -- ^ Relocation entries
                -> Either String [RelaEntry tp]
-elfRelaEntries d entries = runGetMany (getRelaEntry d) (L.fromStrict entries)
+elfRelaEntries d = runGetMany (getRelaEntry d)
 
 -- | Pretty-print a table of relocation entries.
 ppRelaEntries :: IsRelocationType tp => [RelaEntry tp] -> Doc
