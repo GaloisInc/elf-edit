@@ -21,6 +21,7 @@ module Data.ElfEdit.Dynamic
   , dynRelocations
   , dynPLTRel
   , dynamicEntries
+  , dynamicEntriesFromSegment
   , DynamicMap
   , VersionedSymbol
   , VersionId(..)
@@ -65,17 +66,24 @@ import           Data.ElfEdit.Types
 type VirtAddrMap w = Map.Map w L.ByteString
 
 -- | Creates a virtual address map from bytestring and list of program headers.
+--
+-- Returns 'Nothing' if the map could not be created due to overlapping segments.
 virtAddrMap :: Integral w
             => L.ByteString -- ^ File contents
             -> [Phdr w] -- ^ Program headers
             -> Maybe (VirtAddrMap w)
 virtAddrMap file = foldlM ins Map.empty
-  where ins m phdr
-          | elfSegmentType seg /= PT_LOAD = pure m
+  where -- Insert phdr into map if it is loadable
+        ins m phdr
+            -- If segment is not loadable or empty, leave map unchanged
+          | elfSegmentType seg /= PT_LOAD || n == 0 = pure m
+            -- If segment overlaps with a previous segment, then return
+            -- 'Nothing' to indicate an error.
+          | Just (prev, old) <- Map.lookupLE addr m
+          , addr - prev < fromIntegral (L.length old) = Nothing
+            -- Insert phdr into map
           | otherwise =
-            case Map.lookupLE addr m of
-              Just (prev, old) | addr - prev < fromIntegral (L.length old) -> Nothing
-              _ -> pure $! Map.insert addr new_contents m
+            pure $! Map.insert addr new_contents m
           where seg = phdrSegment phdr
                 addr = elfSegmentVirtAddr seg
                 FileOffset dta = phdrFileStart phdr
@@ -112,6 +120,8 @@ data DynamicError
    | ErrorParsingPLTRelaEntries !String
    | DupVersionReqAuxIndex !Word16
    | UnresolvedVersionReqAuxIndex !B.ByteString !Word16
+   | MultipleDynamicSegments
+   | OverlappingLoadableSegments
 
 
 instance Show DynamicError where
@@ -137,6 +147,8 @@ instance Show DynamicError where
   show (UnresolvedVersionReqAuxIndex sym idx) =
     "Symbol " ++ BSC.unpack sym ++ " has unresolvable version requirement index " ++ show idx ++ "."
   show VerSymTooSmall = "File ends before end of symbol version table."
+  show MultipleDynamicSegments = "File contained multiple dynamic segments."
+  show OverlappingLoadableSegments = "File contained overlapping loadable segments."
 
 ------------------------------------------------------------------------
 -- DynamicMap
@@ -580,6 +592,32 @@ dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
                       , dynPLTAddr = pltAddr
                       , dynDebug = mdebug
                       }
+
+-- | Returns information from dynamic segment in elf file if it exists.
+dynamicEntriesFromSegment :: forall tp
+                         .  IsRelocationType tp
+                         => Elf (RelocationWord tp)
+                         -> Maybe (Either DynamicError (DynamicSection tp))
+dynamicEntriesFromSegment e =
+   case filter (\phdr -> elfSegmentType (phdrSegment phdr) == PT_DYNAMIC) ph of
+     [] -> Nothing
+     [dynPhdr] -> elfWordInstances w $ do
+       let dynContents = sliceL (phdrFileRange dynPhdr) contents
+       case virtAddrMap contents ph of
+         Just virtMap -> do
+           Just $ dynamicEntries (elfData e) (elfClass e) virtMap dynContents
+         Nothing -> do
+           Just $ Left OverlappingLoadableSegments
+     _ -> Just $ Left MultipleDynamicSegments
+  where l = elfLayout e
+        contents = elfLayoutBytes l
+        ph = allPhdrs l
+        w = relaWidth (error "dynamicEntriesForSegment relatype evaluated" :: tp)
+
+
+
+------------------------------------------------------------------------
+-- Symbol version information
 
 -- | Identifies a version in an Elf file
 data VersionId
