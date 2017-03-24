@@ -68,6 +68,7 @@ tests = T.testGroup "ELF Tests"
     [ T.testCase "Empty ELF" testEmptyElf
     , T.testCase "Identity Transformation (simple static)" (testIdentityTransform "./tests/simple.static.elf")
     , T.testCase "Identity Transformation (simple)" (testIdentityTransform "./tests/simple.elf")
+    , T.testCase "Zero-sized BSS" (testIdentityTransform "./tests/zero-physical-bss.elf")
     , T.testProperty "stringTable consistency" stringTableConsistencyProp
     ]
 
