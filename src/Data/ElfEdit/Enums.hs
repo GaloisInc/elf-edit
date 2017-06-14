@@ -182,7 +182,7 @@ import           Numeric (showHex)
 
 -- | A flag identifying the OS or ABI specific Elf extensions used.
 newtype ElfOSABI = ElfOSABI { fromElfOSABI :: Word8 }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
 
 -- | No extensions or unspecified
 pattern ELFOSABI_SYSV = ElfOSABI 0
@@ -231,6 +231,33 @@ pattern ELFOSABI_ARM = ElfOSABI 97
 
 -- | Standalone (embedded) application
 pattern ELFOSABI_STANDALONE = ElfOSABI 255
+
+osabiNames :: Map.Map ElfOSABI String
+osabiNames = Map.fromList
+  [ (,) ELFOSABI_SYSV "SYSV"
+  , (,) ELFOSABI_HPUX "HPUX"
+  , (,) ELFOSABI_NETBSD "NETBSD"
+  , (,) ELFOSABI_LINUX "LINUX"
+  , (,) ELFOSABI_SOLARIS "SOLARIS"
+  , (,) ELFOSABI_AIX "AIX"
+  , (,) ELFOSABI_IRIS "IRIS"
+  , (,) ELFOSABI_FREEBSD "FREEBSD"
+  , (,) ELFOSABI_TRU64 "TRU64"
+  , (,) ELFOSABI_MODESTO "MODESTO"
+  , (,) ELFOSABI_OPENBSD "OPENBSD"
+  , (,) ELFOSABI_OPENVMS "OPENVMS"
+  , (,) ELFOSABI_NSK "NSK"
+  , (,) ELFOSABI_AROS "AROS"
+  , (,) ELFOSABI_ARM "ARM"
+  , (,) ELFOSABI_STANDALONE "STANDALONE"
+  ]
+
+-- This pretty prints the ABI in a user-friendly format.
+instance Show ElfOSABI where
+  show e =
+    case Map.lookup e osabiNames of
+      Nothing -> "unknown_" ++ show (fromElfOSABI e)
+      Just nm -> nm
 
 ------------------------------------------------------------------------
 -- ElfType

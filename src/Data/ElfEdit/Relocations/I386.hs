@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
 module Data.ElfEdit.Relocations.I386
   ( I386_RelocationType(..)
   , pattern R_386_NONE
@@ -21,6 +22,7 @@ import           Data.Word (Word32)
 import           Numeric (showHex)
 
 import           Data.ElfEdit.Relocations
+import           Data.ElfEdit.Types (ElfClass(..))
 
 -- | Relocation types for 64-bit x86 code.
 newtype I386_RelocationType = I386_RelocationType { fromI386_RelocationType :: Word32 }
@@ -61,7 +63,7 @@ instance Show I386_RelocationType where
 
 instance IsRelocationType I386_RelocationType where
   type RelocationWidth I386_RelocationType = 32
-  relaWidth _ = Rela32
+  relaWidth _ = ELFCLASS32
   relaType = Just . I386_RelocationType
   isRelative R_386_RELATIVE = True
   isRelative _ = False

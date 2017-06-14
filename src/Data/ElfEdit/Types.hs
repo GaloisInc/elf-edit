@@ -1,9 +1,17 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Trustworthy #-} -- Cannot be Safe due to GeneralizedNewtypeDeriving
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
 module Data.ElfEdit.Types
   ( -- * Top leve ldeclaration
     Elf(..)
@@ -15,6 +23,10 @@ module Data.ElfEdit.Types
   , SomeElfClass(..)
   , toSomeElfClass
   , elfClassInstances
+  , elfClassByteWidth
+  , elfClassBitWidth
+  , ElfWordType
+  , ElfWidthConstraints
     -- **  ElfData
   , ElfData(..)
   , fromElfData
@@ -109,6 +121,7 @@ import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
 import           Data.Word
+import           GHC.TypeLits
 import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
@@ -153,7 +166,7 @@ showFlags names d w =
         unknown = w .&. complement (1 `shiftR` nl - 1)
         unknown_val | unknown > 0  = ["0x" ++ showHex unknown ""]
                     | unknown == 0 = []
-                    | unknown < 0  = error "showFlags given negative value"
+                    | otherwise = error "showFlags given negative value"
         l = map (names V.!) (filter (testBit w) (enumCnt 0 nl)) ++ unknown_val
 
 
@@ -172,31 +185,56 @@ ppHex v | v >= 0 = "0x" ++ fixLength (bitSizeMaybe v) (showHex v "")
 -- ElfClass
 
 -- | A flag indicating whether Elf is 32 or 64-bit.
-data ElfClass w where
-  ELFCLASS32 :: ElfClass Word32
-  ELFCLASS64 :: ElfClass Word64
+data ElfClass (w :: Nat) where
+  ELFCLASS32 :: ElfClass 32
+  ELFCLASS64 :: ElfClass 64
 
 instance Show (ElfClass w) where
   show ELFCLASS32 = "ELFCLASS32"
   show ELFCLASS64 = "ELFCLASS64"
 
+-- | A flag indicating this is either 32 or 64 bit.
+data SomeElfClass = forall w . SomeElfClass !(ElfClass w)
+
 fromElfClass :: ElfClass w -> Word8
 fromElfClass ELFCLASS32 = 1
 fromElfClass ELFCLASS64 = 2
-
--- | A flag indicating this is either 32 or 64 bit.
-data SomeElfClass = forall w . SomeElfClass !(ElfClass w)
 
 toSomeElfClass :: Word8 -> Maybe SomeElfClass
 toSomeElfClass 1 = Just (SomeElfClass ELFCLASS32)
 toSomeElfClass 2 = Just (SomeElfClass ELFCLASS64)
 toSomeElfClass _ = Nothing
 
+-- | An unsigned value of a given width
+type family ElfWordType (w::Nat) :: * where
+  ElfWordType 32 = Word32
+  ElfWordType 64 = Word64
+
+type ElfWidthConstraints w = (Bits (ElfWordType w), Integral (ElfWordType w), Show (ElfWordType w))
+
 -- | Given a provides a way to access 'Bits', 'Integral' and 'Show' instances
 -- of underlying word types associated with an 'ElfClass'.
-elfClassInstances :: ElfClass w -> ((Bits w, Integral w, Show w) => a) -> a
+elfClassInstances :: ElfClass w
+                  -> (ElfWidthConstraints w => a)
+                  -> a
 elfClassInstances ELFCLASS32 a = a
 elfClassInstances ELFCLASS64 a = a
+
+-- | Return the number of bytes in an address with this elf class.
+elfClassByteWidth :: ElfClass w -> Int
+elfClassByteWidth ELFCLASS32 = 4
+elfClassByteWidth ELFCLASS64 = 8
+
+-- | Return the number of bits in an address with this elf class.
+elfClassBitWidth :: ElfClass w -> Int
+elfClassBitWidth ELFCLASS32 = 32
+elfClassBitWidth ELFCLASS64 = 64
+
+-- | Return the width of an elf word.
+type family ElfWordWidth (w :: *) :: Nat where
+  ElfWordWidth Word32 = 32
+  ElfWordWidth Word64 = 64
+
 
 ------------------------------------------------------------------------
 -- ElfData
@@ -550,7 +588,7 @@ data ElfMemSize w
 --
 -- The parameter should be a 'Word32' or 'Word64' depending on whether this
 -- is a 32 or 64-bit elf file.
-data ElfSegment w = ElfSegment
+data ElfSegment (w :: Nat) = ElfSegment
   { elfSegmentType      :: !ElfSegmentType
     -- ^ Segment type
   , elfSegmentFlags     :: !ElfSegmentFlags
@@ -562,19 +600,19 @@ data ElfSegment w = ElfSegment
     -- the number of segemnts in the Elf file.
     -- Since the phdr table is typically stored in a loaded segment, the number of
     -- entries affects the layout of binaries.
-  , elfSegmentVirtAddr  :: !w
+  , elfSegmentVirtAddr  :: !(ElfWordType w)
     -- ^ Virtual address for the segment.
     --
     -- The elf standard for some ABIs proscribes that the virtual address for a
     -- file should be in ascending order of the segment addresses.  This does not
     -- appear to be the case for the x86 ABI documents, but valgrind warns of it.
-  , elfSegmentPhysAddr  :: !w
+  , elfSegmentPhysAddr  :: !(ElfWordType w)
     -- ^ Physical address for the segment.
     --
     -- This contents are typically not used on executables and shared libraries
     -- as they are not loaded at fixed physical addresses.  The convention
     -- seems to be to set the phyiscal address equal to the virtual address.
-  , elfSegmentAlign     :: !w
+  , elfSegmentAlign     :: !(ElfWordType w)
     -- ^ The value to which this segment is aligned in memory and the file.
     -- This field is called @p_align@ in Elf documentation.
     --
@@ -590,7 +628,7 @@ data ElfSegment w = ElfSegment
     -- as needed for padding.  We considered inserting padding automatically, but this
     -- can result in extra bytes inadvertently appearing in loadable segments, thus
     -- breaking layout constraints.
-  , elfSegmentMemSize   :: !(ElfMemSize w)
+  , elfSegmentMemSize   :: !(ElfMemSize (ElfWordType w))
     -- ^ Size in memory (may be larger then segment data)
   , elfSegmentData     :: !(Seq.Seq (ElfDataRegion w))
     -- ^ Regions contained in segment.
@@ -621,17 +659,18 @@ data ElfDataRegion w
      --
      -- The contents are auto-generated, so we only need to know which section
      -- index to give it.
-   | ElfDataGOT !(ElfGOT w)
+   | ElfDataGOT !(ElfGOT (ElfWordType w))
      -- ^ A global offset table.
    | ElfDataStrtab !Word16
      -- ^ Elf strtab section (with index)
-   | ElfDataSymtab !(ElfSymbolTable w)
+   | ElfDataSymtab !(ElfSymbolTable (ElfWordType w))
      -- ^ Elf symtab section
-   | ElfDataSection !(ElfSection w)
+   | ElfDataSection !(ElfSection (ElfWordType w))
      -- ^ A section that has no special interpretation.
    | ElfDataRaw B.ByteString
      -- ^ Identifies an uninterpreted array of bytes.
-  deriving Show
+
+deriving instance ElfWidthConstraints w => Show (ElfDataRegion w)
 
 -- | This applies a function to each data region in an elf file, returning
 -- the sum using 'Alternative' operations for combining results.
@@ -640,7 +679,7 @@ asumDataRegions f e = F.asum $ g <$> e^.elfFileData
   where g r@(ElfDataSegment s) = f r <|> F.asum (g <$> elfSegmentData s)
         g r = f r
 
-ppSegment :: (Bits w, Integral w, Show w) => ElfSegment w -> Doc
+ppSegment :: ElfWidthConstraints w => ElfSegment w -> Doc
 ppSegment s =
   text "type: " <+> ppShow (elfSegmentType s) <$$>
   text "flags:" <+> ppShow (elfSegmentFlags s) <$$>
@@ -652,7 +691,7 @@ ppSegment s =
   text "data:"  <$$>
   indent 2 (ppShow (F.toList (elfSegmentData s)))
 
-instance (Bits w, Integral w, Show w) => Show (ElfSegment w) where
+instance ElfWidthConstraints w => Show (ElfSegment w) where
   show s = show (ppSegment s)
 
 ------------------------------------------------------------------------
@@ -674,7 +713,7 @@ data Elf w = Elf
       -- ^ Identifies the ABI version for which the object is prepared.
     , elfType       :: !ElfType       -- ^ Identifies the object file type.
     , elfMachine    :: !ElfMachine    -- ^ Identifies the target architecture.
-    , elfEntry      :: !w
+    , elfEntry      :: !(ElfWordType w)
       -- ^ Virtual address of the program entry point.
       --
       -- 0 for non-executable Elfs.
@@ -682,9 +721,9 @@ data Elf w = Elf
       -- ^ Machine specific flags
     , _elfFileData  :: Seq.Seq (ElfDataRegion w)
       -- ^ Data to be stored in elf file.
-    , elfRelroRange :: !(Maybe (Range w))
+    , elfRelroRange :: !(Maybe (Range (ElfWordType w)))
       -- ^ Range for Elf read-only relocation section.
-    } deriving Show
+    }
 
 -- | Create an empty elf file.
 emptyElf :: ElfData -> ElfClass w -> ElfType -> ElfMachine -> Elf w
@@ -715,7 +754,7 @@ data ElfHeader w = ElfHeader { headerData       :: !ElfData
                              , headerABIVersion :: !Word8
                              , headerType       :: !ElfType
                              , headerMachine    :: !ElfMachine
-                             , headerEntry      :: !w
+                             , headerEntry      :: !(ElfWordType w)
                              , headerFlags      :: !Word32
                              }
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
 module Data.ElfEdit.Relocations.X86_64
   ( X86_64_RelocationType(..)
   , pattern R_X86_64_NONE
@@ -43,6 +44,7 @@ import           Data.Word (Word32)
 import           Numeric (showHex)
 
 import           Data.ElfEdit.Relocations
+import           Data.ElfEdit.Types (ElfClass(..))
 
 ------------------------------------------------------------------------
 -- X86_64_RelocationType
@@ -159,7 +161,7 @@ instance Show X86_64_RelocationType where
 instance IsRelocationType X86_64_RelocationType where
   type RelocationWidth X86_64_RelocationType = 64
 
-  relaWidth _ = Rela64
+  relaWidth _ = ELFCLASS64
   relaType = Just . X86_64_RelocationType . fromIntegral
 
   isRelative R_X86_64_RELATIVE = True

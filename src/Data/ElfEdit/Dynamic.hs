@@ -7,6 +7,7 @@ Defines function for parsing dynamic section.
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -63,12 +64,12 @@ import           Data.ElfEdit.Types
 
 -- | Maps the start of memory segment addresses to the file contents backing that
 -- memory
-type VirtAddrMap w = Map.Map w L.ByteString
+type VirtAddrMap w = Map.Map (ElfWordType w) L.ByteString
 
 -- | Creates a virtual address map from bytestring and list of program headers.
 --
 -- Returns 'Nothing' if the map could not be created due to overlapping segments.
-virtAddrMap :: Integral w
+virtAddrMap :: Integral (ElfWordType w)
             => L.ByteString -- ^ File contents
             -> [Phdr w] -- ^ Program headers
             -> Maybe (VirtAddrMap w)
@@ -153,12 +154,12 @@ instance Show DynamicError where
 ------------------------------------------------------------------------
 -- DynamicMap
 
-type DynamicMap w = Map.Map ElfDynamicTag [w]
+type DynamicMap w = Map.Map ElfDynamicTag [ElfWordType w]
 
-insertDynamic :: Dynamic w -> DynamicMap w -> DynamicMap w
+insertDynamic :: Dynamic v ->  Map.Map ElfDynamicTag [v] -> Map.Map ElfDynamicTag [v]
 insertDynamic (Dynamic tag v) = Map.insertWith (++) tag [v]
 
-dynamicEntry :: ElfDynamicTag -> DynamicMap w -> [w]
+dynamicEntry :: ElfDynamicTag -> Map.Map ElfDynamicTag [v] -> [v]
 dynamicEntry tag m = fromMaybe [] (Map.lookup tag m)
 
 ------------------------------------------------------------------------
@@ -188,7 +189,7 @@ runDynamicParser dta cl m p = elfClassInstances cl $
 
 -- | Get the mandatory entry with the given tag from the map.
 -- It is required that there is exactly one tag with this type.
-optionalDynamicEntry :: ElfDynamicTag -> DynamicMap w -> DynamicParser w (Maybe w)
+optionalDynamicEntry :: ElfDynamicTag -> DynamicMap w -> DynamicParser w (Maybe (ElfWordType w))
 optionalDynamicEntry tag m =
   case dynamicEntry tag m of
     [w] -> return (Just w)
@@ -197,7 +198,7 @@ optionalDynamicEntry tag m =
 
 -- | Get the mandatory entry with the given tag from the map.
 -- It is required that there is exactly one tag with this type.
-mandatoryDynamicEntry :: ElfDynamicTag -> DynamicMap w -> DynamicParser w w
+mandatoryDynamicEntry :: ElfDynamicTag -> DynamicMap w -> DynamicParser w (ElfWordType w)
 mandatoryDynamicEntry tag m =
   case dynamicEntry tag m of
     [w] -> return w
@@ -208,7 +209,7 @@ mandatoryDynamicEntry tag m =
 -- Lookup address
 
 addressToFile :: ElfDynamicTag -- ^ Tag this address was defined in
-              -> w -- ^ Address in memory.
+              -> ElfWordType w -- ^ Address in memory.
               -> DynamicParser w L.ByteString
 addressToFile tag addr = do
   cl       <- asks fileClass
@@ -221,7 +222,7 @@ addressToFile tag addr = do
     _ -> throwError $ EntryAddressNotFound tag
 
 addressRangeToFile :: (ElfDynamicTag, ElfDynamicTag)
-                   -> Range w
+                   -> Range (ElfWordType w)
                    -> DynamicParser w L.ByteString
 addressRangeToFile (tag_off, tag_size) (off, sz) = do
   cl <- asks fileClass
@@ -242,13 +243,13 @@ data Dynamic w
   deriving (Show)
 
 -- | Read dynamic array entry.
-getDynamic :: forall w . RelaWidth w -> ElfData -> Get (Dynamic (ElfWordType w))
-getDynamic w d = elfWordInstances w $ do
+getDynamic :: forall w . ElfClass w -> ElfData -> Get (Dynamic (ElfWordType w))
+getDynamic w d = elfClassInstances w $ do
   tag <- getRelaWord w d :: Get (ElfWordType w)
   v   <- getRelaWord w d
   return $! Dynamic (ElfDynamicTag (fromIntegral tag)) v
 
-dynamicList :: RelaWidth w -> ElfData -> Get [Dynamic (ElfWordType w)]
+dynamicList :: ElfClass w -> ElfData -> Get [Dynamic (ElfWordType w)]
 dynamicList w d = go []
   where go l = do
           done <- isEmpty
@@ -425,9 +426,9 @@ gnuVersionReqs strTab dm = do
 
 data DynamicSection tp
    = DynSection { dynData :: !ElfData
-                , dynWidth :: !(RelaWidth (RelocationWidth tp))
-                , dynAddrMap :: !(VirtAddrMap (RelocationWord tp))
-                , dynMap :: !(DynamicMap (RelocationWord tp))
+                , dynClass :: !(ElfClass (RelocationWidth tp))
+                , dynAddrMap :: !(VirtAddrMap (RelocationWidth tp))
+                , dynMap :: !(DynamicMap (RelocationWidth tp))
 
                 , dynSOName :: Maybe B.ByteString
                 , dynStrTab  :: B.ByteString
@@ -445,12 +446,9 @@ data DynamicSection tp
 deriving instance (Show (RelocationWord tp), IsRelocationType tp)
   => Show (DynamicSection tp)
 
-dynClass :: DynamicSection tp -> ElfClass (RelocationWord tp)
-dynClass = relaClass . dynWidth
-
 -- | Get values of DT_NEEDED entries
 dynNeeded :: DynamicSection tp -> Either LookupStringError [B.ByteString]
-dynNeeded d = elfWordInstances (dynWidth d) $
+dynNeeded d = elfClassInstances (dynClass d) $
   let entries = dynamicEntry DT_NEEDED (dynMap d)
       strtab = dynStrTab d
    in traverse ((`lookupString` strtab) . fromIntegral) entries
@@ -462,7 +460,7 @@ dynFini :: DynamicSection tp -> [RelocationWord tp]
 dynFini = dynamicEntry DT_FINI . dynMap
 
 -- | Return unparsed entries
-dynUnparsed :: DynamicSection tp -> DynamicMap (RelocationWord tp)
+dynUnparsed :: DynamicSection tp -> DynamicMap (RelocationWidth tp)
 dynUnparsed = Map.filterWithKey isUnparsed . dynMap
   where isUnparsed tag _ = not (tag `elem` parsed_dyntags)
 
@@ -479,7 +477,7 @@ getDynStrTab m = do
 dynSymTab :: B.ByteString
              -- ^ String table
           -> DynamicMap w
-          -> DynamicParser w [ElfSymbolTableEntry w]
+          -> DynamicParser w [ElfSymbolTableEntry (ElfWordType w)]
 dynSymTab strTab m = do
   cl  <- asks fileClass
   dta <- asks fileData
@@ -545,19 +543,17 @@ dynamicEntries :: forall tp
                 . IsRelocationType tp
                => ElfData
                   -- ^ Elf data
-               -> ElfClass (RelocationWord tp)
+               -> ElfClass (RelocationWidth tp)
                   -- ^ Elf class
-               -> VirtAddrMap (RelocationWord tp)
+               -> VirtAddrMap (RelocationWidth tp)
                   -- ^ Virtual address map
                -> L.ByteString
                   -- ^ Dynamic section contents
                -> Either DynamicError (DynamicSection tp)
 dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
  runDynamicParser d cl virtMap $ do
-  let w :: RelaWidth (RelocationWidth tp)
-      w = relaWidth (error "relaWidth evaluated" :: tp)
   m <-
-    case runGetOrFail (dynamicList w d) dynamic of
+    case runGetOrFail (dynamicList cl d) dynamic of
       Left  (_,_,msg)  -> throwError (ErrorParsingDynamicEntries msg)
       Right (_,_,elts) -> pure (foldl' (flip insertDynamic) Map.empty elts)
 
@@ -580,7 +576,7 @@ dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
   mdebug       <- optionalDynamicEntry DT_DEBUG m
 
   return $ DynSection { dynData    = d
-                      , dynWidth   = w
+                      , dynClass   = cl
                       , dynAddrMap = virtMap
                       , dynMap     = m
                       , dynStrTab  = strTab
@@ -596,12 +592,16 @@ dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
 -- | Returns information from dynamic segment in elf file if it exists.
 dynamicEntriesFromSegment :: forall tp
                          .  IsRelocationType tp
-                         => Elf (RelocationWord tp)
+                         => Elf (RelocationWidth tp)
                          -> Maybe (Either DynamicError (DynamicSection tp))
-dynamicEntriesFromSegment e =
+dynamicEntriesFromSegment e = do
+   elfClassInstances (elfClass e) $ do
+   let l = elfLayout e
+   let contents = elfLayoutBytes l
+   let ph = allPhdrs l
    case filter (\phdr -> elfSegmentType (phdrSegment phdr) == PT_DYNAMIC) ph of
      [] -> Nothing
-     [dynPhdr] -> elfWordInstances w $ do
+     [dynPhdr] -> do
        let dynContents = sliceL (phdrFileRange dynPhdr) contents
        case virtAddrMap contents ph of
          Just virtMap -> do
@@ -609,10 +609,6 @@ dynamicEntriesFromSegment e =
          Nothing -> do
            Just $ Left OverlappingLoadableSegments
      _ -> Just $ Left MultipleDynamicSegments
-  where l = elfLayout e
-        contents = elfLayoutBytes l
-        ph = allPhdrs l
-        w = relaWidth (error "dynamicEntriesForSegment relatype evaluated" :: tp)
 
 
 
@@ -678,7 +674,7 @@ dynSymTable ds = runParser ds $ do
 -- Relocations
 
 runParser :: DynamicSection tp
-          -> DynamicParser (RelocationWord tp) a
+          -> DynamicParser (RelocationWidth tp) a
           -> Either DynamicError a
 runParser ds m = runDynamicParser (dynData ds) (dynClass ds) (dynAddrMap ds) m
 

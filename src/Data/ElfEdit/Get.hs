@@ -1,6 +1,10 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Trustworthy #-}
 module Data.ElfEdit.Get
@@ -41,6 +45,7 @@ import qualified Data.ByteString.UTF8 as B (toString)
 import           Data.Foldable (foldlM, foldrM)
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
+import           GHC.TypeLits
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.ElfEdit.Enums
@@ -90,6 +95,38 @@ runGetMany g bs0 = start [] (L.toChunks bs0)
         start prev (h:r) | B.null h = start prev r
         start prev l = go prev l (runGetIncremental g)
 
+------------------------------------------------------------------------
+-- ElfParseError
+
+-- | Describes reason an insertion failed.
+data ElfInsertError w
+   = OverlapSegment (ElfDataRegion w) (Range (ElfWordType w))
+     -- ^ The inserted segment overlaps with another, and we needed to insert
+     -- it in the given range.
+     -- the end.
+   | OutOfRange
+     -- ^ This segment is out of range.
+
+-- | A parse error
+data ElfParseError w
+  = ElfInsertError !(ElfDataRegion w) !(ElfInsertError w)
+    -- ^ Attempt to insert region failed.
+  | ElfSymtabError !String
+  | MultipleGnuRelro
+
+instance Show (ElfParseError w) where
+  show (ElfSymtabError msg) =
+    "Could not parse symtab entries: " ++ msg
+  show MultipleGnuRelro =
+    "Multiple relro segments."
+  show (ElfInsertError n (OverlapSegment prev _)) =
+    "Attempt to insert "
+    ++ elfDataRegionName n
+    ++ " overlapping Elf region into "
+    ++ elfDataRegionName prev
+    ++ "."
+  show (ElfInsertError n OutOfRange) =
+    "Invalid region " ++ elfDataRegionName n ++ "."
 
 ------------------------------------------------------------------------
 -- Low level getters
@@ -124,7 +161,7 @@ isRelroPhdr :: Phdr w -> Bool
 isRelroPhdr p = elfSegmentType (phdrSegment p) == PT_GNU_RELRO
 
 -- | Extract relro information.
-asRelroInfo :: [Phdr w] -> GetResult (ElfParseError w) (Maybe (Range w))
+asRelroInfo :: [Phdr w] -> GetResult (ElfParseError w) (Maybe (Range (ElfWordType w)))
 asRelroInfo l =
   case filter isRelroPhdr l of
     [] -> pure $ Nothing
@@ -136,7 +173,7 @@ asRelroInfo l =
 
 -- | Defines the layout of a table with elements of a fixed size.
 data TableLayout w =
-  TableLayout { tableOffset :: w
+  TableLayout { tableOffset :: !(ElfWordType w)
                 -- ^ Offset where table starts relative to start of file.
               , entrySize :: Word16
                 -- ^ Size of entries in bytes.
@@ -145,15 +182,15 @@ data TableLayout w =
               }
 
 -- | Returns size of table.
-tableSize :: Integral w => TableLayout w -> w
+tableSize :: Integral (ElfWordType w) => TableLayout w -> ElfWordType w
 tableSize l = fromIntegral (entryNum l) * fromIntegral (entrySize l)
 
 -- | Returns range in memory of table.
-tableRange :: Integral w => TableLayout w -> Range w
+tableRange :: Integral (ElfWordType w) => TableLayout w -> Range (ElfWordType w)
 tableRange l = (tableOffset l, tableSize l)
 
 -- | Returns offset of entry in table.
-tableEntry :: Integral w => TableLayout w -> Word16 -> B.ByteString -> L.ByteString
+tableEntry :: Integral (ElfWordType w) => TableLayout w -> Word16 -> B.ByteString -> L.ByteString
 tableEntry l i b = L.fromChunks [B.drop (fromIntegral o) b]
   where sz = fromIntegral (entrySize l)
         o = tableOffset l + fromIntegral i * sz
@@ -162,7 +199,7 @@ tableEntry l i b = L.fromChunks [B.drop (fromIntegral o) b]
 -- GetPhdr
 
 -- | Given a
-getPhdr32 :: ElfData -> Word16 -> Get (Phdr Word32)
+getPhdr32 :: ElfData -> Word16 -> Get (Phdr 32)
 getPhdr32 d idx = do
   p_type   <- ElfSegmentType  <$> getWord32 d
   p_offset <- getWord32 d
@@ -188,7 +225,7 @@ getPhdr32 d idx = do
                  , phdrMemSize   = p_memsz
                  }
 
-getPhdr64 :: ElfData -> Word16 -> Get (Phdr Word64)
+getPhdr64 :: ElfData -> Word16 -> Get (Phdr 64)
 getPhdr64 d idx = do
   p_type   <- ElfSegmentType  <$> getWord32 d
   p_flags  <- ElfSegmentFlags <$> getWord32 d
@@ -308,36 +345,36 @@ data ElfHeaderInfo w = ElfHeaderInfo {
        -- ^ Index of section for storing section names.
      , shdrTable :: !(TableLayout w)
        -- ^ Layout of section header table.
-     , getShdr   :: !(GetShdrFn w)
+     , getShdr   :: !(GetShdrFn (ElfWordType w))
        -- ^ Function for reading elf sections.
      , fileContents :: !B.ByteString
        -- ^ Contents of file as a bytestring.
      }
 
 -- | Return list of segments with contents.
-rawSegments :: Integral w => ElfHeaderInfo w -> [Phdr w]
+rawSegments :: ElfHeaderInfo w -> [Phdr w]
 rawSegments ehi = segmentByIndex ehi <$> enumCnt 0 (entryNum (phdrTable ehi))
 
 -- | Returns size of region.
-type RegionSizeFn w = ElfDataRegion w -> w
+type RegionSizeFn (w :: Nat) = ElfDataRegion w -> ElfWordType w
 
 -- | Information needed to compute region sizes.
-data ElfSizingInfo w
+data ElfSizingInfo (w :: Nat)
    = ElfSizingInfo
      { esiHeaderInfo :: !(ElfHeaderInfo w)
        -- ^ Header info
-     , esiSectionNameTableSize :: !w
+     , esiSectionNameTableSize :: !(ElfWordType w)
        -- ^ Contains size of name table
-     , esiStrtabSize :: !w
+     , esiStrtabSize :: !(ElfWordType w)
        -- ^ Return string table size
      }
 
 -- | Return filesize of region given parse information.
-regionSize :: Integral w
-           => ElfSizingInfo w
+regionSize :: forall w . ElfSizingInfo w
            -> RegionSizeFn w
-regionSize esi = sizeOf
+regionSize esi = elfClassInstances (headerClass (header (esiHeaderInfo esi))) $ sizeOf
   where ehi = esiHeaderInfo esi
+        sizeOf :: ElfWidthConstraints w => RegionSizeFn w
         sizeOf ElfDataElfHeader            = fromIntegral $ ehdrSize ehi
         sizeOf ElfDataSegmentHeaders       = tableSize $ phdrTable ehi
         sizeOf (ElfDataSegment s)          = sum $ sizeOf <$> elfSegmentData s
@@ -351,18 +388,17 @@ regionSize esi = sizeOf
         sizeOf (ElfDataRaw b)              = fromIntegral $ B.length b
 
 -- | Parse segment at given index.
-segmentByIndex :: Integral w
-               => ElfHeaderInfo w -- ^ Information for parsing
+segmentByIndex :: ElfHeaderInfo w -- ^ Information for parsing
                -> Word16 -- ^ Index
                -> Phdr w
-segmentByIndex ehi i =
+segmentByIndex ehi i = elfClassInstances (headerClass (header ehi)) $
   Get.runGet (getPhdr ehi i) (tableEntry (phdrTable ehi) i (fileContents ehi))
 
 -- Return section
 getSection' :: ElfHeaderInfo w
             -> Maybe B.ByteString -- ^ String table (if defined)
             -> Word16 -- ^ Index of section.
-            -> (Range w, ElfSection w)
+            -> (Range (ElfWordType w), ElfSection (ElfWordType w))
 getSection' ehi mstrtab i =
     elfClassInstances (headerClass (header ehi)) $
       Get.runGet (getShdr ehi i mstrtab)
@@ -370,7 +406,7 @@ getSection' ehi mstrtab i =
   where file = fileContents ehi
 
 nameSectionInfo :: ElfHeaderInfo w
-                -> (Range w, B.ByteString)
+                -> (Range (ElfWordType w), B.ByteString)
 nameSectionInfo ehi =
   over _2 elfSectionData $ getSection' ehi Nothing (shdrNameIdx ehi)
 
@@ -382,7 +418,7 @@ getSymbolTableEntry :: ElfClass w
                     -> ElfData
                     -> B.ByteString
                        -- ^ The string table
-                      -> Get (ElfSymbolTableEntry w)
+                      -> Get (ElfSymbolTableEntry (ElfWordType w))
 getSymbolTableEntry ELFCLASS32 d strTab = do
   nameIdx <- getWord32 d
   value <- getWord32 d
@@ -452,15 +488,6 @@ insertRawRegion :: B.ByteString -> RegionPrefixFn w
 insertRawRegion b r | B.length b == 0 = r
                     | otherwise = ElfDataRaw b Seq.<| r
 
--- | Describes reason an insertion failed.
-data ElfInsertError w
-   = OverlapSegment (ElfDataRegion w) (Range w)
-     -- ^ The inserted segment overlaps with another, and we needed to insert
-     -- it in the given range.
-     -- the end.
-   | OutOfRange
-     -- ^ This segment is out of range.
-
 -- | This is a type that captures an insertion error, but returns a result
 -- anyways.
 data GetResult e a
@@ -494,12 +521,12 @@ instance Monad (GetResult e) where
       GetResult l' y -> GetResult (l ++ l') y
 
 -- | Insert an elf data region at a given offset.
-insertAtOffset :: Integral w
+insertAtOffset :: Integral (ElfWordType w)
                => RegionSizeFn w
                   -- ^ Function for getting size of a region.
-               -> (Range w -> RegionPrefixFn w)
+               -> (Range (ElfWordType w) -> RegionPrefixFn w)
                   -- ^ Insert function
-               -> Range w
+               -> Range (ElfWordType w)
                   -- ^ Range to insert in.
                -> Seq.Seq (ElfDataRegion w)
                -> GetResult (ElfInsertError w) (Seq.Seq (ElfDataRegion w))
@@ -534,38 +561,18 @@ insertAtOffset sizeOf fn rng@(o,c) r0 =
         insError (OverlapSegment p rng) $! ((p Seq.<|) $! fn (o,c) r)
      where sz = sizeOf p
 
--- | A parse error
-data ElfParseError w
-  = ElfInsertError !(ElfDataRegion w) !(ElfInsertError w)
-    -- ^ Attempt to insert region failed.
-  | ElfSymtabError !String
-  | MultipleGnuRelro
-
-instance Show (ElfParseError w) where
-  show (ElfSymtabError msg) =
-    "Could not parse symtab entries: " ++ msg
-  show MultipleGnuRelro =
-    "Multiple relro segments."
-  show (ElfInsertError n (OverlapSegment prev _)) =
-    "Attempt to insert "
-    ++ elfDataRegionName n
-    ++ " overlapping Elf region into "
-    ++ elfDataRegionName prev
-    ++ "."
-  show (ElfInsertError n OutOfRange) =
-    "Invalid region " ++ elfDataRegionName n ++ "."
-
 -- | Insert a leaf region into the region.
-insertSpecialRegion :: Integral w
-                    => ElfSizingInfo w -- ^ Returns size of region.
-                    -> Range w
+insertSpecialRegion :: forall w
+                    .  ElfSizingInfo w -- ^ Returns size of region.
+                    -> Range (ElfWordType w)
                     -> ElfDataRegion w -- ^ New region
                     -> Seq.Seq (ElfDataRegion w)
                     -> GetResult (ElfInsertError w) (Seq.Seq (ElfDataRegion w))
-insertSpecialRegion esi r n segs =
+insertSpecialRegion esi r n segs = esiInstances esi $
     insertAtOffset (regionSize esi) fn r segs
   where c = snd r
         -- Insert function
+        fn :: ElfWidthConstraints w => Range (ElfWordType w) -> RegionPrefixFn w
         fn _ l | c == 0 = n Seq.<| l
         fn _ l0
           | ElfDataRaw b Seq.:< l <- Seq.viewl l0
@@ -574,33 +581,33 @@ insertSpecialRegion esi r n segs =
         fn _ _ = error $ "Elf file contained a non-empty header that overlapped with another.\n"
                        ++ "  This is not supported by the Elf parser."
 
+esiInstances :: ElfSizingInfo w -> (ElfWidthConstraints w => a) -> a
+esiInstances = elfClassInstances . headerClass . header . esiHeaderInfo
+
 -- | Insert a segment/phdr into a sequence of elf regions, returning the new sequence.
 insertSegment :: forall w
-               . (Bits w, Integral w, Show w)
-              => ElfSizingInfo w
+               . ElfSizingInfo w
               -> Seq.Seq (ElfDataRegion w)
               -> Phdr w
               -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
-insertSegment esi segs phdr = do
-    -- TODO: See if we can do better than dropping the segment.
-    mapError (ElfInsertError (ElfDataSegment (phdrSegment phdr))) $
-      insertAtOffset (regionSize esi) (\_ -> gather szd Seq.empty) rng segs
-  where d = phdrSegment phdr
-        rng = phdrFileRange phdr
-        szd = phdrFileSize  phdr
-        -- | @gather@ inserts new segment into head of list after collecting existings
-        -- data it contains.
-        gather :: w -- ^ Number of bytes to insert.
-               -> Seq.Seq (ElfDataRegion w)
-                  -- ^ Subsegments that occur before this segment.
-               -> Seq.Seq (ElfDataRegion w)
-                  -- ^ Segments after insertion point.
-               -> Seq.Seq (ElfDataRegion w)
-        -- Insert segment if there are 0 bytes left to process.
-        gather 0 l r =
+insertSegment esi segs phdr = esiInstances esi $ do
+  let d = phdrSegment phdr
+      rng = phdrFileRange phdr
+      szd = phdrFileSize  phdr
+      -- | @gather@ inserts new segment into head of list after collecting existings
+      -- data it contains.
+      gather :: Integral (ElfWordType w)
+             => ElfWordType w -- ^ Number of bytes to insert.
+             -> Seq.Seq (ElfDataRegion w)
+                -- ^ Subsegments that occur before this segment.
+             -> Seq.Seq (ElfDataRegion w)
+                -- ^ Segments after insertion point.
+             -> Seq.Seq (ElfDataRegion w)
+      -- Insert segment if there are 0 bytes left to process.
+      gather 0 l r =
           ElfDataSegment (d { elfSegmentData = l }) Seq.<| r
-        -- Collect p if it is contained within segment we are inserting.
-        gather cnt l r0 =
+      -- Collect p if it is contained within segment we are inserting.
+      gather cnt l r0 =
           case Seq.viewl r0 of
             p Seq.:< r
               | regionSize esi p <= cnt ->
@@ -619,11 +626,14 @@ insertSegment esi segs phdr = do
                      ++ "  New segment:\n" ++ show (indent 2 (ppSegment d)) ++ "\n"
                      ++ "  Remaining bytes: " ++ show cnt
             Seq.EmptyL -> error "insertSegment: Data ended before completion"
+  -- TODO: See if we can do better than dropping the segment.
+  mapError (ElfInsertError (ElfDataSegment (phdrSegment phdr))) $
+    insertAtOffset (regionSize esi) (\_ -> gather szd Seq.empty) rng segs
 
 
 -- | Get list of sections from Elf parse info.
 -- This includes the initial section
-getSectionTable :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection w)
+getSectionTable :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection (ElfWordType w))
 getSectionTable ehi = V.generate cnt $ getSection
   where cnt = fromIntegral (entryNum (shdrTable ehi)) :: Int
 
@@ -633,7 +643,7 @@ getSectionTable ehi = V.generate cnt $ getSection
         names :: B.ByteString
         names = snd $ nameSectionInfo ehi
 
-        getSection :: Int -> ElfSection w
+        getSection :: Int -> ElfSection (ElfWordType w)
         getSection i = elfClassInstances c $
           snd $ getSection' ehi (Just names) (fromIntegral i)
 
@@ -645,9 +655,9 @@ isSymtabSection s
 
 -- | Parse the section as a list of symbol table entries.
 getSymbolTableEntries :: ElfHeader w
-                      -> V.Vector (Range w, ElfSection w)
-                      -> ElfSection w
-                      -> Either String [ElfSymbolTableEntry w]
+                      -> V.Vector (Range (ElfWordType w), ElfSection (ElfWordType w))
+                      -> ElfSection (ElfWordType w)
+                      -> Either String [ElfSymbolTableEntry (ElfWordType w)]
 getSymbolTableEntries hdr sections s = do
   let link   = elfSectionLink s
 
@@ -660,72 +670,64 @@ getSymbolTableEntries hdr sections s = do
 
 -- | Parse elf region.
 parseElfRegions :: forall w
-                .  (Bits w, Integral w, Show w)
-                => ElfHeaderInfo w -- ^ Information for parsing.
+                .  ElfHeaderInfo w -- ^ Information for parsing.
                 -> [Phdr w] -- ^ List of segments
                 -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
-parseElfRegions info segments = do
-   let initSeq = insertRawRegion (fileContents info) Seq.empty
-   s <- foldrM insertSection initSeq sections
-   -- Define initial region list without segments.
-   postHeaders <- foldrM insertRegion s headers
-   -- Add in segments
-   foldlM (insertSegment esi) postHeaders $
-     -- Strip out relro segment (stored in `elfRelroRange')
-     filter (not . isRelroPhdr) segments
+parseElfRegions info segments = elfClassInstances (headerClass (header info)) $ do
+  let -- Return range used to store name index.
+      nameRange :: Range (ElfWordType w)
+      nameRange = fst $ nameSectionInfo info
 
-  where -- Return range used to store name index.
-        nameRange :: Range w
-        nameRange = fst $ nameSectionInfo info
+  let section_cnt :: Word16
+      section_cnt = entryNum $ shdrTable info
 
-        section_cnt :: Word16
-        section_cnt = entryNum $ shdrTable info
+  let section_names = slice nameRange $ fileContents info
 
-        section_names = slice nameRange $ fileContents info
+      -- Get vector with section information
+  let section_vec :: V.Vector (Range (ElfWordType w), ElfSection (ElfWordType w))
+      section_vec = V.generate (fromIntegral section_cnt) $
+        getSection' info (Just section_names) . fromIntegral
 
-        -- Get vector with section information
-        section_vec :: V.Vector (Range w, ElfSection w)
-        section_vec = V.generate (fromIntegral section_cnt) $
-          getSection' info (Just section_names) . fromIntegral
+  let msymtab :: Maybe (Range (ElfWordType w), ElfSection (ElfWordType w))
+      msymtab = V.find (\(_,s) -> isSymtabSection s) section_vec
 
-        msymtab :: Maybe (Range w, ElfSection w)
-        msymtab = V.find (\(_,s) -> isSymtabSection s) section_vec
+  let mstrtab_index  = elfSectionLink . snd <$> msymtab
 
-        mstrtab_index  = elfSectionLink . snd <$> msymtab
+      -- Return size of section at given index.
+  let section_size :: Word32 -> ElfWordType w
+      section_size i =
+        case section_vec V.!? fromIntegral i of
+          Just ((_,n),_) -> n
+          Nothing -> 0
 
-        -- Return size of section at given index.
-        section_size :: Word32 -> w
-        section_size i =
-          case section_vec V.!? fromIntegral i of
-            Just ((_,n),_) -> n
-            Nothing -> 0
+      -- Get information needed to compute region sizes.
+  let esi_size :: ElfWordType w
+      esi_size = maybe 0 section_size mstrtab_index
 
-        -- Get information needed to compute region sizes.
-        esi_size = maybe 0 section_size mstrtab_index
-        esi = ElfSizingInfo { esiHeaderInfo = info
-                            , esiSectionNameTableSize = snd nameRange
-                            , esiStrtabSize = esi_size
-                            }
+  let esi = ElfSizingInfo { esiHeaderInfo = info
+                          , esiSectionNameTableSize = snd nameRange
+                          , esiStrtabSize = esi_size
+                          }
 
-        -- Define table with special data regions.
-        headers :: [(Range w, ElfDataRegion w)]
-        headers = [ ((0, fromIntegral (ehdrSize info)), ElfDataElfHeader)
-                  , (tableRange (phdrTable info), ElfDataSegmentHeaders)
-                  , (tableRange (shdrTable info), ElfDataSectionHeaders)
-                  , (nameRange,                  ElfDataSectionNameTable (shdrNameIdx info))
-                  ]
+      -- Define table with special data regions.
+  let headers :: [(Range (ElfWordType w), ElfDataRegion w)]
+      headers = [ ((0, fromIntegral (ehdrSize info)), ElfDataElfHeader)
+                , (tableRange (phdrTable info), ElfDataSegmentHeaders)
+                , (tableRange (shdrTable info), ElfDataSectionHeaders)
+                , (nameRange,                  ElfDataSectionNameTable (shdrNameIdx info))
+                ]
 
-        -- Get list of all sections other than the first section (which is skipped)
-        sections :: [(Range w, ElfSection w)]
-        sections = fmap (\i -> section_vec V.! fromIntegral i)
-                 $ filter (\i -> i /= shdrNameIdx info && i /= 0)
-                 $ enumCnt 0 section_cnt
+      -- Get list of all sections other than the first section (which is skipped)
+  let sections :: [(Range (ElfWordType w), ElfSection (ElfWordType w))]
+      sections = fmap (\i -> section_vec V.! fromIntegral i)
+               $ filter (\i -> i /= shdrNameIdx info && i /= 0)
+               $ enumCnt 0 section_cnt
 
-        -- Define table with regions for sections.
-        -- TODO: Modify this so that it correctly recognizes the GOT section
-        -- and generate the appropriate type.
-        dataSection :: ElfSection w -> GetResult (ElfParseError w) (ElfDataRegion w)
-        dataSection s
+      -- Define table with regions for sections.
+      -- TODO: Modify this so that it correctly recognizes the GOT section
+      -- and generate the appropriate type.
+  let dataSection :: ElfSection (ElfWordType w) -> GetResult (ElfParseError w) (ElfDataRegion w)
+      dataSection s
           | Just (fromIntegral (elfSectionIndex s)) == mstrtab_index
           , elfSectionName s == ".strtab"
           , elfSectionType s == SHT_STRTAB =
@@ -743,23 +745,32 @@ parseElfRegions info segments = do
                   pure $ ElfDataSymtab symtab
           | otherwise = pure $ ElfDataSection s
 
-        insertRegion :: (Range w, ElfDataRegion w)
-                     -> Seq.Seq (ElfDataRegion w)
-                     -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
-        insertRegion (r, n) segs =
+  let insertRegion :: (Range (ElfWordType w), ElfDataRegion w)
+                   -> Seq.Seq (ElfDataRegion w)
+                   -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
+      insertRegion (r, n) segs =
           mapError (ElfInsertError n) $ insertSpecialRegion esi r n segs
 
-        insertSection :: (Range w, ElfSection w)
-                      -> Seq.Seq (ElfDataRegion w)
-                      -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
-        insertSection s segs = (`insertRegion` segs) =<< _2 dataSection s
+  let insertSection :: (Range (ElfWordType w), ElfSection (ElfWordType w))
+                    -> Seq.Seq (ElfDataRegion w)
+                    -> GetResult (ElfParseError w) (Seq.Seq (ElfDataRegion w))
+      insertSection s segs = (`insertRegion` segs) =<< _2 dataSection s
+
+  let initSeq = insertRawRegion (fileContents info) Seq.empty
+  s <- foldrM insertSection initSeq sections
+  -- Define initial region list without segments.
+  postHeaders <- foldrM insertRegion s headers
+  -- Add in segments
+  foldlM (insertSegment esi) postHeaders $
+    -- Strip out relro segment (stored in `elfRelroRange')
+    filter (not . isRelroPhdr) segments
+
 
 -- | This returns an elf from the header information along with
 -- and errors that occured when generating it.
 --
 -- Note that this may call 'error' in some cases,
-getElf :: (Bits w, Integral w, Show w)
-       => ElfHeaderInfo w
+getElf :: ElfHeaderInfo w
        -> ([ElfParseError w], Elf w)
 getElf ehi = errorPair $ f <$> parseElfRegions ehi segments
                            <*> asRelroInfo segments
@@ -781,7 +792,7 @@ parseElf32ParseInfo :: ElfData
                     -> ElfOSABI
                     -> Word8 -- ^ ABI Version
                     -> B.ByteString
-                    -> Get (ElfHeaderInfo Word32)
+                    -> Get (ElfHeaderInfo 32)
 parseElf32ParseInfo d ei_osabi ei_abiver b = do
   e_type      <- ElfType      <$> getWord16 d
   e_machine   <- ElfMachine   <$> getWord16 d
@@ -831,7 +842,7 @@ parseElf64ParseInfo :: ElfData
                     -> ElfOSABI
                     -> Word8 -- ^ ABI Version
                     -> B.ByteString
-                    -> Get (ElfHeaderInfo Word64)
+                    -> Get (ElfHeaderInfo 64)
 parseElf64ParseInfo d ei_osabi ei_abiver b = do
   e_type      <- ElfType    <$> getWord16 d
   e_machine   <- ElfMachine <$> getWord16 d
@@ -877,15 +888,15 @@ parseElf64ParseInfo d ei_osabi ei_abiver b = do
 
 -- | Wraps a either a 32-bit or 64-bit typed value.
 data SomeElf f
-   = Elf32 (f Word32)
-   | Elf64 (f Word64)
+   = Elf32 (f 32)
+   | Elf64 (f 64)
 
 parseElfResult :: Either (L.ByteString, ByteOffset, String) (L.ByteString, ByteOffset, a)
                -> Either (ByteOffset,String) a
 parseElfResult (Left (_,o,e)) = Left (o,e)
 parseElfResult (Right (_,_,v)) = Right v
 
--- | Parses a ByteString into an Elf record. Parse failures call error. 32-bit ELF objects hav
+-- | Parses a ByteString into an Elf record. Parse failures call error. 32-bit ELF objects have
 -- their fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
 parseElfHeaderInfo :: B.ByteString -> Either (ByteOffset,String) (SomeElf ElfHeaderInfo)
 parseElfHeaderInfo b = parseElfResult $ flip Get.runGetOrFail (L.fromChunks [b]) $ do
@@ -907,8 +918,8 @@ parseElfHeaderInfo b = parseElfResult $ flip Get.runGetOrFail (L.fromChunks [b])
       Elf64 <$> parseElf64ParseInfo d ei_osabi ei_abiver b
 
 data ElfGetResult
-   = Elf32Res !([ElfParseError Word32]) (Elf Word32)
-   | Elf64Res !([ElfParseError Word64]) (Elf Word64)
+   = Elf32Res !([ElfParseError 32]) (Elf 32)
+   | Elf64Res !([ElfParseError 64]) (Elf 64)
    | ElfHeaderError !ByteOffset !String
      -- ^ Attempt to parse header failed.
      --

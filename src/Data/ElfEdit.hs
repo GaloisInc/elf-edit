@@ -22,7 +22,6 @@ datatype.
 module Data.ElfEdit
   ( -- * Top-level definitions
     Elf (..)
-  , ElfClass(..)
   , ElfData(..)
   , emptyElf
   , elfFileData
@@ -36,6 +35,11 @@ module Data.ElfEdit
   , elfInterpreter
   , elfSymtab
   , module Data.ElfEdit.Enums
+    -- * ElfClass
+  , ElfClass(..)
+  , elfClassInstances
+  , elfClassByteWidth
+  , elfClassBitWidth
     -- * Elf data region
   , ElfDataRegion(..)
     -- * Elf GOT
@@ -137,8 +141,6 @@ module Data.ElfEdit
   , pattern STV_PROTECTED
     -- * Relocations
   , IsRelocationType(..)
-  , RelaWidth(..)
-  , relaClass
   , RelaEntry(..)
   , RelocationWord
   , ppRelaEntries
@@ -188,7 +190,7 @@ hasSectionName section name = elfSectionName section == name
 -- | Given a section name, returns sections matching that name.
 --
 -- Section names in elf are not necessarily unique.
-findSectionByName :: B.ByteString -> Elf w -> [ElfSection w]
+findSectionByName :: B.ByteString -> Elf w -> [ElfSection (ElfWordType w)]
 findSectionByName name e  = e^..elfSections.filtered (`hasSectionName` name)
 
 -- | Remove section with given name.
@@ -222,15 +224,19 @@ renderElf = elfLayoutBytes . elfLayout
 newtype ElfSymbolVisibility = ElfSymbolVisibility { fromElfSymbolVisibility :: Word8 }
 
 -- | Visibility is specified by binding type
+pattern STV_DEFAULT :: ElfSymbolVisibility
 pattern STV_DEFAULT = ElfSymbolVisibility 0
 
 -- | OS specific version of STV_HIDDEN.
+pattern STV_INTERNAL :: ElfSymbolVisibility
 pattern STV_INTERNAL = ElfSymbolVisibility 1
 
 -- | Can only be seen inside current component.
+pattern STV_HIDDEN :: ElfSymbolVisibility
 pattern STV_HIDDEN = ElfSymbolVisibility 2
 
 -- | Can only be seen inside current component.
+pattern STV_PROTECTED :: ElfSymbolVisibility
 pattern STV_PROTECTED = ElfSymbolVisibility 3
 
 instance Show ElfSymbolVisibility where
@@ -281,7 +287,7 @@ ppSymbolTableEntry i e =
 -- These are sections labeled, ".symtab" with type SHT_SYMTAB.
 -- There should be at most one symbol table, but we return a list in case the
 -- elf file happens to contain multiple symbol tables.
-elfSymtab :: Elf w -> [ElfSymbolTable w]
+elfSymtab :: Elf w -> [ElfSymbolTable (ElfWordType w)]
 elfSymtab = asumDataRegions f
   where f (ElfDataSymtab s) = [s]
         f _ = []
