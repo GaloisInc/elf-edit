@@ -13,7 +13,10 @@ This contains definitions and utilities used for relocations.
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP #-}
+#if __GLASGOW_HASKELL >= 800
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
+#endif
 module Data.ElfEdit.Relocations
   ( -- * Relocation types
     IsRelocationType(..)

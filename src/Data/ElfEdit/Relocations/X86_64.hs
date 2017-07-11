@@ -1,7 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP #-}
+#if __GLASGOW_HASKELL >= 800
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
+#endif
 module Data.ElfEdit.Relocations.X86_64
   ( X86_64_RelocationType(..)
   , pattern R_X86_64_NONE

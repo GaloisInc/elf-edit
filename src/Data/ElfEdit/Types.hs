@@ -11,7 +11,10 @@
 {-# LANGUAGE Trustworthy #-} -- Cannot be Safe due to GeneralizedNewtypeDeriving
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE CPP #-}
+#if __GLASGOW_HASKELL >= 800
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
+#endif
 module Data.ElfEdit.Types
   ( -- * Top leve ldeclaration
     Elf(..)
