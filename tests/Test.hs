@@ -58,10 +58,13 @@ checkStringTableEntry bytes (str, off) = str == bstr
 withElf :: B.ByteString -> (forall w . Elf w -> T.Assertion) -> T.Assertion
 withElf bs f =
   case parseElf bs of
-    Elf32Res err e32 | null err  -> f e32
-    Elf64Res err e64 | null err  -> f e64
+    Elf32Res err e32
+      | null err  -> f e32
+      | otherwise -> T.assertFailure ("Failed to parse elf file: " ++ show err)
+    Elf64Res err e64
+      | null err  -> f e64
+      | otherwise -> T.assertFailure ("Failed to parse elf file: " ++ show err)
     ElfHeaderError _ e -> T.assertFailure $ "Failed to parse elf file: " ++ show e
-    _ -> T.assertFailure "Failed to parse elf file"
 
 tests :: T.TestTree
 tests = T.testGroup "ELF Tests"
