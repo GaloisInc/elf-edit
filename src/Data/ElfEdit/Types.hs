@@ -264,28 +264,40 @@ newtype ElfSectionType = ElfSectionType { fromElfSectionType :: Word32 }
   deriving (Eq, Ord)
 
 -- | Identifies an empty section header.
+pattern SHT_NULL :: ElfSectionType
 pattern SHT_NULL     = ElfSectionType  0
 -- | Contains information defined by the program
+pattern SHT_PROGBITS :: ElfSectionType
 pattern SHT_PROGBITS = ElfSectionType  1
 -- | Contains a linker symbol table
+pattern SHT_SYMTAB :: ElfSectionType
 pattern SHT_SYMTAB   = ElfSectionType  2
 -- | Contains a string table
+pattern SHT_STRTAB :: ElfSectionType
 pattern SHT_STRTAB   = ElfSectionType  3
 -- | Contains "Rela" type relocation entries
+pattern SHT_RELA :: ElfSectionType
 pattern SHT_RELA     = ElfSectionType  4
 -- | Contains a symbol hash table
+pattern SHT_HASH :: ElfSectionType
 pattern SHT_HASH     = ElfSectionType  5
 -- | Contains dynamic linking tables
+pattern SHT_DYNAMIC :: ElfSectionType
 pattern SHT_DYNAMIC  = ElfSectionType  6
 -- | Contains note information
+pattern SHT_NOTE :: ElfSectionType
 pattern SHT_NOTE     = ElfSectionType  7
 -- | Contains uninitialized space; does not occupy any space in the file
+pattern SHT_NOBITS :: ElfSectionType
 pattern SHT_NOBITS   = ElfSectionType  8
 -- | Contains "Rel" type relocation entries
-pattern SHT_REL      = ElfSectionType  9
+pattern SHT_REL :: ElfSectionType
+pattern SHT_REL = ElfSectionType  9
 -- | Reserved
-pattern SHT_SHLIB    = ElfSectionType 10
+pattern SHT_SHLIB :: ElfSectionType
+pattern SHT_SHLIB = ElfSectionType 10
 -- | Contains a dynamic loader symbol table
+pattern SHT_DYNSYM :: ElfSectionType
 pattern SHT_DYNSYM   = ElfSectionType 11
 
 instance Show ElfSectionType where
@@ -484,42 +496,58 @@ newtype ElfSegmentType = ElfSegmentType { fromElfSegmentType :: Word32 }
   deriving (Eq,Ord)
 
 -- | Unused entry
+pattern PT_NULL :: ElfSegmentType
 pattern PT_NULL    = ElfSegmentType 0
 -- | Loadable program segment
+pattern PT_LOAD :: ElfSegmentType
 pattern PT_LOAD    = ElfSegmentType 1
 -- | Dynamic linking information
+pattern PT_DYNAMIC :: ElfSegmentType
 pattern PT_DYNAMIC = ElfSegmentType 2
 -- | Program interpreter path name
+pattern PT_INTERP :: ElfSegmentType
 pattern PT_INTERP  = ElfSegmentType 3
 -- | Note sections
+pattern PT_NOTE :: ElfSegmentType
 pattern PT_NOTE    = ElfSegmentType 4
 -- | Reserved
+pattern PT_SHLIB :: ElfSegmentType
 pattern PT_SHLIB   = ElfSegmentType 5
 -- | Program header table
+pattern PT_PHDR :: ElfSegmentType
 pattern PT_PHDR    = ElfSegmentType 6
 -- | A thread local storage segment
 --
 -- See 'https://www.akkadia.org/drepper/tls.pdf'
+pattern PT_TLS :: ElfSegmentType
 pattern PT_TLS     = ElfSegmentType 7
 -- | A number of defined types.
+pattern PT_NUM :: ElfSegmentType
 pattern PT_NUM     = ElfSegmentType 8
 
 -- | Start of OS-specific
+pattern PT_LOOS :: ElfSegmentType
 pattern PT_LOOS    = ElfSegmentType 0x60000000
 
 -- | The GCC '.eh_frame_hdr' segment
+pattern PT_GNU_EH_FRAME :: ElfSegmentType
 pattern PT_GNU_EH_FRAME = ElfSegmentType 0x6474e550
 -- | Indicates if stack should be executable.
+pattern PT_GNU_STACK :: ElfSegmentType
 pattern PT_GNU_STACK    = ElfSegmentType 0x6474e551
 -- | GNU segment with relocation that may be read-only.
+pattern PT_GNU_RELRO :: ElfSegmentType
 pattern PT_GNU_RELRO    = ElfSegmentType 0x6474e552
 
 -- | End of OS-specific
+pattern PT_HIOS :: ElfSegmentType
 pattern PT_HIOS    = ElfSegmentType 0x6fffffff
 
 -- | Start of OS-specific
+pattern PT_LOPROC :: ElfSegmentType
 pattern PT_LOPROC  = ElfSegmentType 0x70000000
 -- | End of OS-specific
+pattern PT_HIPROC :: ElfSegmentType
 pattern PT_HIPROC  = ElfSegmentType 0x7fffffff
 
 elfSegmentTypeNameMap :: Map.Map ElfSegmentType String

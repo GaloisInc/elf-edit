@@ -4,7 +4,11 @@ Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
 Defines the tags used in the dynamic section.
 -}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms #-}
+#if __GLASGOW_HASKELL__ >= 800
+{-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
+#endif
 module Data.ElfEdit.Dynamic.Tag
   ( module Data.ElfEdit.Dynamic.Tag
   ) where
