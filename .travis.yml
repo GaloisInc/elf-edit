@@ -20,15 +20,7 @@ matrix:
         packages:
         - ghc-8.0.1
         - build-essential
-  - env: GHCVER=7.10.3 STACK_YAML=stack-7.10.yaml
-    addons:
-      apt:
-        sources:
-        - hvr-ghc
-        packages:
-        - ghc-7.10.3
-        - build-essential
 
 script:
- - stack --no-terminal --system-ghc build
- - stack --no-terminal --system-ghc test
+ - stack --no-terminal --system-ghc build elf-edit
+ - stack --no-terminal --system-ghc test elf-edit

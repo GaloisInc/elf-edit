@@ -7,6 +7,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Data.ElfEdit.Get
   ( -- * parseElf
     parseElf
@@ -18,6 +19,7 @@ module Data.ElfEdit.Get
   , SomeElf(..)
   , getElf
   , ElfParseError(..)
+  , elfParseErrorIsWarning
   , ElfInsertError(..)
   , getSectionTable
   , getSymbolTableEntry
@@ -100,12 +102,12 @@ runGetMany g bs0 = start [] (L.toChunks bs0)
 
 -- | Describes reason an insertion failed.
 data ElfInsertError w
-   = OverlapSegment (ElfDataRegion w) (Range (ElfWordType w))
+   = OverlapSegment !(ElfDataRegion w) !(Range (ElfWordType w))
      -- ^ The inserted segment overlaps with another, and we needed to insert
      -- it in the given range.
-     -- the end.
-   | OutOfRange
-     -- ^ This segment is out of range.
+   | OutOfRange !(Range (ElfWordType w))
+     -- ^ This indicates we tried to insert some region, but we reached the end
+     -- of the contents, and still had an offset.
 
 -- | A parse error
 data ElfParseError w
@@ -114,19 +116,43 @@ data ElfParseError w
   | ElfSymtabError !String
   | MultipleGnuRelro
 
-instance Show (ElfParseError w) where
+-- | This returns true if the parse error is not very serious
+-- because, for example, it concerns a region with size 0.
+--
+-- Binutils generates binaries that sometimes contain these
+-- warnings.
+elfParseErrorIsWarning :: (Eq (ElfWordType w), Num (ElfWordType w)) => ElfParseError w -> Bool
+elfParseErrorIsWarning pe =
+  case pe of
+    ElfInsertError _ (OverlapSegment _ (_,0)) -> True
+    ElfInsertError _ (OutOfRange (_,0)) -> True
+    _ -> False
+
+
+instance (Eq (ElfWordType w), Num (ElfWordType w), Show (ElfWordType w))
+      => Show (ElfParseError w) where
   show (ElfSymtabError msg) =
     "Could not parse symtab entries: " ++ msg
   show MultipleGnuRelro =
     "Multiple relro segments."
+  show (ElfInsertError n (OverlapSegment prev (_,0))) =
+    "WARNING: Attempt to insert empty "
+    ++ elfDataRegionName n
+    ++ " that overlaps with "
+    ++ elfDataRegionName prev
+    ++ "."
   show (ElfInsertError n (OverlapSegment prev _)) =
     "Attempt to insert "
     ++ elfDataRegionName n
     ++ " overlapping Elf region into "
     ++ elfDataRegionName prev
     ++ "."
-  show (ElfInsertError n OutOfRange) =
-    "Invalid region " ++ elfDataRegionName n ++ "."
+  show (ElfInsertError n (OutOfRange (o,0))) =
+    "WARNING: Could not insert empty region " ++ elfDataRegionName n
+    ++ " at offset " ++ show o ++ "."
+  show (ElfInsertError n (OutOfRange (o,c))) =
+    "Could not insert region " ++ elfDataRegionName n
+    ++ " with size " ++ show c ++ " at offset " ++ show o ++ "."
 
 ------------------------------------------------------------------------
 -- Low level getters
@@ -498,9 +524,11 @@ data GetResult e a
 errorPair :: GetResult e a -> ([e], a)
 errorPair (GetResult e a) = (e, a)
 
+-- Apply a function to all errors collected.
 mapError :: (e -> f) -> GetResult e a -> GetResult f a
 mapError f (GetResult l x) = GetResult (f <$> l) x
 
+-- | Return the get result, but add an error.
 insError :: e -> a -> GetResult e a
 insError e a = seq e $ GetResult [e] a
 
@@ -530,13 +558,14 @@ insertAtOffset :: Integral (ElfWordType w)
                   -- ^ Range to insert in.
                -> Seq.Seq (ElfDataRegion w)
                -> GetResult (ElfInsertError w) (Seq.Seq (ElfDataRegion w))
+-- Insert into current region is offset is 0.
 insertAtOffset sizeOf fn rng@(o,c) r0 =
   case Seq.viewl r0 of
     Seq.EmptyL
       | rng == (0,0) ->
         noInsError $ fn rng Seq.empty
       | otherwise ->
-        insError OutOfRange $ fn rng Seq.empty
+        insError (OutOfRange rng) $ fn rng Seq.empty
     p Seq.:< r
       -- Go to next segment if offset to insert is after p.
       | o >= sz ->
@@ -548,7 +577,7 @@ insertAtOffset sizeOf fn rng@(o,c) r0 =
                 where s' = s { elfSegmentData = seg_data' }
          in combine <$> insertAtOffset sizeOf fn rng (elfSegmentData s)
         -- Insert into current region is offset is 0.
-      | o == 0 -> noInsError $! fn rng (p Seq.<| r)
+      | o == 0 -> noInsError $! fn rng r0
         -- Split a raw segment into prefix and post.
       | ElfDataRaw b <- p ->
           -- We know offset is less than length of bytestring as otherwise we would
@@ -629,7 +658,6 @@ insertSegment esi segs phdr = esiInstances esi $ do
   -- TODO: See if we can do better than dropping the segment.
   mapError (ElfInsertError (ElfDataSegment (phdrSegment phdr))) $
     insertAtOffset (regionSize esi) (\_ -> gather szd Seq.empty) rng segs
-
 
 -- | Get list of sections from Elf parse info.
 -- This includes the initial section

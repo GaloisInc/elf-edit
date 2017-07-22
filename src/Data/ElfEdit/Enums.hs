@@ -5,9 +5,13 @@ Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
 Defines a large collection of constants used in defining elf values.
 -}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE PatternSynonyms #-}
+#if __GLASGOW_HASKELL__ >= 800
+{-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
+#endif
 module Data.ElfEdit.Enums
   (  -- * ElfOSABI
     ElfOSABI(..)

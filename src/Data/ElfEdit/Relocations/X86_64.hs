@@ -1,7 +1,16 @@
+{-
+Copyright        : (c) Galois, Inc 2016
+Maintainer       : Joe Hendrix <jhendrix@galois.com>
+
+X86_64 relocation type.
+-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
+#if __GLASGOW_HASKELL__ >= 800
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
+#endif
 module Data.ElfEdit.Relocations.X86_64
   ( X86_64_RelocationType(..)
   , pattern R_X86_64_NONE
