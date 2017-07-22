@@ -159,6 +159,8 @@ module Data.ElfEdit
   , Range
   , hasPermissions
   , stringTable
+    -- * Constraints
+  , ElfWidthConstraints
   ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)
