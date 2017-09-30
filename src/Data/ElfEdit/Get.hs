@@ -558,7 +558,6 @@ insertAtOffset :: Integral (ElfWordType w)
                   -- ^ Range to insert in.
                -> Seq.Seq (ElfDataRegion w)
                -> GetResult (ElfInsertError w) (Seq.Seq (ElfDataRegion w))
--- Insert into current region is offset is 0.
 insertAtOffset sizeOf fn rng@(o,c) r0 =
   case Seq.viewl r0 of
     Seq.EmptyL
@@ -576,15 +575,17 @@ insertAtOffset sizeOf fn rng@(o,c) r0 =
         let combine seg_data' = ElfDataSegment s' Seq.<| r
                 where s' = s { elfSegmentData = seg_data' }
          in combine <$> insertAtOffset sizeOf fn rng (elfSegmentData s)
-        -- Insert into current region is offset is 0.
-      | o == 0 -> noInsError $! fn rng r0
+        -- Insert into current region when offset is 0 or when size is 0
+      | o == 0 || c == 0 -> noInsError $! fn rng r0
         -- Split a raw segment into prefix and post.
       | ElfDataRaw b <- p ->
           -- We know offset is less than length of bytestring as otherwise we would
           -- have gone to next segment
-          assert (fromIntegral o < B.length b) $ do
-            let (pref,post) = B.splitAt (fromIntegral o) b
-            noInsError $! insertRawRegion pref $ fn rng $ insertRawRegion post r
+          if (c == 0)
+             then noInsError $ insertRawRegion b $ fn rng r
+             else assert (fromIntegral o < B.length b) $ do
+                    let (pref,post) = B.splitAt (fromIntegral o) b
+                    noInsError $! insertRawRegion pref $ fn rng $ insertRawRegion post r
         --
       | otherwise ->
         insError (OverlapSegment p rng) $! ((p Seq.<|) $! fn (o,c) r)
