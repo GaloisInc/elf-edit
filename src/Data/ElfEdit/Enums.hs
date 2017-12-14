@@ -272,13 +272,13 @@ newtype ElfType = ElfType { fromElfType :: Word16 }
 
 -- | Unspecified elf type.
 pattern ET_NONE = ElfType 0
--- | Relocatable object file
+-- | Relocatable object file such as assembler output
 pattern ET_REL  = ElfType 1
--- | Executable object file
+-- | Executable
 pattern ET_EXEC = ElfType 2
--- | Shared object file
+-- | Shared object
 pattern ET_DYN  = ElfType 3
--- | Core dump object file
+-- | Core dump
 pattern ET_CORE = ElfType 4
 
 instance Show ElfType where
