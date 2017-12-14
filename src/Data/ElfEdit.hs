@@ -145,6 +145,8 @@ module Data.ElfEdit
   , RelocationWord
   , ppRelaEntries
   , elfRelaEntries
+    -- ** ARM32 relocations
+  , module Data.ElfEdit.Relocations.ARM32
     -- ** 32-bit x86 relocations
   , module Data.ElfEdit.Relocations.I386
     -- * 64-bit x86 relocations
@@ -178,6 +180,7 @@ import           Data.ElfEdit.Enums
 import           Data.ElfEdit.Get
 import           Data.ElfEdit.Layout
 import           Data.ElfEdit.Relocations
+import           Data.ElfEdit.Relocations.ARM32
 import           Data.ElfEdit.Relocations.I386
 import           Data.ElfEdit.Relocations.X86_64
 import           Data.ElfEdit.Types
