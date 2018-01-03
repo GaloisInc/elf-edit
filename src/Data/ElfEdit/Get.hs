@@ -48,6 +48,7 @@ import           Data.Foldable (foldlM, foldrM)
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
 import           GHC.TypeLits
+import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.ElfEdit.Enums
@@ -128,8 +129,7 @@ elfParseErrorIsWarning pe =
     ElfInsertError _ (OutOfRange (_,0)) -> True
     _ -> False
 
-
-instance (Eq (ElfWordType w), Num (ElfWordType w), Show (ElfWordType w))
+instance (Integral (ElfWordType w), Show (ElfWordType w))
       => Show (ElfParseError w) where
   show (ElfSymtabError msg) =
     "Could not parse symtab entries: " ++ msg
@@ -149,10 +149,10 @@ instance (Eq (ElfWordType w), Num (ElfWordType w), Show (ElfWordType w))
     ++ "."
   show (ElfInsertError n (OutOfRange (o,0))) =
     "WARNING: Could not insert empty region " ++ elfDataRegionName n
-    ++ " at offset " ++ show o ++ "."
+    ++ " at offset 0x" ++ showHex o "."
   show (ElfInsertError n (OutOfRange (o,c))) =
     "Could not insert region " ++ elfDataRegionName n
-    ++ " with size " ++ show c ++ " at offset " ++ show o ++ "."
+    ++ " with size " ++ show c ++ " at offset 0x" ++ showHex o "."
 
 ------------------------------------------------------------------------
 -- Low level getters
