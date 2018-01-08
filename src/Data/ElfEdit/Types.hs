@@ -726,6 +726,20 @@ instance ElfWidthConstraints w => Show (ElfSegment w) where
   show s = show (ppSegment s)
 
 ------------------------------------------------------------------------
+-- ElfHeader
+
+-- | This contain entry for the Elf header.
+data ElfHeader w = ElfHeader { headerData       :: !ElfData
+                             , headerClass      :: !(ElfClass w)
+                             , headerOSABI      :: !ElfOSABI
+                             , headerABIVersion :: !Word8
+                             , headerType       :: !ElfType
+                             , headerMachine    :: !ElfMachine
+                             , headerEntry      :: !(ElfWordType w)
+                             , headerFlags      :: !Word32
+                             }
+
+------------------------------------------------------------------------
 -- Elf
 
 -- | The version of elf files supported by this parser
@@ -771,24 +785,6 @@ emptyElf d c tp m = elfClassInstances c $
       , elfRelroRange = Nothing
       }
 
--- | Lens to access top-level regions in Elf file.
-elfFileData :: Simple Lens (Elf w) (Seq.Seq (ElfDataRegion w))
-elfFileData = lens _elfFileData (\s v -> s { _elfFileData = v })
-
-------------------------------------------------------------------------
--- ElfHeader
-
--- | This contain entry for the Elf header.
-data ElfHeader w = ElfHeader { headerData       :: !ElfData
-                             , headerClass      :: !(ElfClass w)
-                             , headerOSABI      :: !ElfOSABI
-                             , headerABIVersion :: !Word8
-                             , headerType       :: !ElfType
-                             , headerMachine    :: !ElfMachine
-                             , headerEntry      :: !(ElfWordType w)
-                             , headerFlags      :: !Word32
-                             }
-
 -- | Return the header information about the elf
 elfHeader :: Elf w -> ElfHeader w
 elfHeader e = ElfHeader { headerData       = elfData e
@@ -800,3 +796,7 @@ elfHeader e = ElfHeader { headerData       = elfData e
                         , headerEntry      = elfEntry e
                         , headerFlags      = elfFlags e
                         }
+
+-- | Lens to access top-level regions in Elf file.
+elfFileData :: Simple Lens (Elf w) (Seq.Seq (ElfDataRegion w))
+elfFileData = lens _elfFileData (\s v -> s { _elfFileData = v })

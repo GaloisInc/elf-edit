@@ -50,6 +50,6 @@ test-suite test-elf
     containers,
     elf-edit,
     tasty,
-    tasty-hunit,
+    tasty-hunit >= 0.10,
     tasty-quickcheck,
     vector

@@ -24,7 +24,6 @@ module Data.ElfEdit.Get
   , getSectionTable
   , getSymbolTableEntry
     -- * Utilities
-  , word16
   , getWord16
   , getWord32
   , getWord64
@@ -39,9 +38,7 @@ import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get
 import qualified Data.Binary.Get as Get
-import           Data.Bits
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Unsafe as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.UTF8 as B (toString)
 import           Data.Foldable (foldlM, foldrM)
@@ -156,15 +153,6 @@ instance (Integral (ElfWordType w), Show (ElfWordType w))
 
 ------------------------------------------------------------------------
 -- Low level getters
-
--- | Parse a word16 with the given data and bytestring
-word16 :: ElfData -> B.ByteString -> Word16
-word16 = \d s -> do
-  let idx i = fromIntegral (s `B.unsafeIndex` i)
-  case d of
-    _ | B.length s < 2 -> error "word16 given illegal bytestring"
-    ELFDATA2LSB -> (idx 1 `shiftL` 8) .|. idx 0
-    ELFDATA2MSB -> (idx 0 `shiftL` 8) .|. idx 1
 
 getWord16 :: ElfData -> Get Word16
 getWord16 ELFDATA2LSB = Get.getWord16le
@@ -794,11 +782,8 @@ parseElfRegions info segments = elfClassInstances (headerClass (header info)) $ 
     -- Strip out relro segment (stored in `elfRelroRange')
     filter (not . isRelroPhdr) segments
 
-
--- | This returns an elf from the header information along with
--- and errors that occured when generating it.
---
--- Note that this may call 'error' in some cases,
+-- | This returns an elf from the header information along with and
+-- errors that occured when generating it.
 getElf :: ElfHeaderInfo w
        -> ([ElfParseError w], Elf w)
 getElf ehi = errorPair $ f <$> parseElfRegions ehi segments
@@ -957,7 +942,7 @@ data ElfGetResult
 -- | Parses a ByteString into an Elf record. Parse failures call error. 32-bit ELF objects hav
 -- their fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
 parseElf :: B.ByteString -> ElfGetResult
-parseElf b = do
+parseElf b =
   case parseElfHeaderInfo b of
     Left (o, m) -> ElfHeaderError o m
     Right (Elf32 hdr) -> Elf32Res l e

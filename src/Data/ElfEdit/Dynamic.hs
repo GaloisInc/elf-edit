@@ -41,6 +41,7 @@ module Data.ElfEdit.Dynamic
 import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.Reader
+import           Control.Monad.State
 import           Data.Binary.Get hiding (runGet)
 import           Data.Bits
 import qualified Data.ByteString as B
@@ -90,15 +91,6 @@ virtAddrMap file = foldlM ins Map.empty
                 FileOffset dta = phdrFileStart phdr
                 n              = phdrFileSize phdr
                 new_contents   = sliceL (dta,n) file
-
--- | Split a bytestring into an equivalent list of byte strings with a given size.
---
--- This drops the last bits if the total length is not a multiple of the size.
-regularChunks :: Int -> B.ByteString -> [B.ByteString]
-regularChunks sz bs
-  | B.length bs < sz = []
-  | otherwise = B.take sz bs : regularChunks sz (B.drop sz bs)
-
 
 ------------------------------------------------------------------------
 -- DynamicError
@@ -159,6 +151,7 @@ type DynamicMap w = Map.Map ElfDynamicTag [ElfWordType w]
 insertDynamic :: Dynamic v ->  Map.Map ElfDynamicTag [v] -> Map.Map ElfDynamicTag [v]
 insertDynamic (Dynamic tag v) = Map.insertWith (++) tag [v]
 
+-- | Return entries in the dynamic map.
 dynamicEntry :: ElfDynamicTag -> Map.Map ElfDynamicTag [v] -> [v]
 dynamicEntry tag m = fromMaybe [] (Map.lookup tag m)
 
@@ -204,6 +197,15 @@ mandatoryDynamicEntry tag m =
     [w] -> return w
     []  -> throwError $ MandatoryEntryMissing tag
     _   -> throwError $ EntryDuplicated tag
+
+-- | Parse a word16 with the given data.
+word16 :: ElfData -> L.ByteString -> DynamicParser w Word16
+word16 d s = do
+  let idx i = fromIntegral (s `L.index` i)
+  case d of
+    _ | L.length s < 2 -> throwError VerSymTooSmall
+    ELFDATA2LSB -> pure $ (idx 1 `shiftL` 8) .|. idx 0
+    ELFDATA2MSB -> pure $ (idx 0 `shiftL` 8) .|. idx 1
 
 ------------------------------------------------------------------------
 -- Lookup address
@@ -610,8 +612,6 @@ dynamicEntriesFromSegment e = do
            Just $ Left OverlappingLoadableSegments
      _ -> Just $ Left MultipleDynamicSegments
 
-
-
 ------------------------------------------------------------------------
 -- Symbol version information
 
@@ -621,7 +621,7 @@ data VersionId
                  -- ^ Name of file symbol is expected in
                , verName :: !B.ByteString
                  -- ^ Name of version this belongs to.
-               }
+               } deriving (Show)
 
 -- | Identifies a symbol entry along with a possible version constraint for the symbol.
 type VersionedSymbol w = (ElfSymbolTableEntry w, Maybe VersionId)
@@ -647,28 +647,29 @@ dynSymTable :: DynamicSection tp
 dynSymTable ds = runParser ds $ do
   let dm = dynMap ds
   let symbols = dynSymbols ds
-  let symcnt = V.length symbols
   let dta = dynData ds
   mvs <- optionalDynamicEntry DT_VERSYM dm
   case mvs of
     Nothing ->
       return $! (\s -> (s, Nothing)) <$> symbols
     Just vs -> do
-      fileRest <- addressToFile DT_VERSYM vs
-      let verSize = 2 * symcnt
-      let buffer = L.toStrict (L.take (fromIntegral verSize) fileRest)
-      when (B.length buffer < verSize) $ do
-        throwError $ VerSymTooSmall
-      let versionIndices = word16 dta <$> V.fromList (regularChunks 2 buffer)
       verMap <- either throwError pure $ versionReqMap (dynVersionReqs ds)
 
-      let f sym 0 = pure (sym,Nothing)
-          f sym 1 = pure (sym,Nothing)
-          f sym idx = do
+      -- Extract the version symbol infirnation.
+      fileRest <- addressToFile DT_VERSYM vs
+      -- This takes each symbol table entry and associated it with the version indices
+      -- by the next two bytes in the bytestring.
+      let resolveSymVer :: ElfSymbolTableEntry a
+                        -> StateT L.ByteString (DynamicParser w) (VersionedSymbol a)
+          resolveSymVer sym = do
+            bs <- get
+            put (L.drop 2 bs)
+            idx <- lift $ word16 dta bs
             case Map.lookup idx verMap of
-              Nothing -> throwError (UnresolvedVersionReqAuxIndex (steName sym) idx)
+              Nothing | idx == 0 -> pure (sym, Nothing)
+                      | otherwise -> throwError (UnresolvedVersionReqAuxIndex (steName sym) idx)
               Just verId -> pure (sym, Just verId)
-      V.zipWithM f symbols versionIndices
+      evalStateT (traverse resolveSymVer symbols) fileRest
 
 ------------------------------------------------------------------------
 -- Relocations

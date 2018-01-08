@@ -51,6 +51,7 @@ module Data.ElfEdit
   , ElfParseError(..)
   , ElfInsertError(..)
   , parseElf
+  , parseElfHeaderInfo
   , SomeElf(..)
     -- * Writing Elf files
   , renderElf
