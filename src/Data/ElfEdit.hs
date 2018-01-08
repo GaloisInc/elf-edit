@@ -164,6 +164,9 @@ module Data.ElfEdit
   , stringTable
     -- * Constraints
   , ElfWidthConstraints
+    -- * Header
+  , ElfHeaderInfo
+  , getElf
   ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)
