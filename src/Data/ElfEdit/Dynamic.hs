@@ -36,6 +36,7 @@ module Data.ElfEdit.Dynamic
   , ver_flg_weak
   , VersionReq(..)
   , VersionReqAux(..)
+  , VersionTableValue(..)
   ) where
 
 import           Control.Monad
@@ -623,8 +624,16 @@ data VersionId
                  -- ^ Name of version this belongs to.
                } deriving (Show)
 
+data VersionTableValue
+   = VersionLocal
+     -- ^ Symbol is local and not available outside object
+   | VersionGlobal
+     -- ^ Symbol is defined in object and globally available
+   | VersionSpecific !VersionId
+     -- ^ Symbol version information
+
 -- | Identifies a symbol entry along with a possible version constraint for the symbol.
-type VersionedSymbol w = (ElfSymbolTableEntry w, Maybe VersionId)
+type VersionedSymbol w = (ElfSymbolTableEntry w, VersionTableValue)
 
 
 -- | Maps the version requirement index to the appropriate version.
@@ -651,7 +660,7 @@ dynSymTable ds = runParser ds $ do
   mvs <- optionalDynamicEntry DT_VERSYM dm
   case mvs of
     Nothing ->
-      return $! (\s -> (s, Nothing)) <$> symbols
+      return $! (\s -> (s, VersionGlobal)) <$> symbols
     Just vs -> do
       verMap <- either throwError pure $ versionReqMap (dynVersionReqs ds)
 
@@ -665,10 +674,13 @@ dynSymTable ds = runParser ds $ do
             bs <- get
             put (L.drop 2 bs)
             idx <- lift $ word16 dta bs
-            case Map.lookup idx verMap of
-              Nothing | idx == 0 -> pure (sym, Nothing)
-                      | otherwise -> throwError (UnresolvedVersionReqAuxIndex (steName sym) idx)
-              Just verId -> pure (sym, Just verId)
+            case idx of
+              0 -> pure (sym, VersionLocal)
+              1 -> pure (sym, VersionGlobal)
+              _ | Just verId <- Map.lookup idx verMap -> do
+                    pure (sym, VersionSpecific verId)
+                | otherwise -> do
+                    throwError $ UnresolvedVersionReqAuxIndex (steName sym) idx
       evalStateT (traverse resolveSymVer symbols) fileRest
 
 ------------------------------------------------------------------------
