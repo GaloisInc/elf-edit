@@ -34,7 +34,10 @@ module Data.ElfEdit
   , updateSections
   , elfInterpreter
   , elfSymtab
+  , elfHeader
   , module Data.ElfEdit.Enums
+    -- * Header
+  , ElfHeader(..)
     -- * ElfClass
   , ElfClass(..)
   , elfClassInstances
@@ -164,7 +167,7 @@ module Data.ElfEdit
   , stringTable
     -- * Constraints
   , ElfWidthConstraints
-    -- * Header
+    -- * Header parse information
   , ElfHeaderInfo
   , getElf
   ) where
