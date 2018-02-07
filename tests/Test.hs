@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -97,7 +98,11 @@ testDynSymTable = do
 
     syms <- either (T.assertFailure . show) pure $ dynSymTable
       (dynSection :: DynamicSection X86_64_RelocationType)
-    let symInfo (s,v) = (steName s, isJust v)
+    let isVer VersionSpecific{} = True
+        isVer VersionLocal  = False
+        isVer VersionGlobal = False
+    let symInfo :: (ElfSymbolTableEntry u, VersionTableValue) -> (C8.ByteString, Bool)
+        symInfo (s,v) = (steName s, isVer v)
     -- Statically define expected symbol information.
     let expectedSymInfo = [("",False), ("__libc_start_main",True), ("__gmon_start__", False)]
     T.assertEqual "Testing number of relocations" (symInfo <$> V.toList syms) expectedSymInfo
