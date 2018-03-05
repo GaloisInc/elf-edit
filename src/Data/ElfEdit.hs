@@ -170,6 +170,8 @@ module Data.ElfEdit
     -- * Header parse information
   , ElfHeaderInfo
   , getElf
+  , ElfNote(..)
+  , allNotes
   ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)

@@ -30,6 +30,8 @@ module Data.ElfEdit.Get
   , LookupStringError
   , lookupString
   , runGetMany
+  , allNotes
+  , notesInSection
   ) where
 
 import           Control.Exception ( assert )
@@ -57,6 +59,7 @@ import           Data.ElfEdit.Layout
   , phdrEntrySize
   , shdrEntrySize
   , symbolTableSize
+  , elfSections
   )
 import           Data.ElfEdit.Types
 
@@ -949,3 +952,43 @@ parseElf b =
       where (l, e) = getElf hdr
     Right (Elf64 hdr) -> Elf64Res l e
       where (l, e) = getElf hdr
+
+
+allNotes :: Elf w -> Either String [ElfNote]
+allNotes elf =
+  foldrM (\res ->
+             \oldList ->
+               case notesInSection endian res of
+                 Left s  -> Left s
+                 Right l -> Right (l ++ oldList)
+         ) [] noteSections
+  where
+    endian       = elfData elf
+    noteSections = elf ^.. elfSections.filtered isNoteSection
+
+    isNoteSection :: ElfSection w -> Bool
+    isNoteSection s = SHT_NOTE == elfSectionType s
+
+notesInSection :: ElfData -> ElfSection w -> Either String [ElfNote]
+notesInSection endian sec =
+  runGetMany (singleNoteParser endian) (L.fromChunks [elfSectionData sec])
+
+singleNoteParser :: ElfData -> Get.Get ElfNote
+singleNoteParser cls = do
+  nsz <- getWord32 cls
+  dsz <- getWord32 cls
+  typ <- getWord32 cls
+  -- Alignment is always on 4-byte boundary
+  -- even on 64-bit platforms
+  let padded_nsz = 4 * ((nsz + 3) `div` 4)
+  let padded_dsz = 4 * ((dsz + 3) `div` 4)
+  padded_name <- Get.getByteString (fromIntegral padded_nsz)
+  padded_desc <- Get.getByteString (fromIntegral padded_dsz)
+  return $! ElfNote
+    {
+      noteSize     = nsz
+    , noteDescSize = dsz
+    , noteType     = typ
+    , noteName     = B.take (fromIntegral nsz) padded_name
+    , noteDesc     = B.take (fromIntegral dsz) padded_desc
+    }
