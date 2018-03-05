@@ -111,6 +111,7 @@ module Data.ElfEdit.Types
   , enumCnt
   , hasPermissions
   , ppHex
+  , ElfNote(..)
   ) where
 
 import           Control.Applicative
@@ -800,3 +801,16 @@ elfHeader e = ElfHeader { headerData       = elfData e
 -- | Lens to access top-level regions in Elf file.
 elfFileData :: Simple Lens (Elf w) (Seq.Seq (ElfDataRegion w))
 elfFileData = lens _elfFileData (\s v -> s { _elfFileData = v })
+
+
+-- | Adding support for parsing ELF notes. ElfNotes don't have
+-- dependency on World size, so the datatype definition is not
+-- parameterized by word size.
+data ElfNote = ElfNote
+  {
+    noteSize      :: !Word32
+  , noteDescSize  :: !Word32
+  , noteType      :: !Word32
+  , noteName      :: !B.ByteString
+  , noteDesc      :: !B.ByteString
+  } deriving(Show)
