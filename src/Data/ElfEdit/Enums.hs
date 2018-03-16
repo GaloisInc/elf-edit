@@ -597,6 +597,7 @@ elfMachineNameMap = Map.fromList
   , (,) EM_TI_C6000 "EM_TI_C6000"
   , (,) EM_L1OM "EM_L1OM"
   , (,) EM_K1OM "EM_K1OM"
+  , (,) EM_RISCV "EM_RISCV"
   ]
 
 ------------------------------------------------------------------------
