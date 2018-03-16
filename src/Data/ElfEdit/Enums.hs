@@ -136,6 +136,7 @@ module Data.ElfEdit.Enums
   , pattern EM_TI_C6000
   , pattern EM_L1OM
   , pattern EM_K1OM
+  , pattern EM_RISCV
     -- * ElfSectionIndex
   , ElfSectionIndex(..)
   , pattern SHN_UNDEF
@@ -489,6 +490,8 @@ pattern EM_L1OM        = ElfMachine 180
 -- ^ Intel L10M
 pattern EM_K1OM        = ElfMachine 181
 -- ^ Intel K10M
+pattern EM_RISCV       = ElfMachine 243
+-- ^ RISC-V
 
 instance Show ElfMachine where
   show m =
