@@ -447,10 +447,11 @@ data ElfSymbolTableEntry w = EST
     { steName             :: !B.ByteString
       -- ^ This is the name of the symbol
       --
-      -- We use bytestrings for encoding the name rather than a 'Text' or 'String'
-      -- value because the elf format does not specify an encoding for symbol table
-      -- entries -- it only specifies that they are null-terminated.  This also
-      -- makes checking equality and reading symbol tables faster.
+      -- We use bytestrings for encoding the name rather than a 'Text'
+      -- or 'String' value because the elf format does not specify an
+      -- encoding for symbol table entries -- it only specifies that
+      -- they are null-terminated.  This also makes checking equality
+      -- and reading symbol tables faster.
     , steType             :: !ElfSymbolType
     , steBind             :: !ElfSymbolBinding
     , steOther            :: !Word8

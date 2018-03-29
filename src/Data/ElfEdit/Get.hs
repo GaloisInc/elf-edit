@@ -27,7 +27,7 @@ module Data.ElfEdit.Get
   , getWord16
   , getWord32
   , getWord64
-  , LookupStringError
+  , LookupStringError(..)
   , lookupString
   , runGetMany
   ) where
@@ -63,6 +63,7 @@ import           Data.ElfEdit.Types
 ------------------------------------------------------------------------
 -- Utilities
 
+-- | An error that occurs when looking up a string in a table
 data LookupStringError
    = IllegalStrtabIndex
    | MissingNullTerminator
@@ -79,6 +80,7 @@ lookupString o b | toInteger o >= toInteger (B.length b) = Left IllegalStrtabInd
                  | otherwise = Right r
   where s = B.drop (fromIntegral o) b
         r = B.takeWhile (/= 0) s
+
 -- | Apply the get operation repeatedly to bystring until all bits are done.
 --
 -- This returns a list contain all the values read or the message for the failure.

@@ -61,6 +61,7 @@ module Data.ElfEdit
     -- ** Layout information
   , ElfLayout
   , elfLayout
+  , elfLayoutHeader
   , elfLayoutData
   , elfLayoutClass
   , elfLayoutBytes

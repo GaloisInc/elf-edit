@@ -19,6 +19,7 @@ This defines the 'ElfLayout' class which is used for writing elf files.
 module Data.ElfEdit.Layout
   ( -- * ElfLayout
     ElfLayout
+  , elfLayoutHeader
   , elfLayoutClass
   , elfLayoutData
   , Phdr(..)
