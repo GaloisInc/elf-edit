@@ -96,8 +96,7 @@ testDynSymTable = do
     dynSection <- either (T.assertFailure . show) pure $
         dynamicEntries d cl virtMap dynContents
 
-    syms <- either (T.assertFailure . show) pure $ dynSymTable
-      (dynSection :: DynamicSection X86_64_RelocationType)
+    syms <- either (T.assertFailure . show) pure $ dynSymTable dynSection
     let isVer VersionSpecific{} = True
         isVer VersionLocal  = False
         isVer VersionGlobal = False
