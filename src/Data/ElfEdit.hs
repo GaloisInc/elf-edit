@@ -1,8 +1,8 @@
 {-|
 Module           : Data.ElfEdit.Layout
 Copyright        : (c) Galois, Inc 2016
-Maintainer       : Joe Hendrix <jhendrix@galois.com>
 License          : BSD3
+Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
 This module provides facilities for manipulating ELF files.  It includes
 operations for both reading and writing files a well as inspecting their
