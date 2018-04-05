@@ -21,11 +21,15 @@ module Data.ElfEdit.Relocations
   ( -- * Relocation types
     IsRelocationType(..)
   , RelocationWord
+  , RelEntry(..)
   , RelaEntry(..)
+  , relaToRel
   , isRelativeRelaEntry
   , ppRelaEntries
+  , elfRelEntries
   , elfRelaEntries
     -- ** Relocation width
+  , relEntSize
   , relaEntSize
   , getRelaWord
     -- * Utilities
@@ -91,15 +95,20 @@ ppElfWordHex :: ElfClass w -> ElfWordType w -> String
 ppElfWordHex ELFCLASS32 = ppHex
 ppElfWordHex ELFCLASS64 = ppHex
 
--- | Size of one relocation entry.
+-- | Size of one relocation entry with implicit addend.
+relEntSize :: ElfClass w -> ElfWordType w
+relEntSize ELFCLASS32 = 8
+relEntSize ELFCLASS64 = 16
+
+-- | Size of one relocation entry with explicit addend.
 relaEntSize :: ElfClass w -> ElfWordType w
 relaEntSize ELFCLASS32 = 12
 relaEntSize ELFCLASS64 = 24
 
 -- | Convert info parameter to relocation sym.
-relaSym :: ElfClass w -> ElfWordType w -> Word32
-relaSym ELFCLASS32 info = info `shiftR` 8
-relaSym ELFCLASS64 info = fromIntegral (info `shiftR` 32)
+relocationSymIndex :: ElfClass w -> ElfWordType w -> Word32
+relocationSymIndex ELFCLASS32 info = info `shiftR` 8
+relocationSymIndex ELFCLASS64 info = fromIntegral (info `shiftR` 32)
 
 getRelaWord :: ElfClass w -> ElfData -> Get (ElfWordType w)
 getRelaWord ELFCLASS32 = getWord32
@@ -126,6 +135,9 @@ getRelaInt ELFCLASS64 d = fromIntegral <$> getWord64 d
 -------------------------------------------------------------------------
 -- IsRelocationType
 
+
+data IsSigned = Signed | Unsigned
+
 -- | 'IsRelocationType tp' provide methods associated with
 -- relocations on a particular architecture identified by 'tp'.
 --
@@ -140,8 +152,17 @@ class (Show tp, Show (RelocationWord tp)) => IsRelocationType tp where
   -- The argument is used for typing purposes, and should not actually be evaluated.
   relaWidth :: tp -> ElfClass (RelocationWidth tp)
 
+  -- | Return the number of bits that the rel entry should use for the addend.
+  --
+  -- This is commonly the size of a pointer, but may be smaller for some
+  -- relocation types.  This is used for rel entries, where to compute
+  -- the addend the next @ceiling (bits/8)@ bytes is read out of memory
+  -- as a list of bytes and the low @bits@ are interpreted as a signed
+  -- integer (where low uses the elf's endianness) and sign extended.
+  relocTargetBits :: tp -> Int
+
   -- | Convert unsigned value to type.
-  relaType :: ElfWordType (RelocationWidth tp) -> Maybe tp
+  toRelocType :: ElfWordType (RelocationWidth tp) -> tp
 
   -- | Return true if this is a relative relocation type.
   isRelative :: tp -> Bool
@@ -151,36 +172,76 @@ type RelocationWord tp = ElfWordType (RelocationWidth tp)
 -------------------------------------------------------------------------
 -- RelaEntry
 
--- | A relocation entry
+-- | A relocation entry with an implicit addend that is stored in the
+-- offset being applied.
+data RelEntry tp
+   = Rel { relOffset :: !(RelocationWord tp)
+           -- ^ Offset in section/segment where relocation should be applied.
+         , relSym    :: !Word32
+           -- ^ Index in symbol table this relocation refers to.
+         , relType   :: !tp
+           -- ^ The type of relocation entry
+         }
+
+
+-- | A relocation entry with an explicit addend
 data RelaEntry tp
-   = Rela { r_offset :: !(RelocationWord tp)
+   = Rela { relaOffset :: !(RelocationWord tp)
             -- ^ Offset in section/segment where relocation should be applied.
-          , r_sym    :: Word32
+          , relaSym    :: !Word32
             -- ^ Index in symbol table this relocation refers to.
-          , r_type   :: !tp
+          , relaType   :: !tp
             -- ^ The type of relocation entry
-          , r_addend :: !(ElfIntType (RelocationWidth tp))
+          , relaAddend :: !(ElfIntType (RelocationWidth tp))
             -- ^ The constant addend to apply.
           }
+
+relaToRel :: RelaEntry tp -> RelEntry tp
+relaToRel r = Rel { relOffset = relaOffset r
+                  , relSym = relaSym r
+                  , relType = relaType r
+                  }
 
 instance IsRelocationType tp => Show (RelaEntry tp) where
   show r =  s ""
     where w :: ElfClass (RelocationWidth tp)
-          w = relaWidth (r_type r)
+          w = relaWidth (relaType r)
           s = showString "Rela "
-            . showString (ppElfWordHex w (r_offset r))
+            . showString (ppElfWordHex w (relaOffset r))
             . showChar ' '
-            . showsPrec 10 (r_sym r)
+            . showsPrec 10 (relaSym r)
             . showChar ' '
-            . showsPrec 10 (r_type r)
+            . showsPrec 10 (relaType r)
             . showChar ' '
-            . showElfInt w (showsPrec 10 (r_addend r))
+            . showElfInt w (showsPrec 10 (relaAddend r))
 
 -- | Return true if this is a relative relocation entry.
 isRelativeRelaEntry :: IsRelocationType tp => RelaEntry tp -> Bool
-isRelativeRelaEntry r = isRelative (r_type r)
+isRelativeRelaEntry r = isRelative (relaType r)
 
 -- | Read a relocation entry.
+getRelEntry :: forall tp
+            .  IsRelocationType tp
+            => ElfData
+            -> Get (RelEntry tp)
+getRelEntry d  = do
+  let w :: ElfClass (RelocationWidth tp)
+      w = relaWidth (undefined :: tp)
+  offset <- getRelaWord w d
+  info   <- getRelaWord w d
+  return Rel { relOffset = offset
+             , relSym    = relocationSymIndex w info
+             , relType   = toRelocType info
+             }
+
+-- | Return relocation entries from byte string.
+elfRelEntries :: IsRelocationType tp
+              => ElfData -- ^ Endianess of encodings
+              -> L.ByteString -- ^ Relocation entries
+              -> Either String [RelEntry tp]
+elfRelEntries d = runGetMany (getRelEntry d)
+
+-- | Read a relocation Rela entry.
 getRelaEntry :: forall tp
              .  IsRelocationType tp
              => ElfData
@@ -191,12 +252,10 @@ getRelaEntry d  = do
   offset <- getRelaWord w d
   info   <- getRelaWord w d
   addend <- getRelaInt  w d
-  let msg = "Could not parse relocation type: " ++ ppElfWordHex w info
-  tp <- maybe (fail msg) return $ relaType info
-  return Rela { r_offset = offset
-              , r_sym    = relaSym w info
-              , r_type   = tp
-              , r_addend = addend
+  return Rela { relaOffset = offset
+              , relaSym    = relocationSymIndex w info
+              , relaType   = toRelocType info
+              , relaAddend = addend
               }
 
 -- | Return relocation entries from byte string.
@@ -221,8 +280,8 @@ ppRelaEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
 ppRelaEntry :: IsRelocationType tp => Int -> RelaEntry tp -> [String]
 ppRelaEntry i e =
   [ shows i ":"
-  , ppElfWordHex (relaWidth (r_type e)) (r_offset e)
-  , show (r_sym e)
-  , show (r_type e)
-  , showElfInt (relaWidth (r_type e)) $ show (r_addend e)
+  , ppElfWordHex (relaWidth (relaType e)) (relaOffset e)
+  , show (relaSym e)
+  , show (relaType e)
+  , showElfInt (relaWidth (relaType e)) $ show (relaAddend e)
   ]

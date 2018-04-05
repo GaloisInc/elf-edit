@@ -120,58 +120,75 @@ pattern R_X86_64_TLSDESC_CALL    = X86_64_RelocationType 35
 pattern R_X86_64_TLSDESC         = X86_64_RelocationType 36
 pattern R_X86_64_IRELATIVE       = X86_64_RelocationType 37
 
-x86_64_RelocationTypes :: Map.Map X86_64_RelocationType String
+x86Reloc :: X86_64_RelocationType
+         -> String
+         -> Int
+         -> (X86_64_RelocationType, (String,Int))
+x86Reloc tp nm c = (tp, (nm, c))
+
+-- | @wordclass@ is 64 on LP64 and 32 on LP32.
+--
+-- All our programs are currently LP64, but we use this
+-- constant in case that needs to change.
+wordclass :: Int
+wordclass = 64
+
+
+x86_64_RelocationTypes :: Map.Map X86_64_RelocationType (String,Int)
 x86_64_RelocationTypes = Map.fromList
-  [ (,) R_X86_64_NONE            "R_X86_64_NONE"
-  , (,) R_X86_64_64              "R_X86_64_64"
-  , (,) R_X86_64_PC32            "R_X86_64_PC32"
-  , (,) R_X86_64_GOT32           "R_X86_64_GOT32"
-  , (,) R_X86_64_PLT32           "R_X86_64_PLT32"
-  , (,) R_X86_64_COPY            "R_X86_64_COPY"
-  , (,) R_X86_64_GLOB_DAT        "R_X86_64_GLOB_DAT"
-  , (,) R_X86_64_JUMP_SLOT       "R_X86_64_JUMP_SLOT"
+  [ x86Reloc R_X86_64_NONE            "R_X86_64_NONE"   0
+  , x86Reloc R_X86_64_64              "R_X86_64_64"    64
+  , x86Reloc R_X86_64_PC32            "R_X86_64_PC32"  32
+  , x86Reloc R_X86_64_GOT32           "R_X86_64_GOT32" 32
+  , x86Reloc R_X86_64_PLT32           "R_X86_64_PLT32" 32
+  , x86Reloc R_X86_64_COPY            "R_X86_64_COPY"   0
+  , x86Reloc R_X86_64_GLOB_DAT        "R_X86_64_GLOB_DAT"  wordclass
+  , x86Reloc R_X86_64_JUMP_SLOT       "R_X86_64_JUMP_SLOT" wordclass
 
-  , (,) R_X86_64_RELATIVE        "R_X86_64_RELATIVE"
-  , (,) R_X86_64_GOTPCREL        "R_X86_64_GOTPCREL"
-  , (,) R_X86_64_32              "R_X86_64_32"
-  , (,) R_X86_64_32S             "R_X86_64_32S"
-  , (,) R_X86_64_16              "R_X86_64_16"
-  , (,) R_X86_64_PC16            "R_X86_64_PC16"
-  , (,) R_X86_64_8               "R_X86_64_8"
-  , (,) R_X86_64_PC8             "R_X86_64_PC8"
+  , x86Reloc R_X86_64_RELATIVE        "R_X86_64_RELATIVE"  wordclass
+  , x86Reloc R_X86_64_GOTPCREL        "R_X86_64_GOTPCREL"  32
+  , x86Reloc R_X86_64_32              "R_X86_64_32"        32
+  , x86Reloc R_X86_64_32S             "R_X86_64_32S"       32
+  , x86Reloc R_X86_64_16              "R_X86_64_16"        16
+  , x86Reloc R_X86_64_PC16            "R_X86_64_PC16"      16
+  , x86Reloc R_X86_64_8               "R_X86_64_8"          8
+  , x86Reloc R_X86_64_PC8             "R_X86_64_PC8"        8
+  , x86Reloc R_X86_64_DTPMOD64        "R_X86_64_DTPMOD64"  64
+  , x86Reloc R_X86_64_DTPOFF64        "R_X86_64_DTPOFF64"  64
+  , x86Reloc R_X86_64_TPOFF64         "R_X86_64_TPOFF64"   64
+  , x86Reloc R_X86_64_TLSGD           "R_X86_64_TLSGD"     32
+  , x86Reloc R_X86_64_TLSLD           "R_X86_64_TLSLD"     32
+  , x86Reloc R_X86_64_DTPOFF32        "R_X86_64_DTPOFF32"  32
+  , x86Reloc R_X86_64_GOTTPOFF        "R_X86_64_GOTTPOFF"  32
+  , x86Reloc R_X86_64_TPOFF32         "R_X86_64_TPOFF32"   32
 
-  , (,) R_X86_64_DTPMOD64        "R_X86_64_DTPMOD64"
-  , (,) R_X86_64_DTPOFF64        "R_X86_64_DTPOFF64"
-  , (,) R_X86_64_TPOFF64         "R_X86_64_TPOFF64"
-  , (,) R_X86_64_TLSGD           "R_X86_64_TLSGD"
-  , (,) R_X86_64_TLSLD           "R_X86_64_TLSLD"
-  , (,) R_X86_64_DTPOFF32        "R_X86_64_DTPOFF32"
-  , (,) R_X86_64_GOTTPOFF        "R_X86_64_GOTTPOFF"
-  , (,) R_X86_64_TPOFF32         "R_X86_64_TPOFF32"
-
-  , (,) R_X86_64_PC64            "R_X86_64_PC64"
-  , (,) R_X86_64_GOTOFF64        "R_X86_64_GOTOFF64"
-  , (,) R_X86_64_GOTPC32         "R_X86_64_GOTPC32"
-
-  , (,) R_X86_64_SIZE32          "R_X86_64_SIZE32"
-  , (,) R_X86_64_SIZE64          "R_X86_64_SIZE64"
-  , (,) R_X86_64_GOTPC32_TLSDESC "R_X86_64_GOTPC32_TLSDESC"
-  , (,) R_X86_64_TLSDESC_CALL    "R_X86_64_TLSDESC_CALL"
-  , (,) R_X86_64_TLSDESC         "R_X86_64_TLSDESC"
-  , (,) R_X86_64_IRELATIVE       "R_X86_64_IRELATIVE"
+  , x86Reloc R_X86_64_PC64            "R_X86_64_PC64"      64
+  , x86Reloc R_X86_64_GOTOFF64        "R_X86_64_GOTOFF64"  64
+  , x86Reloc R_X86_64_GOTPC32         "R_X86_64_GOTPC32"   32
+  , x86Reloc R_X86_64_SIZE32          "R_X86_64_SIZE32"    32
+  , x86Reloc R_X86_64_SIZE64          "R_X86_64_SIZE64"    64
+  , x86Reloc R_X86_64_GOTPC32_TLSDESC "R_X86_64_GOTPC32_TLSDESC" 32
+  , x86Reloc R_X86_64_TLSDESC_CALL    "R_X86_64_TLSDESC_CALL"     0
+  , x86Reloc R_X86_64_TLSDESC         "R_X86_64_TLSDESC"        128
+  , x86Reloc R_X86_64_IRELATIVE       "R_X86_64_IRELATIVE" wordclass
   ]
 
 instance Show X86_64_RelocationType where
   show i =
     case Map.lookup i x86_64_RelocationTypes of
-      Just s -> s
+      Just (s,_) -> s
       Nothing -> "0x" ++ showHex (fromX86_64_RelocationType i) ""
 
 instance IsRelocationType X86_64_RelocationType where
   type RelocationWidth X86_64_RelocationType = 64
 
   relaWidth _ = ELFCLASS64
-  relaType = Just . X86_64_RelocationType . fromIntegral
+  toRelocType = X86_64_RelocationType . fromIntegral
 
   isRelative R_X86_64_RELATIVE = True
   isRelative _ = False
+
+  relocTargetBits tp =
+    case Map.lookup tp x86_64_RelocationTypes of
+      Just (_,w) -> w
+      Nothing -> 64

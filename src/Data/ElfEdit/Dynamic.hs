@@ -20,8 +20,9 @@ module Data.ElfEdit.Dynamic
   , dynInit
   , dynFini
   , dynUnparsed
+  , dynRelBuffer
   , dynRelaBuffer
-  , dynRelocations
+  , dynRelaEntries
   , dynPLTRel
   , dynamicEntries
   , getDynamicSectionFromSegments
@@ -114,6 +115,7 @@ data DynamicError
    | VerSymTooSmall
    | ErrorParsingSymTab  !String
    | ErrorParsingRelaEntries !String
+   | IncorrectRelSize
    | IncorrectRelaSize
    | IllegalNameIndex
    | ErrorParsingPLTRelaEntries !String
@@ -136,6 +138,7 @@ instance Show DynamicError where
   show (ErrorParsingVerReqs msg) = "Invalid version reqs: " ++ msg
   show (ErrorParsingSymTab msg) = "Invalid symbol table: " ++ msg
   show (ErrorParsingRelaEntries msg) = "Could not parse relocation entries: " ++ msg
+  show IncorrectRelSize = "DT_RELENT has unexpected size"
   show IncorrectRelaSize = "DT_RELAENT has unexpected size"
   show (ErrorParsingPLTRelaEntries msg) = "Could not parse plt relocation entries: " ++ msg
   show IllegalNameIndex = "The index of the DT_SONAME is illegal."
@@ -711,6 +714,22 @@ getRelaRange startTag sizeTag dm = do
       sz  <- mandatoryDynamicEntry sizeTag dm
       Just <$> addressRangeToFile (startTag, sizeTag) (rela_offset,sz)
 
+-- | Return the buffer containing rel entries from the dynamic section if any.
+dynRelBuffer :: DynamicSection w
+              -> Either DynamicError (Maybe L.ByteString)
+dynRelBuffer ds = do
+  runParser ds $ do
+    mr <- getRelaRange DT_REL DT_RELSZ (dynMap ds)
+    -- Check entry size
+    case mr of
+      Nothing -> pure ()
+      Just{} -> do
+        ent <- mandatoryDynamicEntry DT_RELENT (dynMap ds)
+        let w = dynClass ds
+        when (elfClassInstances (dynClass ds) $ ent /= relEntSize w) $
+          throwError IncorrectRelSize
+    pure mr
+
 -- | Return the buffer containing rela entries from the dynamic section if any.
 dynRelaBuffer :: DynamicSection w
               -> Either DynamicError (Maybe L.ByteString)
@@ -728,11 +747,11 @@ dynRelaBuffer ds = do
     pure mr
 
 -- | Return the runtime relocation entries
-dynRelocations :: forall tp
+dynRelaEntries :: forall tp
                .  IsRelocationType tp
                => DynamicSection (RelocationWidth tp)
                -> Either DynamicError [RelaEntry tp]
-dynRelocations ds = do
+dynRelaEntries ds = do
   dynRelaBuf <- dynRelaBuffer ds
   case dynRelaBuf of
     Nothing -> pure []

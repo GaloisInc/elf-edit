@@ -171,6 +171,8 @@ pattern R_ARM_THM_ALU_ABS_G2_NC  = ARM_RelocationType 134 -- Static Thumb16 S + 
 pattern R_ARM_THM_ALU_ABS_G3     = ARM_RelocationType 135 -- Static Thumb16 S + A
 pattern R_ARM_IRELATIVE          = ARM_RelocationType 160 -- Dynamic Reserved for future functionality
 
+-- ARM_RELOC builds a relocation entry for arm_RelocationTypes
+
 arm_RelocationTypes :: Map.Map ARM_RelocationType String
 arm_RelocationTypes = Map.fromList
   [ (,) R_ARM_NONE               "R_ARM_NONE"
@@ -323,7 +325,14 @@ instance IsRelocationType ARM_RelocationType where
 
   relaWidth _ = ELFCLASS32
 
-  relaType = Just . ARM_RelocationType . fromIntegral
+  relocTargetBits tp =
+    case tp of
+      R_ARM_ABS16 -> 16
+      R_ARM_ABS8  -> 8
+      R_ARM_PREL31 -> 31
+      _ -> 32
+  toRelocType = ARM_RelocationType . fromIntegral
+
 
   isRelative R_ARM_RELATIVE = True
   isRelative _              = False

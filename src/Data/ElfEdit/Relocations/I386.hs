@@ -67,6 +67,15 @@ instance Show I386_RelocationType where
 instance IsRelocationType I386_RelocationType where
   type RelocationWidth I386_RelocationType = 32
   relaWidth _ = ELFCLASS32
-  relaType = Just . I386_RelocationType
+  toRelocType = I386_RelocationType
   isRelative R_386_RELATIVE = True
   isRelative _ = False
+  relocTargetBits tp =
+    case tp of
+      R_386_NONE ->  0
+      R_386_COPY ->  0
+--      R_386_16   -> 16
+--      R_386_PC16 -> 16
+--      R_386_8    ->  8
+--      R_386_PC8  ->  8
+      _ -> 32

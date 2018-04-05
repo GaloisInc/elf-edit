@@ -146,10 +146,15 @@ module Data.ElfEdit
   , pattern STV_PROTECTED
     -- * Relocations
   , IsRelocationType(..)
-  , RelaEntry(..)
   , RelocationWord
+    -- ** Implicit addend
+  , RelEntry(..)
+  , elfRelEntries
+    -- ** Explicit addend
+  , RelaEntry(..)
   , ppRelaEntries
   , elfRelaEntries
+  , relaToRel
     -- ** ARM32 relocations
   , module Data.ElfEdit.Relocations.ARM32
     -- ** 32-bit x86 relocations
