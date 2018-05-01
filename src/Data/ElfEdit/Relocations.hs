@@ -135,9 +135,6 @@ getRelaInt ELFCLASS64 d = fromIntegral <$> getWord64 d
 -------------------------------------------------------------------------
 -- IsRelocationType
 
-
-data IsSigned = Signed | Unsigned
-
 -- | 'IsRelocationType tp' provide methods associated with
 -- relocations on a particular architecture identified by 'tp'.
 --
