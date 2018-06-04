@@ -1,6 +1,4 @@
 flags: {}
 packages:
 - '.'
-extra-deps:
-- tasty-hunit-0.10.0.1
-resolver: lts-10.3
+resolver: lts-11.11
