@@ -16,7 +16,7 @@
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
 #endif
 module Data.ElfEdit.Types
-  ( -- * Top leve ldeclaration
+  ( -- * Top level declarations
     Elf(..)
   , emptyElf
   , elfFileData
@@ -34,6 +34,10 @@ module Data.ElfEdit.Types
   , ElfData(..)
   , fromElfData
   , toElfData
+    -- * ElfHeader
+  , ElfHeader(..)
+  , elfHeader
+  , expectedElfVersion
     -- * ElfDataRegion
   , ElfDataRegion(..)
   , asumDataRegions
@@ -76,6 +80,7 @@ module Data.ElfEdit.Types
   , ElfMemSize(..)
     -- * ElfSegment
   , ElfSegment(..)
+  , SegmentIndex
   , ppSegment
     -- ** Elf segment type
   , ElfSegmentType(..)
@@ -98,12 +103,11 @@ module Data.ElfEdit.Types
     -- ** Elf segment flags
   , ElfSegmentFlags(..)
   , pf_none, pf_x, pf_w, pf_r
-    -- * ElfHeader
-  , ElfHeader(..)
-  , elfHeader
-  , expectedElfVersion
+    -- * GNU-specific extensions
+  , GnuStack(..)
+  , GnuRelroRegion(..)
     -- * Range
-  ,  Range
+  , Range
   , inRange
   , slice
   , sliceL
@@ -533,12 +537,16 @@ pattern PT_LOOS    = ElfSegmentType 0x60000000
 -- | The GCC '.eh_frame_hdr' segment
 pattern PT_GNU_EH_FRAME :: ElfSegmentType
 pattern PT_GNU_EH_FRAME = ElfSegmentType 0x6474e550
+
 -- | Indicates if stack should be executable.
 pattern PT_GNU_STACK :: ElfSegmentType
-pattern PT_GNU_STACK    = ElfSegmentType 0x6474e551
--- | GNU segment with relocation that may be read-only.
+pattern PT_GNU_STACK = ElfSegmentType 0x6474e551
+
+-- | GNU-specific segment type used to indicate that a loadable
+-- segment is initially writable, but can be made read-only after
+-- relocations have been applied.
 pattern PT_GNU_RELRO :: ElfSegmentType
-pattern PT_GNU_RELRO    = ElfSegmentType 0x6474e552
+pattern PT_GNU_RELRO = ElfSegmentType 0x6474e552
 
 -- | End of OS-specific
 pattern PT_HIOS :: ElfSegmentType
@@ -616,6 +624,9 @@ data ElfMemSize w
 ------------------------------------------------------------------------
 -- ElfSegment and ElfDataRegion
 
+-- | The index to use for a segment in the program header table.
+type SegmentIndex = Word16
+
 -- | Information about an elf segment
 --
 -- The parameter should be a 'Word32' or 'Word64' depending on whether this
@@ -625,11 +636,11 @@ data ElfSegment (w :: Nat) = ElfSegment
     -- ^ Segment type
   , elfSegmentFlags     :: !ElfSegmentFlags
     -- ^ Segment flags
-  , elfSegmentIndex     :: !Word16
+  , elfSegmentIndex     :: !SegmentIndex
     -- ^ A 0-based index indicating the position of the segment in the Phdr table
     --
     -- The index of a segment should be unique and range from '0' to one less than
-    -- the number of segemnts in the Elf file.
+    -- the number of segments in the Elf file.
     -- Since the phdr table is typically stored in a loaded segment, the number of
     -- entries affects the layout of binaries.
   , elfSegmentVirtAddr  :: !(ElfWordType w)
@@ -741,6 +752,33 @@ data ElfHeader w = ElfHeader { headerData       :: !ElfData
                              }
 
 ------------------------------------------------------------------------
+-- GnuRelroRegion
+
+-- | Information about a PT_GNU_STACK segment.
+data GnuStack =
+  GnuStack { gnuStackIsExecutable :: !Bool
+             -- ^ Flag that indicates whether the stack should be executable.
+           }
+
+------------------------------------------------------------------------
+-- GnuRelroRegion
+
+-- | Information about a PT_GNU_RELRO segment
+data GnuRelroRegion w =
+  GnuRelroRegion { relroSegmentIndex :: !SegmentIndex
+                -- ^ Index of the segment this relro refers to.
+              , relroAddrStart :: !(ElfWordType w)
+                -- ^ Identifies the base virtual address of the
+                -- region that should be made read-only.
+                --
+                -- This is typically the base address of the segment,
+                -- but could be an offset.  The actual address used is
+                -- the relro rounded down.
+              , relroSize :: !(ElfWordType w)
+                -- ^ Size of relro protection in number of bytes.
+              }
+
+------------------------------------------------------------------------
 -- Elf
 
 -- | The version of elf files supported by this parser
@@ -767,8 +805,12 @@ data Elf w = Elf
       -- ^ Machine specific flags
     , _elfFileData  :: Seq.Seq (ElfDataRegion w)
       -- ^ Data to be stored in elf file.
-    , elfRelroRange :: !(Maybe (Range (ElfWordType w)))
-      -- ^ Range for Elf read-only relocation section.
+    , elfGnuStackSegment :: !(Maybe GnuStack)
+      -- ^ PT_GNU_STACK segment info (if any).
+      --
+      -- If present, this tells loaders that support it whether to set the executable
+    , elfGnuRelroRegions :: ![GnuRelroRegion w]
+      -- ^ PT_GNU_RELRO regions.
     }
 
 -- | Create an empty elf file.
@@ -783,7 +825,8 @@ emptyElf d c tp m = elfClassInstances c $
       , elfEntry      = 0
       , elfFlags      = 0
       , _elfFileData  = Seq.empty
-      , elfRelroRange = Nothing
+      , elfGnuStackSegment = Nothing
+      , elfGnuRelroRegions = []
       }
 
 -- | Return the header information about the elf

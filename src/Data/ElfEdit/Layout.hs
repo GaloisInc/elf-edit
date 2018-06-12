@@ -22,6 +22,7 @@ module Data.ElfEdit.Layout
   , elfLayoutHeader
   , elfLayoutClass
   , elfLayoutData
+  , elfLayoutRegions
   , Phdr(..)
   , phdrFileRange
   , phdrs
@@ -118,6 +119,7 @@ putWord64 ELFDATA2MSB = Bld.word64BE
 
 -- | A offset in the file (implemented as a newtype to avoid confusion with virtual addresses)
 newtype FileOffset w = FileOffset { fromFileOffset :: w }
+  deriving (Eq, Ord)
 
 instance Show w => Show (FileOffset w) where
   show (FileOffset o) = show o
@@ -135,7 +137,12 @@ rangeSize (FileOffset s) (FileOffset e) = assert (e >= s) $ e - s
 -- Phdr
 
 -- | Provides concrete information about an elf segment and its layout.
-data Phdr w = Phdr { phdrSegment   :: !(ElfSegment w)
+data Phdr w = Phdr { phdrSegmentIndex :: !SegmentIndex
+                   , phdrSegmentType  :: !ElfSegmentType
+                   , phdrSegmentFlags :: !ElfSegmentFlags
+                   , phdrSegmentVirtAddr  :: !(ElfWordType w)
+                   , phdrSegmentPhysAddr  :: !(ElfWordType w)
+                   , phdrSegmentAlign     :: !(ElfWordType w)
                    , phdrFileStart :: !(FileOffset (ElfWordType w))
                    , phdrFileSize  :: !(ElfWordType w)
                    , phdrMemSize   :: !(ElfWordType w)
@@ -168,17 +175,16 @@ showSegFlags f =
 
 instance (Integral (ElfWordType w)) => Show (Phdr w) where
   show p = unlines (unwords <$> [ col1, col2 ])
-    where seg = phdrSegment p
-          col1 = [ alignLeft 15 (show (elfSegmentType seg)) ' '
+    where col1 = [ alignLeft 15 (show (phdrSegmentType p)) ' '
                  , "0x" ++ fixedHex 16 (fromFileOffset (phdrFileStart p))
-                 , "0x" ++ fixedHex 16 (elfSegmentVirtAddr seg)
-                 , "0x" ++ fixedHex 16 (elfSegmentPhysAddr seg)
+                 , "0x" ++ fixedHex 16 (phdrSegmentVirtAddr p)
+                 , "0x" ++ fixedHex 16 (phdrSegmentPhysAddr p)
                  ]
           col2 = [ replicate 14 ' '
                  , "0x" ++ fixedHex 16 (phdrFileSize p)
                  , "0x" ++ fixedHex 16 (phdrMemSize  p)
-                 , alignLeft 7 (showSegFlags (elfSegmentFlags seg)) ' '
-                 , fixedHex 0 (toInteger (elfSegmentAlign seg))
+                 , alignLeft 7 (showSegFlags (phdrSegmentFlags p)) ' '
+                 , fixedHex 0 (toInteger (phdrSegmentAlign p))
                  ]
 
 phdrFileRange :: Phdr w -> Range (ElfWordType w)
@@ -604,26 +610,43 @@ addSectionToLayout name_map l s
       in l & elfOutputSize %~ (`incOffset` data_size)
            & shdrs %~ Map.insert idx (s, no, fromFileOffset base)
 
-addRelroToLayout :: Maybe (Range (ElfWordType w)) -> ElfLayout w -> ElfLayout w
-addRelroToLayout Nothing l = l
-addRelroToLayout (Just (f,c)) l = l & phdrs %~ Map.insert idx phdr
-  where idx = fromIntegral (Map.size (l^.phdrs))
-        s = elfClassInstances (elfLayoutClass l) $
-            ElfSegment { elfSegmentType     = PT_GNU_RELRO
-                       , elfSegmentFlags    = pf_r
-                       , elfSegmentIndex    = idx
-                       , elfSegmentVirtAddr = f
-                       , elfSegmentPhysAddr = f
-                       , elfSegmentAlign    = 1
-                       , elfSegmentMemSize  = ElfRelativeSize 0
-                       , elfSegmentData     = Seq.empty
-                       }
+addGnuStackToLayout :: ElfLayout w -> GnuStack -> ElfLayout w
+addGnuStackToLayout l gnuStack = elfClassInstances (elfLayoutClass l) $ do
+  let thisIdx = fromIntegral (Map.size (l^.phdrs))
+  let perm | gnuStackIsExecutable gnuStack = pf_r .|. pf_w .|. pf_x
+           |  otherwise = pf_r .|. pf_w
+  let phdr = Phdr { phdrSegmentIndex = thisIdx
+                  , phdrSegmentType  = PT_GNU_STACK
+                  , phdrSegmentFlags = perm
+                  , phdrSegmentVirtAddr = 0
+                  , phdrSegmentPhysAddr = 0
+                  , phdrSegmentAlign = 0x8
+                  , phdrFileStart = startOfFile
+                  , phdrFileSize  = 0
+                  , phdrMemSize   = 0
+                  }
+   in l & phdrs %~ Map.insert thisIdx phdr
 
-        phdr = Phdr { phdrSegment   = s
-                    , phdrFileStart = FileOffset f
-                    , phdrFileSize  = c
-                    , phdrMemSize   = c
-                    }
+addRelroToLayout :: ElfLayout w -> GnuRelroRegion w -> ElfLayout w
+addRelroToLayout l r = elfClassInstances (elfLayoutClass l) $ do
+  let refIdx = relroSegmentIndex r
+  let vaddr = relroAddrStart r
+  case Map.lookup refIdx (l^.phdrs) of
+    Nothing -> error $ "Error segment index " ++ show refIdx ++ " could not be found."
+    Just refPhdr -> do
+      let thisIdx = fromIntegral (Map.size (l^.phdrs))
+          fstart = phdrFileStart refPhdr `incOffset` (vaddr - phdrSegmentVirtAddr refPhdr)
+          phdr = Phdr { phdrSegmentIndex = thisIdx
+                      , phdrSegmentType  = PT_GNU_RELRO
+                      , phdrSegmentFlags = pf_r
+                      , phdrSegmentVirtAddr = vaddr
+                      , phdrSegmentPhysAddr = vaddr
+                      , phdrSegmentAlign = 1
+                      , phdrFileStart = fstart
+                      , phdrFileSize  = relroSize r
+                      , phdrMemSize   = relroSize r
+                      }
+       in l & phdrs %~ Map.insert thisIdx phdr
 
 ------------------------------------------------------------------------
 -- Layout information
@@ -718,26 +741,26 @@ ehdrFields ELFCLASS64 = ehdr64Fields
 
 phdr32Fields :: ElfRecord (Phdr 32)
 phdr32Fields =
-  [ ("p_type",   EFWord32 $ fromElfSegmentType . elfSegmentType . phdrSegment)
+  [ ("p_type",   EFWord32 $ fromElfSegmentType . phdrSegmentType)
   , ("p_offset", EFWord32 $ fromFileOffset . phdrFileStart)
-  , ("p_vaddr",  EFWord32 $ elfSegmentVirtAddr . phdrSegment)
-  , ("p_paddr",  EFWord32 $ elfSegmentPhysAddr . phdrSegment)
+  , ("p_vaddr",  EFWord32 $ phdrSegmentVirtAddr)
+  , ("p_paddr",  EFWord32 $ phdrSegmentPhysAddr)
   , ("p_filesz", EFWord32 $ phdrFileSize)
   , ("p_memsz",  EFWord32 $ phdrMemSize)
-  , ("p_flags",  EFWord32 $ fromElfSegmentFlags . elfSegmentFlags . phdrSegment)
-  , ("p_align",  EFWord32 $                       elfSegmentAlign . phdrSegment)
+  , ("p_flags",  EFWord32 $ fromElfSegmentFlags . phdrSegmentFlags)
+  , ("p_align",  EFWord32 $ phdrSegmentAlign)
   ]
 
 phdr64Fields :: ElfRecord (Phdr 64)
 phdr64Fields =
-  [ ("p_type",   EFWord32 $ fromElfSegmentType  . elfSegmentType  . phdrSegment)
-  , ("p_flags",  EFWord32 $ fromElfSegmentFlags . elfSegmentFlags . phdrSegment)
+  [ ("p_type",   EFWord32 $ fromElfSegmentType  . phdrSegmentType)
+  , ("p_flags",  EFWord32 $ fromElfSegmentFlags . phdrSegmentFlags)
   , ("p_offset", EFWord64 $ fromFileOffset . phdrFileStart)
-  , ("p_vaddr",  EFWord64 $ elfSegmentVirtAddr . phdrSegment)
-  , ("p_paddr",  EFWord64 $ elfSegmentPhysAddr . phdrSegment)
+  , ("p_vaddr",  EFWord64 $ phdrSegmentVirtAddr)
+  , ("p_paddr",  EFWord64 $ phdrSegmentPhysAddr)
   , ("p_filesz", EFWord64 $ phdrFileSize)
   , ("p_memsz",  EFWord64 $ phdrMemSize)
-  , ("p_align",  EFWord64 $ elfSegmentAlign    . phdrSegment)
+  , ("p_align",  EFWord64 $ phdrSegmentAlign)
   ]
 
 phdrFields :: ElfClass w -> ElfRecord (Phdr w)
@@ -907,10 +930,9 @@ elfLayout' e = final
 
         (this_strtab_data, this_strtab_map) = stringTable (elfSymtabNames e)
 
-        has_relro = isJust (elfRelroRange e)
-
         phdr_cnt = elfSegmentCount e
-                 + (if has_relro then 1 else 0)
+                 + (if isJust (elfGnuStackSegment e) then 1 else 0)
+                 + length (elfGnuRelroRegions e)
 
         -- Section names can be determed from counter
         shdr_cnt = length sec_names + 1
@@ -943,7 +965,7 @@ elfLayout' e = final
         layoutRegion l (ElfDataSegment s) = l3
           where -- Update layout by folding over segment data.
                 l2 :: ElfLayout w
-                l2 = l & flip (foldl layoutRegion) (elfSegmentData s)
+                l2 = foldl layoutRegion l (elfSegmentData s)
                 -- Get bytes at start of elf
                 seg_offset = l^.elfOutputSize
                 seg_size   = rangeSize seg_offset (l2^.elfOutputSize)
@@ -954,7 +976,12 @@ elfLayout' e = final
                     ElfAbsoluteSize sz -> max seg_size sz
                     -- Relative sizes are offsets of the computed sizes.
                     ElfRelativeSize o  -> seg_size + o
-                phdr = Phdr { phdrSegment = s
+                phdr = Phdr { phdrSegmentIndex = elfSegmentIndex s
+                            , phdrSegmentType = elfSegmentType s
+                            , phdrSegmentFlags = elfSegmentFlags s
+                            , phdrSegmentVirtAddr = elfSegmentVirtAddr s
+                            , phdrSegmentPhysAddr = elfSegmentPhysAddr s
+                            , phdrSegmentAlign = elfSegmentAlign s
                             , phdrFileStart = seg_offset
                             , phdrFileSize  = seg_size
                             , phdrMemSize   = mem_size
@@ -982,8 +1009,9 @@ elfLayout' e = final
         layoutRegion l (ElfDataRaw b) =
           l & elfOutputSize %~ (`incOffset` fromIntegral (B.length b))
 
-        final = initl & flip (foldl layoutRegion) (e^.elfFileData)
-                      & addRelroToLayout (elfRelroRange e)
+        final = initl & flip (F.foldl' layoutRegion) (e^.elfFileData)
+                      & flip (F.foldl' addGnuStackToLayout) (elfGnuStackSegment e)
+                      & flip (F.foldl' addRelroToLayout)    (elfGnuRelroRegions e)
 
 
 -- | Return layout information from elf file.

@@ -64,6 +64,7 @@ module Data.ElfEdit
   , elfLayoutHeader
   , elfLayoutData
   , elfLayoutClass
+  , elfLayoutRegions
   , elfLayoutBytes
   , elfLayoutSize
   , elfMagic
@@ -159,11 +160,8 @@ module Data.ElfEdit
   , module Data.ElfEdit.Relocations.ARM32
     -- ** 32-bit x86 relocations
   , module Data.ElfEdit.Relocations.I386
-    -- * 64-bit x86 relocations
+    -- ** 64-bit x86 relocations
   , module Data.ElfEdit.Relocations.X86_64
-    -- ** Relocation utilities
-  , ElfWordType
-  , ElfIntType
     -- * Dynamic symbol table and relocations
   , DynamicSection(..)
   , module Data.ElfEdit.Dynamic
@@ -171,11 +169,16 @@ module Data.ElfEdit
   , Range
   , hasPermissions
   , stringTable
+  , ElfWordType
+  , ElfIntType
     -- * Constraints
   , ElfWidthConstraints
     -- * Header parse information
   , ElfHeaderInfo
   , getElf
+    -- * Gnu-specific extensions
+  , GnuStack(..)
+  , GnuRelroRegion(..)
   ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)
