@@ -50,6 +50,7 @@ import qualified Data.Map.Strict as Map
 import           Data.Maybe
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
+import GHC.Stack
 import           GHC.TypeLits
 import           Numeric (showHex)
 
@@ -70,17 +71,17 @@ import           Data.ElfEdit.Types
 
 -- | An error that occurs when looking up a string in a table
 data LookupStringError
-   = IllegalStrtabIndex
+   = IllegalStrtabIndex !Word32
    | MissingNullTerminator
 
 instance Show LookupStringError where
-  show IllegalStrtabIndex = "Illegal strtab index"
-  show MissingNullTerminator = "Missing null terminator in strtab"
+  show (IllegalStrtabIndex i) = "Illegal strtab index " ++ show i ++ "."
+  show MissingNullTerminator = "Missing null terminator in strtab."
 
 -- | Returns null-terminated string at given index in bytestring, or returns
 -- error if that fails.
 lookupString :: Word32 -> B.ByteString -> Either LookupStringError B.ByteString
-lookupString o b | toInteger o >= toInteger (B.length b) = Left IllegalStrtabIndex
+lookupString o b | toInteger o >= toInteger (B.length b) = Left $ IllegalStrtabIndex o
                  | B.length r == B.length s = Left MissingNullTerminator
                  | otherwise = Right r
   where s = B.drop (fromIntegral o) b
@@ -456,21 +457,22 @@ regionSize esi = elfClassInstances (headerClass (header (esiHeaderInfo esi))) $ 
 
 -- | Parse program header at given index
 phdrByIndex :: ElfHeaderInfo w -- ^ Information for parsing
-               -> Word16 -- ^ Index
-               -> Phdr w
+            -> Word16 -- ^ Index
+            -> Phdr w
 phdrByIndex ehi i = elfClassInstances (headerClass (header ehi)) $
   Get.runGet (getPhdr ehi i) (tableEntry (phdrTable ehi) i (fileContents ehi))
 
 -- Return section
-getSection' :: ElfHeaderInfo w
+getSection' :: HasCallStack
+            => ElfHeaderInfo w
             -> Maybe B.ByteString -- ^ String table (if defined)
             -> Word16 -- ^ Index of section.
             -> (Range (ElfWordType w), ElfSection (ElfWordType w))
-getSection' ehi mstrtab i =
-    elfClassInstances (headerClass (header ehi)) $
-      Get.runGet (getShdr ehi i mstrtab)
-                 (tableEntry (shdrTable ehi) i file)
-  where file = fileContents ehi
+getSection' ehi mstrtab i = elfClassInstances (headerClass (header ehi)) $ do
+  let file = fileContents ehi
+  case Get.runGetOrFail (getShdr ehi i mstrtab) (tableEntry (shdrTable ehi) i file) of
+    Left (_,_,msg) -> error msg
+    Right (_,_,v) -> v
 
 nameSectionInfo :: ElfHeaderInfo w
                 -> (Range (ElfWordType w), B.ByteString)
