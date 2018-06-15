@@ -756,7 +756,9 @@ data ElfHeader w = ElfHeader { headerData       :: !ElfData
 
 -- | Information about a PT_GNU_STACK segment.
 data GnuStack =
-  GnuStack { gnuStackIsExecutable :: !Bool
+  GnuStack { gnuStackSegmentIndex :: !SegmentIndex
+             -- ^ Index to use for GNU stack.
+           , gnuStackIsExecutable :: !Bool
              -- ^ Flag that indicates whether the stack should be executable.
            }
 
@@ -766,17 +768,19 @@ data GnuStack =
 -- | Information about a PT_GNU_RELRO segment
 data GnuRelroRegion w =
   GnuRelroRegion { relroSegmentIndex :: !SegmentIndex
-                -- ^ Index of the segment this relro refers to.
-              , relroAddrStart :: !(ElfWordType w)
-                -- ^ Identifies the base virtual address of the
-                -- region that should be made read-only.
-                --
-                -- This is typically the base address of the segment,
-                -- but could be an offset.  The actual address used is
-                -- the relro rounded down.
-              , relroSize :: !(ElfWordType w)
-                -- ^ Size of relro protection in number of bytes.
-              }
+                 -- ^ Index to use for Relro region.
+                 , relroRefSegmentIndex :: !SegmentIndex
+                 -- ^ Index of the segment this relro refers to.
+                 , relroAddrStart :: !(ElfWordType w)
+                 -- ^ Identifies the base virtual address of the
+                 -- region that should be made read-only.
+                 --
+                 -- This is typically the base address of the segment,
+                 -- but could be an offset.  The actual address used is
+                 -- the relro rounded down.
+                 , relroSize :: !(ElfWordType w)
+                 -- ^ Size of relro protection in number of bytes.
+                 }
 
 ------------------------------------------------------------------------
 -- Elf

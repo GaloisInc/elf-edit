@@ -242,7 +242,8 @@ asRelroRegion segMap phdr = do
     Nothing -> warn UnassociatedGnuRelro >> pure Nothing
     Just (_,refIdx) -> do
       pure $ Just $
-        GnuRelroRegion { relroSegmentIndex = refIdx
+        GnuRelroRegion { relroSegmentIndex = phdrSegmentIndex phdr
+                       , relroRefSegmentIndex = refIdx
                        , relroAddrStart    = phdrSegmentVirtAddr phdr
                        , relroSize         = phdrFileSize phdr
                        }
@@ -854,7 +855,8 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
           gnuStackWarning $ "Unexpected flags: " ++ show flags
 
         let isExec = (flags .&. pf_x) == pf_x
-        let gnuStack = GnuStack { gnuStackIsExecutable = isExec
+        let gnuStack = GnuStack { gnuStackSegmentIndex = phdrSegmentIndex stackPhdr
+                                , gnuStackIsExecutable = isExec
                                 }
         pure $ Just gnuStack
 

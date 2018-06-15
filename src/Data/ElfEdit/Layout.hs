@@ -622,7 +622,7 @@ addSectionToLayout name_map l s
 
 addGnuStackToLayout :: ElfLayout w -> GnuStack -> ElfLayout w
 addGnuStackToLayout l gnuStack = elfClassInstances (elfLayoutClass l) $ do
-  let thisIdx = fromIntegral (Map.size (l^.phdrs))
+  let thisIdx = gnuStackSegmentIndex gnuStack
   let perm | gnuStackIsExecutable gnuStack = pf_r .|. pf_w .|. pf_x
            |  otherwise = pf_r .|. pf_w
   let phdr = Phdr { phdrSegmentIndex = thisIdx
@@ -639,13 +639,13 @@ addGnuStackToLayout l gnuStack = elfClassInstances (elfLayoutClass l) $ do
 
 addRelroToLayout :: ElfLayout w -> GnuRelroRegion w -> ElfLayout w
 addRelroToLayout l r = elfClassInstances (elfLayoutClass l) $ do
-  let refIdx = relroSegmentIndex r
+  let thisIdx = relroSegmentIndex r
+  let refIdx = relroRefSegmentIndex r
   let vaddr = relroAddrStart r
   case Map.lookup refIdx (l^.phdrs) of
     Nothing -> error $ "Error segment index " ++ show refIdx ++ " could not be found."
     Just refPhdr -> do
-      let thisIdx = fromIntegral (Map.size (l^.phdrs))
-          fstart = phdrFileStart refPhdr `incOffset` (vaddr - phdrSegmentVirtAddr refPhdr)
+      let fstart = phdrFileStart refPhdr `incOffset` (vaddr - phdrSegmentVirtAddr refPhdr)
           phdr = Phdr { phdrSegmentIndex = thisIdx
                       , phdrSegmentType  = PT_GNU_RELRO
                       , phdrSegmentFlags = pf_r
