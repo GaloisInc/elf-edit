@@ -439,7 +439,7 @@ data ElfSizingInfo (w :: Nat)
 regionSize :: forall w . ElfSizingInfo w -> ElfDataRegion w -> ElfWordType w
 regionSize esi = esiInstances esi $ sizeOf
   where ehi = esiHeaderInfo esi
-        sizeOf :: ElfWidthConstraints w => ElfDataRegion w -> ElfWordType w
+        sizeOf :: Integral (ElfWordType w) => ElfDataRegion w -> ElfWordType w
         sizeOf ElfDataElfHeader            = fromIntegral $ ehdrSize ehi
         sizeOf ElfDataSegmentHeaders       = tableSize $ phdrTable ehi
         sizeOf (ElfDataSegment s)          = sum $ sizeOf <$> elfSegmentData s
