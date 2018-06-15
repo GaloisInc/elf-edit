@@ -97,6 +97,7 @@ module Data.ElfEdit.Types
   , pattern PT_GNU_EH_FRAME
   , pattern PT_GNU_STACK
   , pattern PT_GNU_RELRO
+  , pattern PT_PAX_FLAGS
   , pattern PT_HIOS
   , pattern PT_LOPROC
   , pattern PT_HIPROC
@@ -548,6 +549,10 @@ pattern PT_GNU_STACK = ElfSegmentType 0x6474e551
 pattern PT_GNU_RELRO :: ElfSegmentType
 pattern PT_GNU_RELRO = ElfSegmentType 0x6474e552
 
+-- | Indicates this binary uses PAX.
+pattern PT_PAX_FLAGS :: ElfSegmentType
+pattern PT_PAX_FLAGS = ElfSegmentType 0x65041580
+
 -- | End of OS-specific
 pattern PT_HIOS :: ElfSegmentType
 pattern PT_HIOS    = ElfSegmentType 0x6fffffff
@@ -572,13 +577,14 @@ elfSegmentTypeNameMap = Map.fromList $
   , (,) PT_GNU_EH_FRAME "GNU_EH_FRAME"
   , (,) PT_GNU_STACK    "GNU_STACK"
   , (,) PT_GNU_RELRO    "GNU_RELRO"
+  , (,) PT_PAX_FLAGS    "PAX_FLAGS"
   ]
 
 instance Show ElfSegmentType where
   show tp =
     case Map.lookup tp elfSegmentTypeNameMap of
       Just s -> "PT_" ++ s
-      Nothing -> "ElfSegmentType " ++ show (fromElfSegmentType tp)
+      Nothing -> "0x" ++ showHex (fromElfSegmentType tp) ""
 
 ------------------------------------------------------------------------
 -- ElfSegmentFlags

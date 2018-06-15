@@ -621,42 +621,49 @@ addSectionToLayout name_map l s
            & shdrs %~ Map.insert idx (s, no, fromFileOffset base)
 
 addGnuStackToLayout :: ElfLayout w -> GnuStack -> ElfLayout w
-addGnuStackToLayout l gnuStack = elfClassInstances (elfLayoutClass l) $ do
-  let thisIdx = gnuStackSegmentIndex gnuStack
-  let perm | gnuStackIsExecutable gnuStack = pf_r .|. pf_w .|. pf_x
-           |  otherwise = pf_r .|. pf_w
-  let phdr = Phdr { phdrSegmentIndex = thisIdx
-                  , phdrSegmentType  = PT_GNU_STACK
-                  , phdrSegmentFlags = perm
-                  , phdrSegmentVirtAddr = 0
-                  , phdrSegmentPhysAddr = 0
-                  , phdrSegmentAlign = 0x8
-                  , phdrFileStart = startOfFile
-                  , phdrFileSize  = 0
-                  , phdrMemSize   = 0
+addGnuStackToLayout l gnuStack
+  | Map.member (gnuStackSegmentIndex gnuStack) (l^.phdrs) =
+      error $ "Gnu stack segment index " ++ show (gnuStackSegmentIndex gnuStack)
+         ++ " already exists."
+  | otherwise = elfClassInstances (elfLayoutClass l) $ do
+      let thisIdx = gnuStackSegmentIndex gnuStack
+          perm | gnuStackIsExecutable gnuStack = pf_r .|. pf_w .|. pf_x
+               |  otherwise = pf_r .|. pf_w
+          phdr = Phdr { phdrSegmentIndex = thisIdx
+                      , phdrSegmentType  = PT_GNU_STACK
+                      , phdrSegmentFlags = perm
+                      , phdrSegmentVirtAddr = 0
+                      , phdrSegmentPhysAddr = 0
+                      , phdrSegmentAlign = 0x8
+                      , phdrFileStart = startOfFile
+                      , phdrFileSize  = 0
+                      , phdrMemSize   = 0
                   }
-   in l & phdrs %~ Map.insert thisIdx phdr
+       in l & phdrs %~ Map.insert thisIdx phdr
 
 addRelroToLayout :: ElfLayout w -> GnuRelroRegion w -> ElfLayout w
-addRelroToLayout l r = elfClassInstances (elfLayoutClass l) $ do
-  let thisIdx = relroSegmentIndex r
-  let refIdx = relroRefSegmentIndex r
-  let vaddr = relroAddrStart r
-  case Map.lookup refIdx (l^.phdrs) of
-    Nothing -> error $ "Error segment index " ++ show refIdx ++ " could not be found."
-    Just refPhdr -> do
-      let fstart = phdrFileStart refPhdr `incOffset` (vaddr - phdrSegmentVirtAddr refPhdr)
-          phdr = Phdr { phdrSegmentIndex = thisIdx
-                      , phdrSegmentType  = PT_GNU_RELRO
-                      , phdrSegmentFlags = pf_r
-                      , phdrSegmentVirtAddr = vaddr
-                      , phdrSegmentPhysAddr = vaddr
-                      , phdrSegmentAlign = 1
-                      , phdrFileStart = fstart
-                      , phdrFileSize  = relroSize r
-                      , phdrMemSize   = relroSize r
-                      }
-       in l & phdrs %~ Map.insert thisIdx phdr
+addRelroToLayout l r
+  | Map.member (relroSegmentIndex r) (l^.phdrs) =
+    error $ "Relro has duplicate index"
+  | otherwise = elfClassInstances (elfLayoutClass l) $ do
+      let refIdx = relroRefSegmentIndex r
+      case Map.lookup refIdx (l^.phdrs) of
+        Nothing -> error $ "Error segment index " ++ show refIdx ++ " could not be found."
+        Just refPhdr ->
+          let thisIdx = relroSegmentIndex r
+              vaddr = relroAddrStart r
+              fstart = phdrFileStart refPhdr `incOffset` (vaddr - phdrSegmentVirtAddr refPhdr)
+              phdr = Phdr { phdrSegmentIndex = thisIdx
+                          , phdrSegmentType  = PT_GNU_RELRO
+                          , phdrSegmentFlags = pf_r
+                          , phdrSegmentVirtAddr = vaddr
+                          , phdrSegmentPhysAddr = vaddr
+                          , phdrSegmentAlign = 1
+                          , phdrFileStart = fstart
+                          , phdrFileSize  = relroSize r
+                          , phdrMemSize   = relroSize r
+                          }
+           in l & phdrs %~ Map.insert thisIdx phdr
 
 ------------------------------------------------------------------------
 -- Layout information
