@@ -81,7 +81,7 @@ testDynSymTable = do
     let l  = elfLayout e
     let ph = allPhdrs l
     dynPhdr <-
-      case filter (hasSegmentType PT_DYNAMIC . phdrSegment) ph of
+      case filter (\p -> phdrSegmentType p == PT_DYNAMIC) ph of
         [r] -> pure r
         _ -> T.assertFailure "Could not find DYNAMIC section"
     let d  = elfLayoutData l

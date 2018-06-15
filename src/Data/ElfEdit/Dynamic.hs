@@ -84,7 +84,7 @@ virtAddrMap file = foldlM ins Map.empty
   where -- Insert phdr into map if it is loadable
         ins m phdr
             -- If segment is not loadable or empty, leave map unchanged
-          | elfSegmentType seg /= PT_LOAD || n == 0 = pure m
+          | phdrSegmentType phdr /= PT_LOAD || n == 0 = pure m
             -- If segment overlaps with a previous segment, then return
             -- 'Nothing' to indicate an error.
           | Just (prev, old) <- Map.lookupLE addr m
@@ -92,8 +92,7 @@ virtAddrMap file = foldlM ins Map.empty
             -- Insert phdr into map
           | otherwise =
             pure $! Map.insert addr new_contents m
-          where seg = phdrSegment phdr
-                addr = elfSegmentVirtAddr seg
+          where addr = phdrSegmentVirtAddr phdr
                 FileOffset dta = phdrFileStart phdr
                 n              = phdrFileSize phdr
                 new_contents   = sliceL (dta,n) file
@@ -610,7 +609,7 @@ getDynamicSectionFromSegments :: ElfHeader w
                               -- ^ Maps start of memory offsets in Elf file to contents.
                               -> Maybe (Either DynamicError (DynamicSection w))
 getDynamicSectionFromSegments hdr ph contents virtMap = elfClassInstances (headerClass hdr) $ do
-  case filter (\phdr -> elfSegmentType (phdrSegment phdr) == PT_DYNAMIC) ph of
+  case filter (\phdr -> phdrSegmentType phdr == PT_DYNAMIC) ph of
     [] -> Nothing
     dynPhdr:dynRest | null dynRest -> do
       let dynContents = sliceL (phdrFileRange dynPhdr) contents
