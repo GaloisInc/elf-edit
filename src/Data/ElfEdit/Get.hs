@@ -424,9 +424,6 @@ data ElfHeaderInfo w = ElfHeaderInfo {
 rawSegments :: ElfHeaderInfo w -> [Phdr w]
 rawSegments ehi = phdrByIndex ehi <$> enumCnt 0 (entryNum (phdrTable ehi))
 
--- | Returns size of region.
-type RegionSizeFn (w :: Nat) = ElfDataRegion w -> ElfWordType w
-
 -- | Information needed to compute region sizes.
 data ElfSizingInfo (w :: Nat)
    = ElfSizingInfo
@@ -439,11 +436,10 @@ data ElfSizingInfo (w :: Nat)
      }
 
 -- | Return filesize of region given some additional information.
-regionSize :: forall w . ElfSizingInfo w
-           -> RegionSizeFn w
-regionSize esi = elfClassInstances (headerClass (header (esiHeaderInfo esi))) $ sizeOf
+regionSize :: forall w . ElfSizingInfo w -> ElfDataRegion w -> ElfWordType w
+regionSize esi = esiInstances esi $ sizeOf
   where ehi = esiHeaderInfo esi
-        sizeOf :: ElfWidthConstraints w => RegionSizeFn w
+        sizeOf :: ElfWidthConstraints w => ElfDataRegion w -> ElfWordType w
         sizeOf ElfDataElfHeader            = fromIntegral $ ehdrSize ehi
         sizeOf ElfDataSegmentHeaders       = tableSize $ phdrTable ehi
         sizeOf (ElfDataSegment s)          = sum $ sizeOf <$> elfSegmentData s
@@ -560,8 +556,8 @@ insertRawRegion b r | B.length b == 0 = r
 
 -- | Insert an elf data region at a given offset.
 insertAtOffset :: Integral (ElfWordType w)
-               => RegionSizeFn w
-                  -- ^ Function for getting size of a region.
+               => ElfSizingInfo w
+                  -- ^ Information for getting size of a region.
                -> (Range (ElfWordType w) -> RegionPrefixFn w)
                   -- ^ Insert function
                -> Range (ElfWordType w)
@@ -569,7 +565,7 @@ insertAtOffset :: Integral (ElfWordType w)
                -> Seq.Seq (ElfDataRegion w)
                   -- ^ Existing sequence to insert into.
                -> GetResult (ElfInsertError w) (Seq.Seq (ElfDataRegion w))
-insertAtOffset sizeOf fn rng@(o,c) r0 =
+insertAtOffset esi fn rng@(o,c) r0 =
   case Seq.viewl r0 of
     Seq.EmptyL
       | rng == (0,0) ->
@@ -580,13 +576,13 @@ insertAtOffset sizeOf fn rng@(o,c) r0 =
     p Seq.:< r
       -- Go to next segment if offset to insert is after p.
       | o >= sz ->
-        (p Seq.<|) <$> insertAtOffset sizeOf fn (o-sz,c) r
+        (p Seq.<|) <$> insertAtOffset esi fn (o-sz,c) r
         -- Recurse inside segment if p is a segment that contains region to insert.
         -- New region ends before p ends and p is a segment.
       | o + c <= sz, ElfDataSegment s <- p ->
         let combine seg_data' = ElfDataSegment s' Seq.<| r
                 where s' = s { elfSegmentData = seg_data' }
-         in combine <$> insertAtOffset sizeOf fn rng (elfSegmentData s)
+         in combine <$> insertAtOffset esi fn rng (elfSegmentData s)
         -- Insert into current region when offset is 0 or when size is 0
       | o == 0 || c == 0 -> pure $! fn rng r0
         -- Split a raw segment into prefix and post.
@@ -602,7 +598,7 @@ insertAtOffset sizeOf fn rng@(o,c) r0 =
       | otherwise -> do
         warn (OverlapSegment p rng)
         pure ((p Seq.<|) $! fn (o,c) r)
-     where sz = sizeOf p
+     where sz = regionSize esi p
 
 -- | Insert a leaf region into the region.
 insertSpecialRegion :: forall w
@@ -615,7 +611,7 @@ insertSpecialRegion :: forall w
 insertSpecialRegion esi nm r n segs
     = esiInstances esi
     $ mapError (ElfInsertError nm)
-    $ insertAtOffset (regionSize esi) fn r segs
+    $ insertAtOffset esi fn r segs
   where c = snd r
         -- Insert function
         fn :: ElfWidthConstraints w => Range (ElfWordType w) -> RegionPrefixFn w
@@ -690,7 +686,7 @@ insertSegment esi segs phdr = esiInstances esi $ do
             Seq.EmptyL -> error "insertSegment: Data ended before completion"
   -- TODO: See if we can do better than dropping the segment.
   mapError (ElfInsertError ("segment" ++ show (phdrSegmentIndex phdr))) $
-    insertAtOffset (regionSize esi) (\_ -> gather szd Seq.empty) rng segs
+    insertAtOffset esi (\_ -> gather szd Seq.empty) rng segs
 
 -- | Get list of sections from Elf parse info.
 -- This includes the initial section
