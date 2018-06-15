@@ -43,12 +43,13 @@ module Data.ElfEdit.Layout
   , traverseElfSegments
   , traverseElfDataRegions
   , updateSegments
+  -- * FileOffset
+  , FileOffset(..)
     -- * Low level constants
   , elfMagic
   , ehdrSize
   , phdrEntrySize
   , shdrEntrySize
-  , FileOffset(..)
   , stringTable
   , strtabSection
   , symbolTableEntrySize
@@ -809,17 +810,34 @@ buildElfSectionHeaderTable hdr sl = mconcat $ writeRecord (shdrFields cl) d <$> 
         cl = headerClass hdr
 
 -- | Utility that validates alignment
-checkAlignment :: (Bits w, Integral w, Show w)
-               => Bool -> String -> FileOffset w -> w -> w -> a -> a
-checkAlignment doCheck nm off addr align r
-    | doCheck && not isAligned =
+checkSegmentFileAlignment :: (Bits w, Integral w, Show w)
+                          => String
+                          -> FileOffset w
+                             -- ^ Offset in file to check
+                          -> w
+                             -- ^ Address of segment
+                          -> w
+                             -- ^ Alignemnt of segment
+                          -> a
+                             -- ^ Value to return if check suceeds.
+                          -> a
+checkSegmentFileAlignment nm off addr align r
+    | (fromFileOffset off .&. (align - 1)) /= (addr .&. (align - 1)) =
       error $ nm
           ++ " address of 0x" ++ showHex addr " and file offset 0x"
           ++ showHex (fromFileOffset off) ""
           ++ " do not respect the alignment of 0x" ++ showHex align "."
     | otherwise = r
-  where mask = align - 1
-        isAligned = (fromFileOffset off .&. mask) == (addr .&. mask)
+
+-- | Utility that validates alignment of the section address.
+checkSectionAlignment :: (Bits w, Integral w, Show w)
+                      => String -> Int -> w -> w -> a -> a
+checkSectionAlignment nm sz addr align r
+    | sz /= 0 &&  (addr .&. (align - 1)) /= 0 =
+      error $ nm
+          ++ " address of 0x" ++ showHex addr ""
+          ++ " does not respect the alignment of 0x" ++ showHex align "."
+    | otherwise = r
 
 -- | Render the given list of regions at a particular file offeset.
 buildRegions :: forall w
@@ -864,7 +882,7 @@ buildRegions l o ((reg,inLoad):rest) = do
           <> buildRegions l (o' `incOffset` phdrSize) rest
     ElfDataSegment s -> do
       let nm = "segment " ++ show (elfSegmentIndex s)
-      checkAlignment True nm o (elfSegmentVirtAddr s) (elfSegmentAlign s) $
+      checkSegmentFileAlignment nm o (elfSegmentVirtAddr s) (elfSegmentAlign s) $
         buildRegions l o $ ((,True) <$> F.toList (elfSegmentData s)) ++ rest
     ElfDataSectionHeaders -> do
       -- The section header table should be aligned to (shdrAlign cl)
@@ -878,10 +896,11 @@ buildRegions l o ((reg,inLoad):rest) = do
       Bld.byteString (elfLayoutSectionNameData l)
         <> doRest sz
     ElfDataGOT g -> do
-      let align = elfGotAddrAlign g
+      let align :: ElfWordType w
+          align = elfGotAddrAlign g
       let dta = elfGotData g
       let sz = B.length dta
-      checkAlignment (sz /= 0) ".got" o (elfGotAddr g) align $
+      checkSectionAlignment ".got" sz (elfGotAddr g) align $
         Bld.byteString dta <> doRest (fromIntegral sz)
     ElfDataStrtab _ ->
       -- String tables may appear at any offset.
@@ -895,11 +914,19 @@ buildRegions l o ((reg,inLoad):rest) = do
         symtabData cl (headerData hdr) (strtab_map l) symtab
           <> buildRegions l (o' `incOffset` sz) rest
     ElfDataSection s -> do
-      let align = elfSectionAddrAlign s
+      let nm = BSC.unpack (elfSectionName s)
+      let align :: ElfWordType w
+          align = elfSectionAddrAlign s
       let dta = elfSectionData s
-      let sz = B.length dta
-      checkAlignment (sz /= 0) (BSC.unpack (elfSectionName s)) o (elfSectionAddr s) align $
-        Bld.byteString dta <> doRest (fromIntegral (B.length dta))
+      let sz :: Int
+          sz = B.length dta
+      -- Check addr
+      checkSectionAlignment nm sz (elfSectionAddr s) align $
+        -- If the section contains no data (e.g., ".bss") then we ignore
+        -- the file alignment constraint.
+        padAt nm (if sz == 0 then 1 else align) $ \o' ->
+          Bld.byteString dta
+            <> buildRegions l (o' `incOffset` fromIntegral sz) rest
     ElfDataRaw dta -> do
       Bld.byteString dta <> doRest (fromIntegral (B.length dta))
 

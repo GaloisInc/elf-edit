@@ -104,6 +104,7 @@ module Data.ElfEdit
   , shf_tls
     -- * Segment operations.
   , ElfSegment(..)
+  , SegmentIndex
     -- ** Elf segment type
   , ElfSegmentType(..)
   , hasSegmentType
