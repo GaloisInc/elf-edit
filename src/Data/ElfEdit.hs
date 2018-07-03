@@ -21,11 +21,12 @@ datatype.
 {-# LANGUAGE TypeFamilies #-}
 module Data.ElfEdit
   ( -- * Top-level definitions
-    Elf (..)
+    Elf(..)
   , ElfData(..)
   , emptyElf
   , elfFileData
   , elfSegments
+  , elfSegmentCount
   , traverseElfSegments
   , traverseElfDataRegions
   , elfSections
@@ -190,6 +191,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.UTF8 as B (toString)
 import qualified Data.Foldable as F
+import           Data.Maybe (isJust)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.ElfEdit.Dynamic
@@ -221,11 +223,19 @@ removeSectionByName nm = over updateSections fn
   where fn s | s `hasSectionName` nm = Nothing
              | otherwise = Just s
 
--- | List of segments in the file.
+-- | List of segments in the file other than `PT_GNU_RELRO` and `PT_GNU_STACK`.
 elfSegments :: Elf w -> [ElfSegment w]
 elfSegments e = concatMap impl (e^.elfFileData)
   where impl (ElfDataSegment s) = s : concatMap impl (F.toList (elfSegmentData s))
         impl _ = []
+
+-- | Return total number of segments including segments with special
+-- support.
+elfSegmentCount :: Elf w -> Int
+elfSegmentCount e
+  = length (elfSegments e)
+  + (if isJust (elfGnuStackSegment e) then 1 else 0)
+  + length (elfGnuRelroRegions e)
 
 -- | Return true if this bytestring has the 4 bytes "\DELELF" at the start.
 hasElfMagic :: L.ByteString -> Bool

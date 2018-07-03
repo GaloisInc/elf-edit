@@ -784,6 +784,7 @@ phdr64Fields =
   , ("p_flags",  EFWord32 $ fromElfSegmentFlags . phdrSegmentFlags)
   , ("p_offset", EFWord64 $ fromFileOffset . phdrFileStart)
   , ("p_vaddr",  EFWord64 $ phdrSegmentVirtAddr)
+
   , ("p_paddr",  EFWord64 $ phdrSegmentPhysAddr)
   , ("p_filesz", EFWord64 $ phdrFileSize)
   , ("p_memsz",  EFWord64 $ phdrMemSize)
