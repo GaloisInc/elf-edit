@@ -10,6 +10,7 @@ This defines the 'ElfLayout' class which is used for writing elf files.
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE RankNTypes #-}
@@ -122,7 +123,7 @@ putWord64 ELFDATA2MSB = Bld.word64BE
 
 -- | A offset in the file (implemented as a newtype to avoid confusion with virtual addresses)
 newtype FileOffset w = FileOffset { fromFileOffset :: w }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Enum, Integral, Num, Real)
 
 instance Show w => Show (FileOffset w) where
   show (FileOffset o) = show o
@@ -868,8 +869,8 @@ buildRegions l o ((reg,inLoad):rest) = do
             -> Bld.Builder
       padAt nm align next
           | inLoad && o' /= o =
-            error $ "Error: " ++ nm ++ " address of "
-                    ++ show (fromFileOffset o) ++ " must be a multiple of "
+            error $ "Error: " ++ nm ++ " file offset of 0x"
+                    ++ showHex (fromFileOffset o) " must be a multiple of "
                     ++ show align ++ " within loadable segment."
           | otherwise =
             Bld.byteString (B.replicate (fromIntegral paddingCount) 0) <> next o'

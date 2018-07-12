@@ -163,19 +163,20 @@ enumCnt :: (Enum e, Real r) => e -> r -> [e]
 enumCnt e x = if x > 0 then e : enumCnt (succ e) (x-1) else []
 
 -- | Shows a bitwise combination of flags
-showFlags :: (Bits w, Integral w, Show w) => V.Vector String -> Int -> w -> ShowS
-showFlags names d w =
-  case l of
-        [] -> showString "pf_none"
-        [e] -> showString e
-        _ -> showParen (d > orPrec) $ showString $ intercalate " .|. " l
+showFlags :: (Bits w, Integral w, Show w) => String -> V.Vector String -> Int -> w -> ShowS
+showFlags noneStr names d w =
+    case l of
+      [] -> showString noneStr
+      [e] -> showString e
+      _ -> showParen (d > orPrec) $ showString $ intercalate " .|. " l
   where orPrec = 5
         nl = V.length names
-        unknown = w .&. complement (1 `shiftR` nl - 1)
+        unknown = w .&. complement (1 `shiftL` nl - 1)
         unknown_val | unknown > 0  = ["0x" ++ showHex unknown ""]
                     | unknown == 0 = []
                     | otherwise = error "showFlags given negative value"
-        l = map (names V.!) (filter (testBit w) (enumCnt 0 nl)) ++ unknown_val
+        l :: [String]
+        l = fmap (names V.!) (filter (testBit w) (enumCnt 0 nl)) ++ unknown_val
 
 
 ppShow :: Show v => v -> Doc
@@ -330,8 +331,8 @@ newtype ElfSectionFlags w = ElfSectionFlags { fromElfSectionFlags :: w }
   deriving (Eq, Bits)
 
 instance (Bits w, Integral w, Show w) => Show (ElfSectionFlags w) where
-  showsPrec d (ElfSectionFlags w) = showFlags names d w
-    where names = V.fromList ["shf_write", "shf_alloc", "shf_execinstr"]
+  showsPrec d (ElfSectionFlags w) = showFlags "shf_none" names d w
+    where names = V.fromList ["shf_write", "shf_alloc", "shf_execinstr", "8", "shf_merge"]
 
 -- | Empty set of flags
 shf_none :: Num w => ElfSectionFlags w
@@ -594,7 +595,7 @@ newtype ElfSegmentFlags  = ElfSegmentFlags { fromElfSegmentFlags :: Word32 }
   deriving (Eq, Num, Bits)
 
 instance Show ElfSegmentFlags where
-  showsPrec d (ElfSegmentFlags w) = showFlags names d w
+  showsPrec d (ElfSegmentFlags w) = showFlags "pf_none" names d w
     where names = V.fromList [ "pf_x", "pf_w", "pf_r" ]
 
 -- | No permissions
