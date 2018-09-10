@@ -152,9 +152,11 @@ module Data.ElfEdit
   , RelocationWord
     -- ** Implicit addend
   , RelEntry(..)
+  , relOffset
   , elfRelEntries
     -- ** Explicit addend
   , RelaEntry(..)
+  , relaOffset
   , ppRelaEntries
   , elfRelaEntries
   , relaToRel

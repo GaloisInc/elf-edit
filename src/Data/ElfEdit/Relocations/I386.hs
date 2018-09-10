@@ -21,14 +21,14 @@ module Data.ElfEdit.Relocations.I386
   ) where
 
 import qualified Data.Map.Strict as Map
-import           Data.Word (Word32)
+import           Data.Word (Word8)
 import           Numeric (showHex)
 
 import           Data.ElfEdit.Relocations
 import           Data.ElfEdit.Types (ElfClass(..))
 
 -- | Relocation types for 64-bit x86 code.
-newtype I386_RelocationType = I386_RelocationType { fromI386_RelocationType :: Word32 }
+newtype I386_RelocationType = I386_RelocationType { fromI386_RelocationType :: Word8 }
   deriving (Eq,Ord)
 
 pattern R_386_NONE     = I386_RelocationType  0
@@ -67,7 +67,7 @@ instance Show I386_RelocationType where
 instance IsRelocationType I386_RelocationType where
   type RelocationWidth I386_RelocationType = 32
   relaWidth _ = ELFCLASS32
-  toRelocType = I386_RelocationType
+  toRelocType = I386_RelocationType . fromIntegral
   isRelative R_386_RELATIVE = True
   isRelative _ = False
   relocTargetBits tp =
