@@ -20,7 +20,7 @@ module Data.ElfEdit.Relocations.ARM32
  ) where
 
 import qualified Data.Map.Strict          as Map
-import           Data.Word                (Word32)
+import           Data.Word                (Word8)
 import           Numeric                  (showHex)
 
 import           Data.ElfEdit.Relocations
@@ -30,7 +30,7 @@ import           Data.ElfEdit.Types       (ElfClass (..), ppHex)
 -- ARM_RelocationType
 
 -- | Relocation types for ARM32 code.
-newtype ARM_RelocationType = ARM_RelocationType { fromARM_RelocationType :: Word32 }
+newtype ARM_RelocationType = ARM_RelocationType { fromARM_RelocationType :: Word8 }
   deriving (Eq,Ord)
 
 pattern R_ARM_NONE               = ARM_RelocationType 0   -- Static Miscellaneous
