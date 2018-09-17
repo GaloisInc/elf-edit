@@ -24,7 +24,7 @@ import           Data.Word                (Word8)
 import           Numeric                  (showHex)
 
 import           Data.ElfEdit.Relocations
-import           Data.ElfEdit.Types       (ElfClass (..))
+import           Data.ElfEdit.Types       (ElfClass (..), ppHex)
 
 ------------------------------------------------------------------------
 -- ARM_RelocationType
@@ -318,7 +318,7 @@ instance Show ARM_RelocationType where
   show i =
     case Map.lookup i arm_RelocationTypes of
       Just s  -> s
-      Nothing -> "0x" ++ showHex (fromARM_RelocationType i) ""
+      Nothing -> ppHex (fromARM_RelocationType i)
 
 instance IsRelocationType ARM_RelocationType where
   type RelocationWidth ARM_RelocationType = 32
