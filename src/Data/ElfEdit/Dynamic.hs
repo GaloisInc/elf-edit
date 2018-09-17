@@ -23,6 +23,7 @@ module Data.ElfEdit.Dynamic
   , dynRelBuffer
   , dynRelaBuffer
   , dynRelaEntries
+  , PLTEntries(..)
   , dynPLTRel
   , dynamicEntries
   , getDynamicSectionFromSegments
@@ -117,10 +118,12 @@ data DynamicError
    | IncorrectRelSize
    | IncorrectRelaSize
    | IllegalNameIndex
-   | ErrorParsingPLTRelaEntries !String
+   | ErrorParsingPLTEntries !String
    | DupVersionReqAuxIndex !Word16
    | UnresolvedVersionReqAuxIndex !B.ByteString !Word16
    | MultipleDynamicSegments
+   | BadValuePltRel !Integer
+     -- ^ DT_PLTREL entry contained a bad value
 
 instance Show DynamicError where
   show (MandatoryEntryMissing tag) =
@@ -139,7 +142,7 @@ instance Show DynamicError where
   show (ErrorParsingRelaEntries msg) = "Could not parse relocation entries: " ++ msg
   show IncorrectRelSize = "DT_RELENT has unexpected size"
   show IncorrectRelaSize = "DT_RELAENT has unexpected size"
-  show (ErrorParsingPLTRelaEntries msg) = "Could not parse plt relocation entries: " ++ msg
+  show (ErrorParsingPLTEntries msg) = "Could not parse PLT relocation entries: " ++ msg
   show IllegalNameIndex = "The index of the DT_SONAME is illegal."
   show StrtabNotAfterSymtab = "The dynamic string table did not appear just after symbol table."
   show (DupVersionReqAuxIndex idx) = "The version requirement index " ++ show idx ++ " is not unique."
@@ -147,6 +150,7 @@ instance Show DynamicError where
     "Symbol " ++ BSC.unpack sym ++ " has unresolvable version requirement index " ++ show idx ++ "."
   show VerSymTooSmall = "File ends before end of symbol version table."
   show MultipleDynamicSegments = "File contained multiple dynamic segments."
+  show (BadValuePltRel v) = "DT_PLTREL entry contained an unexpected value " ++ show v ++ "."
 
 ------------------------------------------------------------------------
 -- DynamicMap
@@ -758,23 +762,34 @@ dynRelaEntries ds = do
       either (throwError . ErrorParsingRelaEntries) pure $
         elfRelaEntries (dynData ds) buf
 
+-- | Information about the PLT relocations in a dynamic section.
+data PLTEntries tp
+  = PLTRel [RelEntry tp]
+  | PLTRela [RelaEntry tp]
+  | PLTEmpty
+
 -- | Parse the PLT location and relocation entries.
 --
 -- These may be applied immediately upon load, or done later if lazy binding is
--- enabled.
+-- enabled.  They may be either all `DT_REL` entries or `DT_RELA` entries
 dynPLTRel :: IsRelocationType tp
           => DynamicSection (RelocationWidth tp)
-          -> Either DynamicError [RelaEntry tp]
+          -> Either DynamicError (PLTEntries tp)
 dynPLTRel ds = do
-  runParser ds $ do
+  runParser ds $ elfClassInstances (dynClass ds) $ do
     mr <- getRelaRange DT_JMPREL DT_PLTRELSZ (dynMap ds)
     case mr of
-      Nothing -> pure []
-      Just rela -> do
-        w <- elfClassInstances (dynClass ds) $
-          ElfDynamicTag . fromIntegral <$> mandatoryDynamicEntry DT_PLTREL (dynMap ds)
-        when (w /= DT_RELA) $ do
-          fail $ "Only DT_RELA entries are supported."
-
-        either (throwError . ErrorParsingPLTRelaEntries) pure $
-          elfRelaEntries (dynData ds) rela
+      Nothing -> pure PLTEmpty
+      Just contents -> do
+        w <- mandatoryDynamicEntry DT_PLTREL (dynMap ds)
+        case () of
+          _ | w == fromIntegral (fromElfDynamicTag DT_RELA) ->
+              case elfRelaEntries (dynData ds) contents of
+                Left err -> throwError $ ErrorParsingPLTEntries err
+                Right l -> pure $ PLTRela l
+            | w == fromIntegral (fromElfDynamicTag DT_REL) ->
+              case elfRelEntries (dynData ds) contents of
+                Left err -> throwError $ ErrorParsingPLTEntries err
+                Right l -> pure $ PLTRel l
+            | otherwise ->
+              throwError $ BadValuePltRel (toInteger w)
