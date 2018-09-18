@@ -12,6 +12,9 @@ Build-Type:    Simple
 Synopsis:      Datatype for ELF files with serialization and deserialization.
 Data-Files:    tests/empty.elf tests/Test.hs
 
+extra-source-files:
+  ChangeLog.md
+
 library
   build-depends:
     base >= 4.8 && < 5,
