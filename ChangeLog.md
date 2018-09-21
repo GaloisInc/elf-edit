@@ -9,6 +9,7 @@
 
   * *Bugfix*: Miscellaneous pretty printing updates.
 
+  * Reorganized modules to improve Haddock documentation flow.
 
 ## 0.31 -- *2018 Sep 10*
 
