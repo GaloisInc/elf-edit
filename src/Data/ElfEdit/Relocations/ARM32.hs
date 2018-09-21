@@ -21,7 +21,6 @@ module Data.ElfEdit.Relocations.ARM32
 
 import qualified Data.Map.Strict          as Map
 import           Data.Word                (Word8)
-import           Numeric                  (showHex)
 
 import           Data.ElfEdit.Relocations
 import           Data.ElfEdit.Types       (ElfClass (..), ppHex)

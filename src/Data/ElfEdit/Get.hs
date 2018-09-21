@@ -65,6 +65,7 @@ import           Data.ElfEdit.Layout
   , symbolTableSize
   )
 import           Data.ElfEdit.Types
+import           Data.ElfEdit.Utils (enumCnt)
 
 ------------------------------------------------------------------------
 -- Utilities
