@@ -7,10 +7,17 @@ Author:        Galois, Inc and Erik Charlebois
 Maintainer:    Joe Hendrix <jhendrix@galois.com>
 Stability:     unstable
 Cabal-Version: >= 1.8
-Homepage:      http://github.com/GaloisInc/elf-edit
+Homepage:      https://github.com/GaloisInc/elf-edit
 Build-Type:    Simple
 Synopsis:      Datatype for ELF files with serialization and deserialization.
 Data-Files:    tests/empty.elf tests/Test.hs
+
+extra-source-files:
+  ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/GaloisInc/elf-edit.git
 
 library
   build-depends:

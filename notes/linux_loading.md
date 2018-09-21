@@ -3,7 +3,7 @@ Constraints on Elf files loaded by the Linux Kernel Elf loader
 
 The Linux kernel is responsible for initializing a process's address
 space based on the contents of the Elf file.  When generating Elf
-files, it is important to understand this processs as it makes certain
+files, it is important to understand this process as it makes certain
 assumptions about the Elf file, and unanticipated behavior may occur
 if the Elf file that you generate does not conform to those
 assumptions.
@@ -44,7 +44,7 @@ involves checking that the size of the header table is not more than
 (or `4096` on most `x86_64` systems).  This means there can be at most
 `4096 / 56` or 73 program headers.
 
-After these checks, Linux searches for a PT_DYNAMIC section, and starts
+After these checks, Linux searches for a PT_DYNAMIC section, and
 initializes the `elf_interpreter` and `interpreter` variables (which were
 initially null) to store information about the interpreter.  We do not
 describe these steps here as we are concerned with static variables.
