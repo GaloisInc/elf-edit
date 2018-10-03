@@ -1135,7 +1135,8 @@ elfSections :: Simple Traversal (Elf w) (ElfSection (ElfWordType w))
 elfSections f = updateSections (fmap Just . f)
 
 -- | Traverse segments in an ELF file and modify or delete them
-updateSegments :: forall w f . Monad f
+updateSegments :: forall w f
+               . Monad f
                => (ElfSegment w -> f (Maybe (ElfSegment w)))
                -> Elf w
                -> f (Elf w)
@@ -1144,15 +1145,14 @@ updateSegments fn = elfFileData (updateSeq impl)
     impl (ElfDataSegment seg) =
       let inner = updateSeq impl (elfSegmentData seg)
           updateData s d = s { elfSegmentData = d }
-          newSeg :: (Monad f) => f (Maybe (ElfSegment w))
+          newSeg :: f (Maybe (ElfSegment w))
           newSeg = fn =<< (fmap (updateData seg) inner)
       in fmap ElfDataSegment <$> newSeg
     impl d = pure (Just d)
 
--- | Traverse elf segments
+-- | Traverse elf segments other than `PT_GNU_RELRO` and `PT_GNU_STACK`.
 traverseElfSegments :: Monad f => (ElfSegment w -> f (ElfSegment w)) -> Elf w -> f (Elf w)
 traverseElfSegments f = updateSegments (fmap Just . f)
-
 
 -- | Traverse the data regions in an ELF file and modify or delete them
 updateDataRegions :: forall w f
