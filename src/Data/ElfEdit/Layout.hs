@@ -1168,7 +1168,7 @@ updateDataRegions fn = elfFileData (updateSeq impl)
       in fmap (updateData seg) inner >>= (fn . ElfDataSegment)
     impl d = fn d
 
--- | Traverse elf data regions
+-- | Traverse all data regions including nested.
 traverseElfDataRegions :: Monad f
                        => (ElfDataRegion w -> f (ElfDataRegion w))
                        -> Elf w

@@ -44,7 +44,10 @@ library
     Data.ElfEdit.Relocations.ARM32
     Data.ElfEdit.Relocations.I386
     Data.ElfEdit.Relocations.X86_64
+    Data.ElfEdit.Sections
+    Data.ElfEdit.SymbolEnums
     Data.ElfEdit.Types
+    Data.ElfEdit.Utils
 
 test-suite test-elf
   type: exitcode-stdio-1.0

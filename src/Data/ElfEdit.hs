@@ -20,90 +20,42 @@ datatype.
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 module Data.ElfEdit
-  ( -- * Top-level definitions
+  ( -- * Elf definitions
     Elf(..)
   , ElfData(..)
   , emptyElf
-  , elfFileData
+    -- ** Utilities to get information
+  , elfHeader
+  , elfInterpreter
+  , elfSymtab
+    -- ** Operations on segments
   , elfSegments
   , elfSegmentCount
-  , traverseElfSegments
-  , traverseElfDataRegions
+  , Data.ElfEdit.Layout.traverseElfSegments
+    -- ** Operations on sections
   , elfSections
   , findSectionByName
   , removeSectionByName
   , updateSections
-  , elfInterpreter
-  , elfSymtab
-  , elfHeader
-  , module Data.ElfEdit.Enums
+    -- ** Operations all data regions
+  , elfFileData
+  , Data.ElfEdit.Layout.traverseElfDataRegions
     -- * Header
   , ElfHeader(..)
-    -- * ElfClass
+  , module Data.ElfEdit.Enums
+    -- ** ElfClass
   , ElfClass(..)
   , elfClassInstances
+  , ElfWidthConstraints
   , elfClassByteWidth
   , elfClassBitWidth
-    -- * Elf data region
+    -- ** Elf data region
   , ElfDataRegion(..)
-    -- * Elf GOT
+  , module Data.ElfEdit.Sections
+    -- ** Elf GOT
   , ElfGOT(..)
   , elfGotSection
-    -- * Reading Elf files
-  , hasElfMagic
-  , ElfGetResult(..)
-  , ElfParseError(..)
-  , ElfInsertError(..)
-  , parseElf
-  , parseElfHeaderInfo
-  , SomeElf(..)
-    -- * Writing Elf files
-  , renderElf
-    -- ** Layout information
-  , ElfLayout
-  , elfLayout
-  , elfLayoutHeader
-  , elfLayoutData
-  , elfLayoutClass
-  , elfLayoutRegions
-  , elfLayoutBytes
-  , elfLayoutSize
-  , elfMagic
-  , ehdrSize
-  , phdrEntrySize
-  , shdrEntrySize
-  , buildElfHeader
-  , buildElfSegmentHeaderTable
-  , buildElfSectionHeaderTable
-  , elfRegionFileSize
-  , Shdr
-  , shdrs
-    -- * Sections
-  , ElfSection(..)
-  , elfSectionFileSize
-    -- ** Elf section type
-  , ElfSectionType(..)
-  , pattern SHT_NULL
-  , pattern SHT_PROGBITS
-  , pattern SHT_SYMTAB
-  , pattern SHT_STRTAB
-  , pattern SHT_RELA
-  , pattern SHT_HASH
-  , pattern SHT_DYNAMIC
-  , pattern SHT_NOTE
-  , pattern SHT_NOBITS
-  , pattern SHT_REL
-  , pattern SHT_SHLIB
-  , pattern SHT_DYNSYM
-    -- ** Elf section flags
-  , ElfSectionFlags
-  , shf_none
-  , shf_write
-  , shf_alloc
-  , shf_execinstr
-  , shf_merge
-  , shf_tls
-    -- * Segment operations.
+    -- * Segments
   , ElfSegment(..)
   , SegmentIndex
     -- ** Elf segment type
@@ -128,18 +80,47 @@ module Data.ElfEdit
     -- ** Elf segment flags
   , ElfSegmentFlags
   , pf_none, pf_x, pf_w, pf_r
-    -- ** ElfMemSize
+    -- ** Memory size description
   , ElfMemSize(..)
-    -- ** Layout information from Elf segments
+    -- ** Segment Layout information
   , allPhdrs
   , Phdr(..)
   , FileOffset(..)
   , phdrFileRange
+    -- * Reading Elf files
+  , hasElfMagic
+  , ElfGetResult(..)
+  , ElfParseError(..)
+  , ElfInsertError(..)
+  , parseElf
+  , SomeElf(..)
+    -- * Writing Elf files
+  , renderElf
+    -- ** Layout information
+  , ElfLayout
+  , elfLayout
+  , elfLayoutHeader
+  , elfLayoutData
+  , elfLayoutClass
+  , elfLayoutRegions
+  , elfLayoutBytes
+  , elfLayoutSize
+  , elfMagic
+  , ehdrSize
+  , phdrEntrySize
+  , shdrEntrySize
+  , buildElfHeader
+  , buildElfSegmentHeaderTable
+  , buildElfSectionHeaderTable
+  , elfRegionFileSize
+  , Shdr
+  , shdrs
     -- * Symbol Table Entries
   , ElfSymbolTable(..)
   , ElfSymbolTableEntry(..)
   , ppSymbolTableEntries
   , symbolTableEntrySize
+  , module Data.ElfEdit.SymbolEnums
     -- ** Elf symbol visibility
   , steVisibility
   , ElfSymbolVisibility(..)
@@ -175,10 +156,9 @@ module Data.ElfEdit
   , stringTable
   , ElfWordType
   , ElfIntType
-    -- * Constraints
-  , ElfWidthConstraints
-    -- * Header parse information
+    -- * Low level information
   , ElfHeaderInfo
+  , parseElfHeaderInfo
   , getElf
     -- * Gnu-specific extensions
   , GnuStack(..)
@@ -204,6 +184,8 @@ import           Data.ElfEdit.Relocations
 import           Data.ElfEdit.Relocations.ARM32
 import           Data.ElfEdit.Relocations.I386
 import           Data.ElfEdit.Relocations.X86_64
+import           Data.ElfEdit.Sections
+import           Data.ElfEdit.SymbolEnums
 import           Data.ElfEdit.Types
 
 ------------------------------------------------------------------------
@@ -215,11 +197,12 @@ hasSectionName section name = elfSectionName section == name
 
 -- | Given a section name, returns sections matching that name.
 --
--- Section names in elf are not necessarily unique.
+-- Section names in elf are often unique, but the file format does not
+-- explicitly enforce this.
 findSectionByName :: B.ByteString -> Elf w -> [ElfSection (ElfWordType w)]
 findSectionByName name e  = e^..elfSections.filtered (`hasSectionName` name)
 
--- | Remove section with given name.
+-- | Remove all sections with given name.
 removeSectionByName :: B.ByteString -> Elf w -> Elf w
 removeSectionByName nm = over updateSections fn
   where fn s | s `hasSectionName` nm = Nothing
@@ -231,8 +214,7 @@ elfSegments e = concatMap impl (e^.elfFileData)
   where impl (ElfDataSegment s) = s : concatMap impl (F.toList (elfSegmentData s))
         impl _ = []
 
--- | Return total number of segments including segments with special
--- support.
+-- | Return total number of segments including `PT_GNU_RELRO` and `PT_GNU_STACK`.
 elfSegmentCount :: Elf w -> Int
 elfSegmentCount e
   = length (elfSegments e)

@@ -41,31 +41,7 @@ module Data.ElfEdit.Types
     -- * ElfDataRegion
   , ElfDataRegion(..)
   , asumDataRegions
-    -- * ElfSection
-  , ElfSection(..)
-  , elfSectionFileSize
-    -- ** Elf section type
-  , ElfSectionType(..)
-  , pattern SHT_NULL
-  , pattern SHT_PROGBITS
-  , pattern SHT_SYMTAB
-  , pattern SHT_STRTAB
-  , pattern SHT_RELA
-  , pattern SHT_HASH
-  , pattern SHT_DYNAMIC
-  , pattern SHT_NOTE
-  , pattern SHT_NOBITS
-  , pattern SHT_REL
-  , pattern SHT_SHLIB
-  , pattern SHT_DYNSYM
-    -- ** Elf section flags
-  , ElfSectionFlags(..)
-  , shf_none
-  , shf_write
-  , shf_alloc
-  , shf_execinstr
-  , shf_merge
-  , shf_tls
+  , module Data.ElfEdit.Sections
     -- ** ElfGOT
   , ElfGOT(..)
   , elfGotSize
@@ -113,7 +89,6 @@ module Data.ElfEdit.Types
   , slice
   , sliceL
     -- * Utilities
-  , enumCnt
   , hasPermissions
   , ppHex
   ) where
@@ -124,7 +99,6 @@ import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
-import           Data.List (intercalate)
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
@@ -134,6 +108,9 @@ import           Numeric (showHex)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
 import           Data.ElfEdit.Enums
+import           Data.ElfEdit.Sections
+import           Data.ElfEdit.SymbolEnums
+import           Data.ElfEdit.Utils (showFlags)
 
 -- | @p `hasPermissions` req@ returns true if all bits set in 'req' are set in 'p'.
 hasPermissions :: Bits b => b -> b -> Bool
@@ -157,27 +134,6 @@ sliceL (i,c) = L.take (fromIntegral c) . L.drop (fromIntegral i)
 
 ------------------------------------------------------------------------
 -- Utilities
-
--- | 'enumCnt b c' returns a list with c enum values starting from 'b'.
-enumCnt :: (Enum e, Real r) => e -> r -> [e]
-enumCnt e x = if x > 0 then e : enumCnt (succ e) (x-1) else []
-
--- | Shows a bitwise combination of flags
-showFlags :: (Bits w, Integral w, Show w) => String -> V.Vector String -> Int -> w -> ShowS
-showFlags noneStr names d w =
-    case l of
-      [] -> showString noneStr
-      [e] -> showString e
-      _ -> showParen (d > orPrec) $ showString $ intercalate " .|. " l
-  where orPrec = 5
-        nl = V.length names
-        unknown = w .&. complement (1 `shiftL` nl - 1)
-        unknown_val | unknown > 0  = ["0x" ++ showHex unknown ""]
-                    | unknown == 0 = []
-                    | otherwise = error "showFlags given negative value"
-        l :: [String]
-        l = fmap (names V.!) (filter (testBit w) (enumCnt 0 nl)) ++ unknown_val
-
 
 ppShow :: Show v => v -> Doc
 ppShow = text . show
@@ -261,149 +217,6 @@ toElfData _ = Nothing
 fromElfData :: ElfData -> Word8
 fromElfData ELFDATA2LSB = 1
 fromElfData ELFDATA2MSB = 2
-
-------------------------------------------------------------------------
--- ElfSectionType
-
--- | The type associated with an Elf file.
-newtype ElfSectionType = ElfSectionType { fromElfSectionType :: Word32 }
-  deriving (Eq, Ord)
-
--- | Identifies an empty section header.
-pattern SHT_NULL :: ElfSectionType
-pattern SHT_NULL     = ElfSectionType  0
--- | Contains information defined by the program
-pattern SHT_PROGBITS :: ElfSectionType
-pattern SHT_PROGBITS = ElfSectionType  1
--- | Contains a linker symbol table
-pattern SHT_SYMTAB :: ElfSectionType
-pattern SHT_SYMTAB   = ElfSectionType  2
--- | Contains a string table
-pattern SHT_STRTAB :: ElfSectionType
-pattern SHT_STRTAB   = ElfSectionType  3
--- | Contains "Rela" type relocation entries
-pattern SHT_RELA :: ElfSectionType
-pattern SHT_RELA     = ElfSectionType  4
--- | Contains a symbol hash table
-pattern SHT_HASH :: ElfSectionType
-pattern SHT_HASH     = ElfSectionType  5
--- | Contains dynamic linking tables
-pattern SHT_DYNAMIC :: ElfSectionType
-pattern SHT_DYNAMIC  = ElfSectionType  6
--- | Contains note information
-pattern SHT_NOTE :: ElfSectionType
-pattern SHT_NOTE     = ElfSectionType  7
--- | Contains uninitialized space; does not occupy any space in the file
-pattern SHT_NOBITS :: ElfSectionType
-pattern SHT_NOBITS   = ElfSectionType  8
--- | Contains "Rel" type relocation entries
-pattern SHT_REL :: ElfSectionType
-pattern SHT_REL = ElfSectionType  9
--- | Reserved
-pattern SHT_SHLIB :: ElfSectionType
-pattern SHT_SHLIB = ElfSectionType 10
--- | Contains a dynamic loader symbol table
-pattern SHT_DYNSYM :: ElfSectionType
-pattern SHT_DYNSYM   = ElfSectionType 11
-
-instance Show ElfSectionType where
-  show tp =
-    case tp of
-      SHT_NULL     -> "SHT_NULL"
-      SHT_PROGBITS -> "SHT_PROGBITS"
-      SHT_SYMTAB   -> "SHT_SYMTAB"
-      SHT_STRTAB   -> "SHT_STRTAB"
-      SHT_RELA     -> "SHT_RELA"
-      SHT_HASH     -> "SHT_HASH"
-      SHT_DYNAMIC  -> "SHT_DYNAMIC"
-      SHT_NOTE     -> "SHT_NOTE"
-      SHT_NOBITS   -> "SHT_NOBITS"
-      SHT_REL      -> "SHT_REL"
-      SHT_SHLIB    -> "SHT_SHLIB"
-      SHT_DYNSYM   -> "SHT_DYNSYM"
-      ElfSectionType w -> "(Unknown type " ++ show w ++ ")"
-
-------------------------------------------------------------------------
--- ElfSectionFlags
-
--- | Flags for sections
-newtype ElfSectionFlags w = ElfSectionFlags { fromElfSectionFlags :: w }
-  deriving (Eq, Bits)
-
-instance (Bits w, Integral w, Show w) => Show (ElfSectionFlags w) where
-  showsPrec d (ElfSectionFlags w) = showFlags "shf_none" names d w
-    where names = V.fromList ["shf_write", "shf_alloc", "shf_execinstr", "8", "shf_merge"]
-
--- | Empty set of flags
-shf_none :: Num w => ElfSectionFlags w
-shf_none = ElfSectionFlags 0x0
-
--- | Section contains writable data
-shf_write :: Num w => ElfSectionFlags w
-shf_write = ElfSectionFlags 0x1
-
--- | Section is allocated in memory image of program
-shf_alloc :: Num w => ElfSectionFlags w
-shf_alloc = ElfSectionFlags 0x2
-
--- | Section contains executable instructions
-shf_execinstr :: Num w => ElfSectionFlags w
-shf_execinstr = ElfSectionFlags 0x4
-
--- | The contents of this section can be merged with elements in
--- sections of the same name, type, and flags.
-shf_merge :: Num w => ElfSectionFlags w
-shf_merge = ElfSectionFlags 0x10
-
--- | Section contains TLS data (".tdata" or ".tbss")
---
--- Information in it may be modified by the dynamic linker, but is only copied
--- once the binary is linked.
-shf_tls :: Num w => ElfSectionFlags w
-shf_tls = ElfSectionFlags 0x400
-
-------------------------------------------------------------------------
--- ElfSection
-
--- | A section in the Elf file.
-data ElfSection w = ElfSection
-    { elfSectionIndex     :: !Word16
-      -- ^ Unique index to identify section.
-    , elfSectionName      :: !B.ByteString
-      -- ^ Name of the section.
-    , elfSectionType      :: !ElfSectionType
-      -- ^ Type of the section.
-    , elfSectionFlags     :: !(ElfSectionFlags w)
-      -- ^ Attributes of the section.
-    , elfSectionAddr      :: !w
-      -- ^ The virtual address of the beginning of the section in memory.
-      --
-      -- This should be 0 for sections that are not loaded into target memory.
-    , elfSectionSize      :: !w
-      -- ^ The size of the section. Except for SHT_NOBITS sections, this is the
-      -- size of elfSectionData.
-    , elfSectionLink      :: !Word32
-      -- ^ Contains a section index of an associated section, depending on section type.
-    , elfSectionInfo      :: !Word32
-      -- ^ Contains extra information for the index, depending on type.
-    , elfSectionAddrAlign :: !w
-      -- ^ Contains the required alignment of the section.  This should be a power of
-      -- two, and the address of the section should be a multiple of the alignment.
-      --
-      -- Note that when writing files, no effort is made to add padding so that the
-      -- alignment constraint is correct.  It is up to the user to insert raw data segments
-      -- as needed for padding.  We considered inserting padding automatically, but this
-      -- can result in extra bytes inadvertently appearing in loadable segments, thus
-      -- breaking layout constraints.  In particular, 'ld' sometimes generates files where
-      -- the '.bss' section address is not a multiple of the alignment.
-    , elfSectionEntSize   :: !w
-      -- ^ Size of entries if section has a table.
-    , elfSectionData      :: !B.ByteString
-      -- ^ Data in section.
-    } deriving (Eq, Show)
-
-elfSectionFileSize :: Integral w => ElfSection w -> w
-elfSectionFileSize = fromIntegral . B.length . elfSectionData
 
 ------------------------------------------------------------------------
 -- ElfGOT
