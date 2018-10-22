@@ -51,6 +51,7 @@ module Data.ElfEdit
   , elfClassBitWidth
     -- ** Elf data region
   , ElfDataRegion(..)
+  , ppRegion
   , module Data.ElfEdit.Sections
     -- ** Elf GOT
   , ElfGOT(..)
@@ -58,6 +59,7 @@ module Data.ElfEdit
     -- * Segments
   , ElfSegment(..)
   , SegmentIndex
+  , ppSegment
     -- ** Elf segment type
   , ElfSegmentType(..)
   , hasSegmentType
