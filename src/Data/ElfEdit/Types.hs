@@ -41,6 +41,7 @@ module Data.ElfEdit.Types
     -- * ElfDataRegion
   , ElfDataRegion(..)
   , asumDataRegions
+  , ppRegion
   , module Data.ElfEdit.Sections
     -- ** ElfGOT
   , ElfGOT(..)
@@ -552,7 +553,20 @@ ppSegment s =
   text "align:" <+> ppShow (elfSegmentAlign s) <$$>
   text "msize:" <+> ppShow (elfSegmentMemSize s) <$$>
   text "data:"  <$$>
-  indent 2 (ppShow (F.toList (elfSegmentData s)))
+  indent 2 (vcat . map ppRegion . F.toList $ elfSegmentData s)
+
+ppRegion :: ElfWidthConstraints w => ElfDataRegion w -> Doc
+ppRegion r = case r of
+  ElfDataElfHeader -> text "ELF header"
+  ElfDataSegmentHeaders -> text "segment header table"
+  ElfDataSegment s -> hang 2 (text "contained segment" <$$> ppSegment s)
+  ElfDataSectionHeaders -> text "section header table"
+  ElfDataSectionNameTable w -> text "section name table" <+> parens (text "section number" <+> ppShow w)
+  ElfDataGOT got -> text "global offset table:" <+> ppShow got
+  ElfDataStrtab w -> text "strtab section" <+> parens (text "section number" <+> ppShow w)
+  ElfDataSymtab symtab -> text "symtab section:" <+> ppShow symtab
+  ElfDataSection sec -> text "other section:" <+> ppShow sec
+  ElfDataRaw bs -> text "raw bytes:" <+> ppShow bs
 
 instance ElfWidthConstraints w => Show (ElfSegment w) where
   show s = show (ppSegment s)
