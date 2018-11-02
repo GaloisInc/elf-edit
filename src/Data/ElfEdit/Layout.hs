@@ -818,25 +818,41 @@ buildElfSectionHeaderTable hdr sl = mconcat $ writeRecord (shdrFields cl) d <$> 
   where d  = headerData hdr
         cl = headerClass hdr
 
+-- | This returns true if we can ignore the region file offset
+-- alignment constraint as the size is zero.
+regionOffsetIgnorable :: ElfDataRegion w -> Bool
+regionOffsetIgnorable reg =
+  case reg of
+    ElfDataElfHeader -> False
+    ElfDataSegmentHeaders -> False
+    ElfDataSegment s  -> all regionOffsetIgnorable $ elfSegmentData s
+    ElfDataSectionHeaders -> False
+    ElfDataSectionNameTable _ -> False
+    ElfDataGOT g              -> B.null (elfGotData g)
+    ElfDataStrtab _           -> False
+    ElfDataSymtab _           -> False
+    ElfDataSection s          -> B.null (elfSectionData s)
+    ElfDataRaw b              -> B.null b
+
 -- | Utility that validates alignment
-checkSegmentFileAlignment :: (Bits w, Integral w, Show w)
-                          => String
-                          -> FileOffset w
+checkSegmentFileAlignment :: ElfWidthConstraints w
+                          => ElfSegment w
+                          -> FileOffset (ElfWordType w)
                              -- ^ Offset in file to check
-                          -> w
-                             -- ^ Address of segment
-                          -> w
-                             -- ^ Alignemnt of segment
                           -> a
                              -- ^ Value to return if check suceeds.
                           -> a
-checkSegmentFileAlignment nm off addr align r
-    | (fromFileOffset off .&. (align - 1)) /= (addr .&. (align - 1)) =
-      error $ nm
+checkSegmentFileAlignment s (FileOffset off) r
+  | all regionOffsetIgnorable (elfSegmentData s) == False
+  , (off .&. (align - 1)) /= (addr .&. (align - 1)) =
+      error $ "segment " ++ show (elfSegmentIndex s)
           ++ " address of 0x" ++ showHex addr " and file offset 0x"
-          ++ showHex (fromFileOffset off) ""
-          ++ " do not respect the alignment of 0x" ++ showHex align "."
-    | otherwise = r
+          ++ showHex off ""
+          ++ " does not respect the alignment of 0x" ++ showHex align "."
+  | otherwise = r
+  where addr = elfSegmentVirtAddr s
+        align = elfSegmentAlign s
+
 
 -- | Utility that validates alignment of the section address.
 checkSectionAlignment :: (Bits w, Integral w, Show w)
@@ -890,8 +906,7 @@ buildRegions l o ((reg,inLoad):rest) = do
         buildElfSegmentHeaderTable hdr (allPhdrs l)
           <> buildRegions l (o' `incOffset` phdrSize) rest
     ElfDataSegment s -> do
-      let nm = "segment " ++ show (elfSegmentIndex s)
-      checkSegmentFileAlignment nm o (elfSegmentVirtAddr s) (elfSegmentAlign s) $
+      checkSegmentFileAlignment s o $
         buildRegions l o $ ((,True) <$> F.toList (elfSegmentData s)) ++ rest
     ElfDataSectionHeaders -> do
       -- The section header table should be aligned to (shdrAlign cl)

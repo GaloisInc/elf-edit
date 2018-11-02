@@ -93,7 +93,6 @@ module Data.ElfEdit
   , hasElfMagic
   , ElfGetResult(..)
   , ElfParseError(..)
-  , ElfInsertError(..)
   , parseElf
   , SomeElf(..)
     -- * Writing Elf files
