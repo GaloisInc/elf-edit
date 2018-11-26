@@ -24,6 +24,26 @@ import           Prelude
 
 import           Data.ElfEdit
 
+------------------------------------------------------------------------
+-- Newtype for generating alphabetic strings.
+
+newtype AsciiString = AsciiString { unwrapAsciiString :: B.ByteString }
+                    deriving (Show)
+
+instance T.Arbitrary AsciiString where
+  arbitrary = AsciiString . fromString <$> genAsciiString
+
+genAsciiString :: T.Gen String
+genAsciiString = T.listOf genAsciiChar
+
+genAsciiChar :: T.Gen Char
+genAsciiChar = T.elements (['a'..'z'] ++ ['A'..'Z'])
+
+------------------------------------------------------------------------
+-- Test cases
+
+
+
 testEmptyElf :: T.Assertion
 testEmptyElf = IO.withBinaryFile "./tests/empty.elf" IO.ReadMode $ \h -> do
   fil <- B.hGetContents h
@@ -119,15 +139,3 @@ tests = T.testGroup "ELF Tests"
 
 main :: IO ()
 main = T.defaultMain tests
-
-newtype AsciiString = AsciiString { unwrapAsciiString :: B.ByteString }
-                    deriving (Show)
-
-instance T.Arbitrary AsciiString where
-  arbitrary = AsciiString . fromString <$> genAsciiString
-
-genAsciiString :: T.Gen String
-genAsciiString = T.listOf genAsciiChar
-
-genAsciiChar :: T.Gen Char
-genAsciiChar = T.elements (['a'..'z'] ++ ['A'..'Z'])

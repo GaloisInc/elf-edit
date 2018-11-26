@@ -142,6 +142,21 @@ rangeSize (FileOffset s) (FileOffset e) = assert (e >= s) $ e - s
 alignFileOffset :: (Bits w, Num w) => w -> FileOffset w -> FileOffset w
 alignFileOffset align (FileOffset o) = FileOffset $ (o + (align - 1)) .&. complement (align - 1)
 
+-- | `isAligned off align` checks that `off` is an
+-- of `align` not less than `offset`.
+--
+-- Note. This throws an error is the alignment is not a power of two.
+isAligned :: (Bits w, Num w) => FileOffset w -> w -> Bool
+isAligned (FileOffset o) align
+  | align .&. (align - 1) /= 0 = error "alignments must be power of two."
+  | otherwise = (o .&. (align - 1)) == 0
+
+
+-- | `alignFileOffset align off` rounds `off` to the smallest multiple
+-- of `align` not less than `offset`.
+alignmentPadding :: Integral w => FileOffset w -> FileOffset w -> Bld.Builder
+alignmentPadding (FileOffset o') (FileOffset o) = Bld.byteString $ B.replicate (fromIntegral (o' - o)) 0
+
 ------------------------------------------------------------------------
 -- Phdr
 
@@ -378,19 +393,19 @@ strtabSection :: Num w
               -> B.ByteString
                  -- ^ Data for name information
               -> ElfSection w
-strtabSection name idx name_data =
+strtabSection name idx nameData =
   ElfSection {
       elfSectionIndex = idx
     , elfSectionName = name
     , elfSectionType = SHT_STRTAB
     , elfSectionFlags = shf_none
     , elfSectionAddr = 0
-    , elfSectionSize = fromIntegral (B.length name_data)
+    , elfSectionSize = fromIntegral (B.length nameData)
     , elfSectionLink = 0
     , elfSectionInfo = 0
     , elfSectionAddrAlign = 1
     , elfSectionEntSize = 0
-    , elfSectionData = name_data
+    , elfSectionData = nameData
     }
 
 ------------------------------------------------------------------------
@@ -513,8 +528,14 @@ data ElfLayout w = ElfLayout {
         -- ^ Header information for elf file
       , elfLayoutRegions :: !(Seq.Seq (ElfDataRegion w))
         -- ^ Data regions from elf file
+      , elfLayoutPhdrCount :: ElfWordType w
+        -- ^ Number of program headers
+      , elfLayoutShdrCount :: ElfWordType w
+        -- ^ Number of section headers
       , elfLayoutSectionNameData :: !B.ByteString
         -- ^ Contents of section name table data.
+      , elfLayoutSectionNameOffsets :: !(Map B.ByteString Word32)
+        -- ^ Map from each section name to offset where it is stored.
       , strtab_idx :: !Word16
         -- ^ Index of strtab (or 'Nothing' if not defined).
         --
@@ -605,21 +626,36 @@ emptyElfSection =
              }
 
 -- | Add section information to layout.
-addSectionToLayout :: Map B.ByteString Word32 -- ^ Name to offset map.
-                   -> ElfLayout w
+-- This may call an erorr if not defined.
+addSectionToLayout :: ElfWidthConstraints w
+                   => ElfLayout w
                    -> ElfSection (ElfWordType w)
+                   -> Bool -- ^ Flag indicating if this section will be loaded.
                    -> ElfLayout w
-addSectionToLayout name_map l s
-    | Map.member (elfSectionIndex s) (l^.shdrs) =
+addSectionToLayout l s inLoad
+  | align <- elfSectionAddrAlign s
+  , not (B.null (elfSectionData s)) &&  (elfSectionAddr s .&. (align - 1)) /= 0 =
+      error $ BSC.unpack (elfSectionName s)
+          ++ " address of 0x" ++ showHex (elfSectionAddr s) ""
+          ++ " does not respect the alignment of 0x" ++ showHex align "."
+    -- If section is non-empty and file offset is not aligned, then fail.
+  | not (B.null (elfSectionData s))
+  , inLoad
+  , not (isAligned (l^.elfOutputSize) (elfSectionAddrAlign s)) =
+      error $ "Section " ++ show (elfSectionName s) ++ " is in a loadable segment and not aligned."
+    -- Report error is section index already defined.
+  | Map.member (elfSectionIndex s) (l^.shdrs) =
       error $ "Section index " ++ show (elfSectionIndex s) ++ " already exists; cannot add "
-        ++ show (elfSectionName s) ++ "."
-    | otherwise = elfClassInstances (elfLayoutClass l) $
-     let Just no = Map.lookup (elfSectionName s) name_map
-         base =  l^.elfOutputSize
-         data_size = elfSectionFileSize s
-         idx = elfSectionIndex s
-      in l & elfOutputSize %~ (`incOffset` data_size)
-           & shdrs %~ Map.insert idx (s, no, fromFileOffset base)
+      ++ show (elfSectionName s) ++ "."
+  | otherwise =
+    let alignedOff
+          | inLoad || B.null (elfSectionData s) = fileOff
+          | otherwise = alignFileOffset (elfSectionAddrAlign s) fileOff
+        Just no = Map.lookup (elfSectionName s) (elfLayoutSectionNameOffsets l)
+        fileOff =  l^.elfOutputSize
+        idx = elfSectionIndex s
+     in l & elfOutputSize .~ incOffset alignedOff (elfSectionFileSize s)
+          & shdrs %~ Map.insert idx (s, no, fromFileOffset alignedOff)
 
 addGnuStackToLayout :: ElfLayout w -> GnuStack -> ElfLayout w
 addGnuStackToLayout l gnuStack
@@ -834,35 +870,29 @@ regionOffsetIgnorable reg =
     ElfDataSection s          -> B.null (elfSectionData s)
     ElfDataRaw b              -> B.null b
 
--- | Utility that validates alignment
-checkSegmentFileAlignment :: ElfWidthConstraints w
-                          => ElfSegment w
-                          -> FileOffset (ElfWordType w)
-                             -- ^ Offset in file to check
-                          -> a
-                             -- ^ Value to return if check suceeds.
-                          -> a
-checkSegmentFileAlignment s (FileOffset off) r
-  | all regionOffsetIgnorable (elfSegmentData s) == False
-  , (off .&. (align - 1)) /= (addr .&. (align - 1)) =
-      error $ "segment " ++ show (elfSegmentIndex s)
-          ++ " address of 0x" ++ showHex addr " and file offset 0x"
-          ++ showHex off ""
-          ++ " does not respect the alignment of 0x" ++ showHex align "."
-  | otherwise = r
-  where addr = elfSegmentVirtAddr s
-        align = elfSegmentAlign s
-
-
--- | Utility that validates alignment of the section address.
-checkSectionAlignment :: (Bits w, Integral w, Show w)
-                      => String -> Int -> w -> w -> a -> a
-checkSectionAlignment nm sz addr align r
-    | sz /= 0 &&  (addr .&. (align - 1)) /= 0 =
-      error $ nm
-          ++ " address of 0x" ++ showHex addr ""
-          ++ " does not respect the alignment of 0x" ++ showHex align "."
-    | otherwise = r
+-- | @sectionContents o s inLoad@ computes the contents and size of a section
+-- for rendering.
+--
+-- It is allowed to add padding as needed to ensure the alignment constraint is
+-- satisfied if the section is not loadable and non-empty.
+sectionContents :: (Bits o, Integral o)
+                => FileOffset o
+                -> ElfSection o
+                -> Bool -- ^ Flag indicating if section is inside loadable segment.
+                -> (Bld.Builder, o)
+sectionContents o s inLoad
+  | not (B.null (elfSectionData s))
+  , inLoad
+  , not (isAligned o (elfSectionAddrAlign s)) =
+    error "sectionContents out of alignment."
+  | B.null (elfSectionData s) = (mempty, 0)
+  | otherwise =
+    let o' = alignFileOffset (elfSectionAddrAlign s) o
+        paddingCnt = fromFileOffset o' - fromFileOffset o
+        dta = elfSectionData s
+     in ( Bld.byteString (B.replicate (fromIntegral paddingCnt) 0) <> Bld.byteString dta
+        , paddingCnt + fromIntegral (B.length dta)
+        )
 
 -- | Render the given list of regions at a particular file offeset.
 buildRegions :: forall w
@@ -878,20 +908,8 @@ buildRegions _ _ [] = mempty
 buildRegions l o ((reg,inLoad):rest) = do
   let hdr = elfLayoutHeader l
   let cl = headerClass hdr
+  let d = elfLayoutData l
   let doRest sz = buildRegions l (o `incOffset` sz) rest
-  let padAt :: String
-            -> ElfWordType w
-            -> (FileOffset (ElfWordType w) -> Bld.Builder)
-            -> Bld.Builder
-      padAt nm align next
-          | inLoad && o' /= o =
-            error $ "Error: " ++ nm ++ " file offset of 0x"
-                    ++ showHex (fromFileOffset o) " must be a multiple of "
-                    ++ show align ++ " within loadable segment."
-          | otherwise =
-            Bld.byteString (B.replicate (fromIntegral paddingCount) 0) <> next o'
-        where o' = alignFileOffset align o
-              paddingCount = fromFileOffset o' - fromFileOffset o
   case reg of
     ElfDataElfHeader
       | o /= startOfFile ->
@@ -899,59 +917,41 @@ buildRegions l o ((reg,inLoad):rest) = do
       | otherwise ->
         buildElfHeader l
         <> doRest (fromIntegral (ehdrSize cl))
-    ElfDataSegmentHeaders ->
-      -- The program header table should be aligned to (shdrAlign cl)
-      padAt "Program header table" (phdrAlign cl) $ \o' -> do
-        let phdrSize = fromIntegral (phnum l) * fromIntegral (phdrEntrySize cl)
-        buildElfSegmentHeaderTable hdr (allPhdrs l)
-          <> buildRegions l (o' `incOffset` phdrSize) rest
+    ElfDataSegmentHeaders
+      | not (isAligned o (phdrAlign cl)) ->
+          error $ "internal error: buildRegions phdr alignment check failed; Fix layoutRegion."
+      | otherwise ->
+          let phdrSize = fromIntegral (phnum l) * fromIntegral (phdrEntrySize cl)
+           in buildElfSegmentHeaderTable hdr (allPhdrs l)
+              <> buildRegions l (o `incOffset` phdrSize) rest
     ElfDataSegment s -> do
-      checkSegmentFileAlignment s o $
-        buildRegions l o $ ((,True) <$> F.toList (elfSegmentData s)) ++ rest
-    ElfDataSectionHeaders -> do
-      -- The section header table should be aligned to (shdrAlign cl)
-      padAt "Section header table" (shdrAlign cl) $ \o' -> do
-        let sz = fromIntegral (shnum l) * fromIntegral (shdrEntrySize cl)
-        buildElfSectionHeaderTable hdr (Map.elems (l^.shdrs))
-          <> buildRegions l (o' `incOffset` sz) rest
-    ElfDataSectionNameTable _ -> do
-      -- Section name string tables may appear at any offset.
-      let sz = fromIntegral (B.length (elfLayoutSectionNameData l))
-      Bld.byteString (elfLayoutSectionNameData l)
-        <> doRest sz
+      buildRegions l o $ ((,True) <$> F.toList (elfSegmentData s)) ++ rest
+    ElfDataSectionHeaders ->
+      let o' = alignFileOffset (shdrAlign cl) o
+          sz = fromIntegral (shnum l) * fromIntegral (shdrEntrySize cl)
+       in alignmentPadding o' o
+            <> buildElfSectionHeaderTable hdr (Map.elems (l^.shdrs))
+            <> buildRegions l (o' `incOffset` sz) rest
+    ElfDataSectionNameTable idx -> do
+      let s = strtabSection shstrtab idx (elfLayoutSectionNameData l)
+          (dta, sz) = sectionContents o s inLoad
+       in dta <> doRest sz
     ElfDataGOT g -> do
-      let align :: ElfWordType w
-          align = elfGotAddrAlign g
-      let dta = elfGotData g
-      let sz = B.length dta
-      checkSectionAlignment ".got" sz (elfGotAddr g) align $
-        Bld.byteString dta <> doRest (fromIntegral sz)
-    ElfDataStrtab _ ->
-      -- String tables may appear at any offset.
-      let dta = strtab_data l
-       in Bld.byteString dta <> doRest (fromIntegral (B.length dta))
-    ElfDataSymtab symtab -> do
-      -- The section header table should be aligned to (symtabAlign cl)
-      padAt ".symtab" (symtabAlign cl) $ \o' -> do
-        -- TODO: Check alignment
-        let sz = symbolTableSize cl symtab
-        symtabData cl (headerData hdr) (strtab_map l) symtab
-          <> buildRegions l (o' `incOffset` sz) rest
-    ElfDataSection s -> do
-      let nm = BSC.unpack (elfSectionName s)
-      let align :: ElfWordType w
-          align = elfSectionAddrAlign s
-      let dta = elfSectionData s
-      let sz :: Int
-          sz = B.length dta
-      -- Check addr
-      checkSectionAlignment nm sz (elfSectionAddr s) align $
-        -- If the section contains no data (e.g., ".bss") then we ignore
-        -- the file alignment constraint.
-        padAt nm (if sz == 0 then 1 else align) $ \o' ->
-          Bld.byteString dta
-            <> buildRegions l (o' `incOffset` fromIntegral sz) rest
-    ElfDataRaw dta -> do
+      let s = elfGotSection g
+          (dta, sz) = sectionContents o s inLoad
+       in dta <> doRest sz
+    ElfDataStrtab idx ->
+      let s = strtabSection ".strtab" idx (strtab_data l)
+          (dta, sz) = sectionContents o s inLoad
+       in dta <> doRest sz
+    ElfDataSymtab symtab ->
+      let s = symtabSection cl d (strtab_map l) (strtab_idx l) symtab
+          (dta, sz) = sectionContents o s inLoad
+       in dta <> doRest sz
+    ElfDataSection s ->
+      let (dta, sz) = sectionContents o s inLoad
+       in dta <> doRest sz
+    ElfDataRaw dta ->
       Bld.byteString dta <> doRest (fromIntegral (B.length dta))
 
 -- | Return the bytes in the Elf file as a lazy bytestring.
@@ -965,19 +965,20 @@ elfLayoutBytes l = elfClassInstances (elfLayoutClass l) $
 
 -- | Return the size of a region given the elf region data.
 elfRegionFileSize :: ElfLayout w -> ElfDataRegion w -> ElfWordType w
-elfRegionFileSize l reg = elfClassInstances c $ do
-    case reg of
-      ElfDataElfHeader          -> fromIntegral (ehdrSize c)
-      ElfDataSegmentHeaders     -> fromIntegral (phnum l) * fromIntegral (phdrEntrySize c)
-      ElfDataSegment s          -> sum (elfRegionFileSize l <$> elfSegmentData s)
-      ElfDataSectionHeaders     -> fromIntegral (shnum l) * fromIntegral (shdrEntrySize c)
-      ElfDataSectionNameTable _ -> fromIntegral $ B.length $ elfLayoutSectionNameData l
-      ElfDataGOT g              -> elfGotSize g
-      ElfDataStrtab _           -> fromIntegral $ B.length $ strtab_data l
-      ElfDataSymtab symtab      -> symbolTableSize c symtab
-      ElfDataSection s          -> elfSectionFileSize s
-      ElfDataRaw b              -> fromIntegral (B.length b)
-  where c = elfLayoutClass l
+elfRegionFileSize l reg =
+  let c = elfLayoutClass l
+   in elfClassInstances c $
+        case reg of
+          ElfDataElfHeader          -> fromIntegral (ehdrSize c)
+          ElfDataSegmentHeaders     -> fromIntegral (phnum l) * fromIntegral (phdrEntrySize c)
+          ElfDataSegment s          -> sum (elfRegionFileSize l <$> elfSegmentData s)
+          ElfDataSectionHeaders     -> fromIntegral (shnum l) * fromIntegral (shdrEntrySize c)
+          ElfDataSectionNameTable _ -> fromIntegral $ B.length $ elfLayoutSectionNameData l
+          ElfDataGOT g              -> elfGotSize g
+          ElfDataStrtab _           -> fromIntegral $ B.length $ strtab_data l
+          ElfDataSymtab symtab      -> symbolTableSize c symtab
+          ElfDataSection s          -> elfSectionFileSize s
+          ElfDataRaw b              -> fromIntegral (B.length b)
 
 ------------------------------------------------------------------------
 -- Generating ElfLayout from elf
@@ -1012,26 +1013,122 @@ elfSectionNames e = concatMap regionNames (F.toList (e^.elfFileData))
         regionNames (ElfDataSection s)          = [elfSectionName s]
         regionNames _                           = []
 
+-- Process element.
+layoutRegion :: forall w
+             .  ElfWidthConstraints w
+             => Bool -- ^ Flag that stores true if this region is inside a segment.
+             -> ElfLayout w
+             -> ElfDataRegion w
+             -> ElfLayout w
+layoutRegion inLoad l reg = do
+  let cl = elfLayoutClass l
+  let d = elfLayoutData l
+  let phdrCnt = elfLayoutPhdrCount l
+  let shdrCnt = elfLayoutShdrCount l
+  let o = l^.elfOutputSize
+  case reg of
+    ElfDataElfHeader
+      | o /= startOfFile ->
+          error "elfLayout given elf header outside start of file."
+      | otherwise ->
+          l & elfOutputSize .~ FileOffset (fromIntegral (ehdrSize cl))
+    ElfDataSegmentHeaders
+      | not (isAligned o (phdrAlign cl)) ->
+          error $ "Segment header table file offset " ++ show o
+               ++ " must be a multiple of " ++ show (phdrAlign cl) ++ "."
+      | otherwise ->
+        let phdrSize = phdrCnt * fromIntegral (phdrEntrySize cl)
+         in l & phdrTableOffset .~ o
+              & elfOutputSize .~ o `incOffset` phdrSize
+    ElfDataSegment s -> do
+      let -- Update layout by folding over segment data.
+          l2 :: ElfLayout w
+          l2 = foldl (layoutRegion True)  l (elfSegmentData s)
+          -- Get bytes at start of elf
+      let segSize   = rangeSize o (l2^.elfOutputSize)
+          -- Get memory size of segment
+      let memSize =
+            case elfSegmentMemSize s of
+              -- Absolute sizes are lower bounds
+              ElfAbsoluteSize sz -> max segSize sz
+              -- Relative sizes are offsets of the computed sizes.
+              ElfRelativeSize delta  -> segSize + delta
+      let idx = elfSegmentIndex s
+      let addr = elfSegmentVirtAddr s
+      let align = elfSegmentAlign s
+          -- Create program header
+      case () of
+        -- Check file offset and address are compatible.
+        _ | any (not . regionOffsetIgnorable) (elfSegmentData s)
+          , (fromFileOffset o .&. (align - 1)) /= (addr .&. (align - 1)) ->
+            error $ "segment " ++ show idx
+                ++ " address of 0x" ++ showHex addr " and file offset 0x"
+                ++ showHex (fromFileOffset o) ""
+                ++ " does not respect the alignment of 0x" ++ showHex align "."
+          | Map.member idx (l2^.phdrs) ->
+              error $ "Segment index " ++ show idx ++ " already exists."
+          | otherwise -> do
+            let phdr = Phdr { phdrSegmentIndex = idx
+                            , phdrSegmentType = elfSegmentType s
+                            , phdrSegmentFlags = elfSegmentFlags s
+                            , phdrSegmentVirtAddr = addr
+                            , phdrSegmentPhysAddr = elfSegmentPhysAddr s
+                            , phdrSegmentAlign = align
+                            , phdrFileStart = o
+                            , phdrFileSize  = segSize
+                            , phdrMemSize   = memSize
+                            }
+            l2 & phdrs %~ Map.insert idx phdr
+    ElfDataSectionHeaders
+      | inLoad ->
+          error $ "Section headers should not be within a segment."
+      | otherwise ->
+        let o' = alignFileOffset (shdrAlign cl) o
+            shdrTableSize = shdrCnt * fromIntegral (shdrEntrySize cl)
+         in l & shdrTableOffset .~ o'
+              & elfOutputSize   .~ incOffset o' shdrTableSize
+    ElfDataSectionNameTable idx ->
+      let l' = l & shstrndx .~ idx
+          s  = strtabSection shstrtab idx (elfLayoutSectionNameData l)
+       in addSectionToLayout l' s inLoad
+    ElfDataGOT g ->
+      let s = elfGotSection g
+       in addSectionToLayout l s inLoad
+    ElfDataStrtab idx ->
+      let s = strtabSection ".strtab" idx (strtab_data l)
+       in addSectionToLayout l s inLoad
+    ElfDataSymtab symtab ->
+      let s = symtabSection cl d (strtab_map l) (strtab_idx l) symtab
+       in addSectionToLayout l s inLoad
+    ElfDataSection s ->
+      addSectionToLayout l s inLoad
+    ElfDataRaw b ->
+      l & elfOutputSize %~ (`incOffset` fromIntegral (B.length b))
+
 -- | Return layout information from elf file.
 elfLayout' :: forall w . ElfWidthConstraints w => Elf w -> ElfLayout w
-elfLayout' e = final
-  where cl = elfClass e
-        d = elfData e
-        sec_names = elfSectionNames e
-        (name_data,name_map) = stringTable sec_names
+elfLayout' e = initl & flip (F.foldl' (layoutRegion False)) (e^.elfFileData)
+                     & flip (F.foldl' addGnuStackToLayout) (elfGnuStackSegment e)
+                     & flip (F.foldl' addRelroToLayout)    (elfGnuRelroRegions e)
+  where sec_names = elfSectionNames e
+        (nameData,nameMap) = stringTable sec_names
 
         (this_strtab_data, this_strtab_map) = stringTable (elfSymtabNames e)
 
-        phdr_cnt = elfSegmentCount e
+        phdrCnt = fromIntegral $
+                  elfSegmentCount e
                  + (if isJust (elfGnuStackSegment e) then 1 else 0)
                  + length (elfGnuRelroRegions e)
 
         -- Section names can be determed from counter
-        shdrCnt = length sec_names + 1
+        shdrCnt = fromIntegral $ length sec_names + 1
 
         initl = ElfLayout { elfLayoutHeader = elfHeader e
                           , elfLayoutRegions = e^.elfFileData
-                          , elfLayoutSectionNameData = name_data
+                          , elfLayoutPhdrCount = phdrCnt
+                          , elfLayoutShdrCount = shdrCnt
+                          , elfLayoutSectionNameData = nameData
+                          , elfLayoutSectionNameOffsets = nameMap
                           , strtab_idx  = elfStrtabSectionIndex e
                           , strtab_data = this_strtab_data
                           , strtab_map  = this_strtab_map
@@ -1043,73 +1140,6 @@ elfLayout' e = final
                           , _shdrs = Map.singleton 0 $ (emptyElfSection, 0, 0)
                           }
 
-        -- Process element.
-        layoutRegion :: ElfWidthConstraints w
-                        => ElfLayout w
-                        -> ElfDataRegion w
-                        -> ElfLayout w
-        layoutRegion l ElfDataElfHeader =
-             l & elfOutputSize %~ (`incOffset` (fromIntegral (ehdrSize cl)))
-        layoutRegion l ElfDataSegmentHeaders =
-             l' & phdrTableOffset .~ l'^.elfOutputSize
-                & elfOutputSize %~ (`incOffset` phdr_size)
-          where phdr_size = fromIntegral phdr_cnt * fromIntegral (phdrEntrySize cl)
-                l' = l & elfOutputSize %~ alignFileOffset (phdrAlign cl)
-
-        layoutRegion l (ElfDataSegment s) = l3
-          where -- Update layout by folding over segment data.
-                l2 :: ElfLayout w
-                l2 = foldl layoutRegion l (elfSegmentData s)
-                -- Get bytes at start of elf
-                seg_offset = l^.elfOutputSize
-                seg_size   = rangeSize seg_offset (l2^.elfOutputSize)
-                -- Get memory size of segment
-                mem_size =
-                  case elfSegmentMemSize s of
-                    -- Absolute sizes are lower bounds
-                    ElfAbsoluteSize sz -> max seg_size sz
-                    -- Relative sizes are offsets of the computed sizes.
-                    ElfRelativeSize o  -> seg_size + o
-                phdr = Phdr { phdrSegmentIndex = elfSegmentIndex s
-                            , phdrSegmentType = elfSegmentType s
-                            , phdrSegmentFlags = elfSegmentFlags s
-                            , phdrSegmentVirtAddr = elfSegmentVirtAddr s
-                            , phdrSegmentPhysAddr = elfSegmentPhysAddr s
-                            , phdrSegmentAlign = elfSegmentAlign s
-                            , phdrFileStart = seg_offset
-                            , phdrFileSize  = seg_size
-                            , phdrMemSize   = mem_size
-                            }
-                idx = elfSegmentIndex s
-                -- Add segment to appropriate
-                l3 :: ElfLayout w
-                l3 | Map.member idx (l2^.phdrs) =
-                     error $ "Segment index " ++ show idx ++ " already exists."
-                   | otherwise = l2 & phdrs %~ Map.insert idx phdr
-        layoutRegion l ElfDataSectionHeaders =
-             l' & shdrTableOffset .~ l'^.elfOutputSize
-                & elfOutputSize   %~ (`incOffset` shdrTableSize)
-          where shdrTableSize = fromIntegral shdrCnt * fromIntegral (shdrEntrySize cl)
-                l' = l & elfOutputSize   %~ alignFileOffset (shdrAlign cl)
-
-        layoutRegion l (ElfDataSectionNameTable idx) =
-            addSectionToLayout name_map l' s
-          where l' = l & shstrndx .~ idx
-                s  = strtabSection shstrtab idx name_data
-        layoutRegion l (ElfDataGOT g) = addSectionToLayout name_map l (elfGotSection g)
-        layoutRegion l (ElfDataStrtab idx) = addSectionToLayout name_map l s
-          where s = strtabSection ".strtab" idx (strtab_data l)
-        layoutRegion l (ElfDataSymtab symtab) =
-            addSectionToLayout name_map l' s
-          where s = symtabSection cl d (strtab_map l) (strtab_idx l) symtab
-                l' = l & elfOutputSize %~ alignFileOffset (symtabAlign cl)
-        layoutRegion l (ElfDataSection s) = addSectionToLayout name_map l s
-        layoutRegion l (ElfDataRaw b) =
-          l & elfOutputSize %~ (`incOffset` fromIntegral (B.length b))
-
-        final = initl & flip (F.foldl' layoutRegion) (e^.elfFileData)
-                      & flip (F.foldl' addGnuStackToLayout) (elfGnuStackSegment e)
-                      & flip (F.foldl' addRelroToLayout)    (elfGnuRelroRegions e)
 
 -- | Return layout information from elf file.
 elfLayout :: Elf w -> ElfLayout w
