@@ -176,7 +176,7 @@ type family ElfWordType (w::Nat) :: * where
   ElfWordType 32 = Word32
   ElfWordType 64 = Word64
 
-type ElfWidthConstraints w = (Bits (ElfWordType w), Integral (ElfWordType w), Show (ElfWordType w))
+type ElfWidthConstraints w = (Bits (ElfWordType w), Integral (ElfWordType w), Show (ElfWordType w), Bounded (ElfWordType w))
 
 -- | Given a provides a way to access 'Bits', 'Integral' and 'Show' instances
 -- of underlying word types associated with an 'ElfClass'.
