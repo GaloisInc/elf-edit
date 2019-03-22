@@ -30,5 +30,5 @@ matrix:
         - build-essential
 
 script:
- - stack --no-terminal --system-ghc --ghc-options="-Wall -Werror" build elf-edit
- - stack --no-terminal --system-ghc --ghc-options="-Wall -Werror" test elf-edit
+ - stack --no-terminal --system-ghc build elf-edit --ghc-options="-Wall -Werror"
+ - stack --no-terminal --system-ghc test elf-edit --ghc-options="-Wall -Werror"
