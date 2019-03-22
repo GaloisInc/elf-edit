@@ -21,7 +21,7 @@ source-repository head
 
 library
   build-depends:
-    base >= 4.8 && < 5,
+    base >= 4.11 && < 5,
     ansi-wl-pprint,
     binary,
     bytestring,

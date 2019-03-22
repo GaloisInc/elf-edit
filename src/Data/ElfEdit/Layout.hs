@@ -74,7 +74,6 @@ import           Data.List (sort)
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
-import           Data.Monoid
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
 import           Data.Word
