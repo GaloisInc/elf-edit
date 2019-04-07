@@ -432,7 +432,7 @@ getSymbolTableEntry ELFCLASS32 d strTab = do
   size  <- getWord32 d
   info  <- getWord8
   other <- getWord8
-  sTlbIdx <- ElfSectionIndex <$> getWord16 d
+  sTlbIdx <- getWord16 d
   let (typ,bind) = infoToTypeAndBind info
   nm <- case lookupString nameIdx strTab of
           Left e -> fail (show e)
@@ -441,7 +441,7 @@ getSymbolTableEntry ELFCLASS32 d strTab = do
                , steType  = typ
                , steBind  = bind
                , steOther = other
-               , steIndex = sTlbIdx
+               , steIndex = ElfSectionIndex sTlbIdx
                , steValue = value
                , steSize  = size
                }
@@ -449,7 +449,7 @@ getSymbolTableEntry ELFCLASS64 d strTab = do
   nameIdx <- getWord32 d
   info <- getWord8
   other <- getWord8
-  sTlbIdx <- ElfSectionIndex <$> getWord16 d
+  sTlbIdx <- getWord16 d
   symVal <- getWord64 d
   size <- getWord64 d
   nm <- case lookupString nameIdx strTab of
@@ -460,7 +460,7 @@ getSymbolTableEntry ELFCLASS64 d strTab = do
                , steType  = typ
                , steBind  = bind
                , steOther = other
-               , steIndex = sTlbIdx
+               , steIndex = ElfSectionIndex sTlbIdx
                , steValue = symVal
                , steSize  = size
                }
