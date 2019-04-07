@@ -657,7 +657,7 @@ dynSymEntry ds i = runParser ds $ elfClassInstances (dynClass ds) $ do
       symEntSize = fromIntegral (symbolTableEntrySize cl)
   let symOff :: Int64
       symOff = fromIntegral i * symEntSize
-  when (symOff + symEntSize <= L.length (dynSymtab ds)) $ do
+  when (symOff + symEntSize > L.length (dynSymtab ds)) $ do
     throwError (IllegalDynamicSymbolIndex i)
   let symEntry = L.drop symOff (dynSymtab ds)
   sym <-
