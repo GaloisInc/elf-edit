@@ -116,7 +116,7 @@ testDynSymTable = do
     dynSection <- either (T.assertFailure . show) pure $
         dynamicEntries d cl virtMap dynContents
 
-    syms <- either (T.assertFailure . show) pure $ dynSymTable dynSection
+    syms <- either (T.assertFailure . show) pure $ traverse (dynSymEntry dynSection) [0..2]
     let isVer VersionSpecific{} = True
         isVer VersionLocal  = False
         isVer VersionGlobal = False
@@ -124,7 +124,7 @@ testDynSymTable = do
         symInfo (s,v) = (steName s, isVer v)
     -- Statically define expected symbol information.
     let expectedSymInfo = [("",False), ("__libc_start_main",True), ("__gmon_start__", False)]
-    T.assertEqual "Testing number of relocations" (symInfo <$> V.toList syms) expectedSymInfo
+    T.assertEqual "Testing relocations" (symInfo <$> syms) expectedSymInfo
 
 tests :: T.TestTree
 tests = T.testGroup "ELF Tests"

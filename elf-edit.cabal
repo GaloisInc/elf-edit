@@ -1,5 +1,5 @@
 Name:          elf-edit
-Version:       0.33
+Version:       0.34.0
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
@@ -42,6 +42,7 @@ library
     Data.ElfEdit.Layout
     Data.ElfEdit.Relocations
     Data.ElfEdit.Relocations.ARM32
+    Data.ElfEdit.Relocations.ARM64
     Data.ElfEdit.Relocations.I386
     Data.ElfEdit.Relocations.X86_64
     Data.ElfEdit.Sections

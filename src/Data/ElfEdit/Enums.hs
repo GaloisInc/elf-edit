@@ -40,6 +40,7 @@ module Data.ElfEdit.Enums
   , pattern ET_CORE
     -- ** ElfMachine
   , ElfMachine(..)
+  , elfMachineNameMap
   , pattern EM_NONE
   , pattern EM_M32
   , pattern EM_SPARC
@@ -136,6 +137,9 @@ module Data.ElfEdit.Enums
   , pattern EM_TI_C6000
   , pattern EM_L1OM
   , pattern EM_K1OM
+  , pattern EM_AARCH64
+  , pattern EM_AVR32
+  , pattern EM_STM8
   , pattern EM_RISCV
   ) where
 
@@ -450,6 +454,12 @@ pattern EM_L1OM        = ElfMachine 180
 -- ^ Intel L10M
 pattern EM_K1OM        = ElfMachine 181
 -- ^ Intel K10M
+pattern EM_AARCH64     = ElfMachine 183
+-- ^ ARM 64-bit architecture (AARCH64)
+pattern EM_AVR32       = ElfMachine 185
+-- ^ Atmel Corporation 32-bit microprocessor family
+pattern EM_STM8        = ElfMachine 186
+-- ^ STMicroeletronics STM8 8-bit microcontroller
 pattern EM_RISCV       = ElfMachine 243
 -- ^ RISC-V
 
@@ -557,5 +567,8 @@ elfMachineNameMap = Map.fromList
   , (,) EM_TI_C6000 "EM_TI_C6000"
   , (,) EM_L1OM "EM_L1OM"
   , (,) EM_K1OM "EM_K1OM"
+  , (,) EM_AARCH64 "EM_AARCH64"
+  , (,) EM_AVR32   "EM_AVR32"
+  , (,) EM_STM8    "EM_STM8"
   , (,) EM_RISCV "EM_RISCV"
   ]

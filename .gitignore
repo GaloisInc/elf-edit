@@ -4,3 +4,4 @@ cabal.sandbox.config
 .stack-work
 TAGS
 stack.yaml
+dist-newstyle

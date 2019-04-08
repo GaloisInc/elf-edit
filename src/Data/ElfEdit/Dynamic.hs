@@ -28,7 +28,7 @@ module Data.ElfEdit.Dynamic
   , dynamicEntries
   , getDynamicSectionFromSegments
   , DynamicMap
-  , dynSymTable
+  , dynSymEntry
   , DynamicError(..)
     -- Version information
   , VersionedSymbol
@@ -48,16 +48,15 @@ module Data.ElfEdit.Dynamic
 import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.Reader
-import           Control.Monad.State
 import           Data.Binary.Get hiding (runGet)
 import           Data.Bits
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy as L
 import           Data.Foldable
+import           Data.Int (Int64)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
-import qualified Data.Vector as V
 import           Data.Word
 import           Numeric (showHex)
 
@@ -103,29 +102,31 @@ virtAddrMap file = foldlM ins Map.empty
 
 -- | Errors found when parsing dynamic section
 data DynamicError
-   = MandatoryEntryMissing    !ElfDynamicTag
-   | EntryDuplicated          !ElfDynamicTag
-   | EntryAddressNotFound     !ElfDynamicTag
-   | EntrySizeTooSmall        !ElfDynamicTag
-   | BadSymbolTableEntrySize
-   | StrtabNotAfterSymtab
-   | ErrorParsingDynamicEntries !String
-   | ErrorParsingVerDefs !String
-   | ErrorParsingVerReqs !String
-   | VerSymTooSmall
-   | ErrorParsingSymTab  !String
+   = IllegalDynamicSymbolIndex !Word32
+   | BadValuePltRel !Integer
+     -- ^ DT_PLTREL entry contained a bad value
+   | ErrorParsingPLTEntries !String
    | ErrorParsingRelaEntries !String
    | IncorrectRelSize
    | IncorrectRelaSize
-   | IllegalNameIndex
-   | ErrorParsingPLTEntries !String
-   | DupVersionReqAuxIndex !Word16
    | UnresolvedVersionReqAuxIndex !B.ByteString !Word16
+   | VerSymTooSmall
    | MultipleDynamicSegments
-   | BadValuePltRel !Integer
-     -- ^ DT_PLTREL entry contained a bad value
+   | BadSymbolTableEntrySize
+   | ErrorParsingSymTabEntry  !Word32 !String
+   | DupVersionReqAuxIndex !Word16
+   | DtSonameIllegal !LookupStringError
+   | ErrorParsingDynamicEntries !String
+   | ErrorParsingVerDefs !String
+   | ErrorParsingVerReqs !String
+   | MandatoryEntryMissing    !ElfDynamicTag
+   | EntryDuplicated          !ElfDynamicTag
+   | EntryAddressNotFound     !ElfDynamicTag
+   | EntrySizeTooSmall        !ElfDynamicTag
+     -- ^ We could not parse the given symbol table entry.
 
 instance Show DynamicError where
+  show (IllegalDynamicSymbolIndex idx) = "Symbol index " ++ show idx ++ " is out of bounds."
   show (MandatoryEntryMissing tag) =
     "Dynamic information missing " ++ show tag
   show (EntryDuplicated tag) =
@@ -138,13 +139,13 @@ instance Show DynamicError where
   show (ErrorParsingDynamicEntries msg) = "Invalid dynamic entries: " ++ msg
   show (ErrorParsingVerDefs msg) = "Invalid version defs: " ++ msg
   show (ErrorParsingVerReqs msg) = "Invalid version reqs: " ++ msg
-  show (ErrorParsingSymTab msg) = "Invalid symbol table: " ++ msg
+  show (ErrorParsingSymTabEntry idx msg) =
+    "Could not parse symbol table entry " ++ show idx ++ ": " ++ msg
   show (ErrorParsingRelaEntries msg) = "Could not parse relocation entries: " ++ msg
   show IncorrectRelSize = "DT_RELENT has unexpected size"
   show IncorrectRelaSize = "DT_RELAENT has unexpected size"
   show (ErrorParsingPLTEntries msg) = "Could not parse PLT relocation entries: " ++ msg
-  show IllegalNameIndex = "The index of the DT_SONAME is illegal."
-  show StrtabNotAfterSymtab = "The dynamic string table did not appear just after symbol table."
+  show (DtSonameIllegal idx) = "Error parsing DT_SONAME: " ++ show idx
   show (DupVersionReqAuxIndex idx) = "The version requirement index " ++ show idx ++ " is not unique."
   show (UnresolvedVersionReqAuxIndex sym idx) =
     "Symbol " ++ BSC.unpack sym ++ " has unresolvable version requirement index " ++ show idx ++ "."
@@ -206,15 +207,6 @@ mandatoryDynamicEntry tag m =
     [w] -> return w
     []  -> throwError $ MandatoryEntryMissing tag
     _   -> throwError $ EntryDuplicated tag
-
--- | Parse a word16 with the given data.
-word16 :: ElfData -> L.ByteString -> DynamicParser w Word16
-word16 d s = do
-  let idx i = fromIntegral (s `L.index` i)
-  case d of
-    _ | L.length s < 2 -> throwError VerSymTooSmall
-    ELFDATA2LSB -> pure $ (idx 1 `shiftL` 8) .|. idx 0
-    ELFDATA2MSB -> pure $ (idx 0 `shiftL` 8) .|. idx 1
 
 ------------------------------------------------------------------------
 -- Lookup address
@@ -442,13 +434,17 @@ data DynamicSection w
                 , dynClass :: !(ElfClass w)
                 , dynAddrMap :: !(VirtAddrMap w)
                 , dynMap :: !(DynamicMap w)
-
+                , dynSymtab :: !L.ByteString
+                  -- ^ Contents of file starting from begining of symbol table.
+                  -- Note the dynamic section does not define the end of the symbol
+                  -- table, so this buffer may contain past the end of the symbol table.
+                , dynVerSym :: !(Maybe L.ByteString)
+                  -- ^ Contents of file starting from start of .gnu.version section
                 , dynSOName :: Maybe B.ByteString
                 , dynStrTab  :: B.ByteString
                   -- ^ Dynamic string table contents
-                , dynSymbols :: !(V.Vector (ElfSymbolTableEntry (ElfWordType w)))
                 , dynVersionDefs :: ![VersionDef]
-                , dynVersionReqs :: ![VersionReq]
+                , dynVersionReqs :: !VersionReqMap
                   -- | Address of GNU Hash address.
                 , dynGNUHASH_Addr :: !(Maybe (ElfWordType w))
                 , dynPLTAddr :: !(Maybe (ElfWordType w))
@@ -487,35 +483,6 @@ getDynStrTab m = do
   sz <- mandatoryDynamicEntry DT_STRSZ m
   L.toStrict <$> addressRangeToFile (DT_STRTAB, DT_STRSZ) (w,sz)
 
-dynSymTab :: B.ByteString
-             -- ^ String table
-          -> DynamicMap w
-          -> DynamicParser w [ElfSymbolTableEntry (ElfWordType w)]
-dynSymTab strTab m = do
-  cl  <- asks fileClass
-  dta <- asks fileData
-  elfClassInstances cl $ do
-
-  sym_off <- mandatoryDynamicEntry DT_SYMTAB m
-  -- According to a comment in GNU Libc 2.19 (dl-fptr.c:175), you get the
-  -- size of the dynamic symbol table by assuming that the string table follows
-  -- immediately afterwards.
-  str_off <- mandatoryDynamicEntry DT_STRTAB m
-  -- Size of each symbol table entry.
-  syment <- mandatoryDynamicEntry DT_SYMENT m
-  when (syment /= symbolTableEntrySize cl) $ do
-    throwError BadSymbolTableEntrySize
-  symtab <- do
-    symtab_full <- addressToFile DT_SYMTAB sym_off
-    let sym_sz = fromIntegral $ str_off - sym_off
-    when (str_off < sym_off || L.length symtab_full < sym_sz) $ do
-      throwError StrtabNotAfterSymtab
-    pure $! L.take sym_sz symtab_full
-
-  case runGetMany (getSymbolTableEntry cl dta strTab) symtab of
-    Left msg -> throwError $ ErrorParsingSymTab msg
-    Right entries -> return entries
-
 parsed_dyntags :: [ElfDynamicTag]
 parsed_dyntags =
   [ DT_NEEDED
@@ -552,6 +519,15 @@ parsed_dyntags =
 -- if it exists.
 --
 -- The code assumes that there is at most one segment with type 'PT_DYNAMIC'.
+--
+-- Note. This code previously parsed all the dynamic symbol table entries.  It
+-- inferred the size of the dynamic symbol table by assuming that the string
+-- table immediately followed the symbol table.  This was chosen because
+-- this is what GNU Libc 2.19 (see comment in dl-fptr.c:175).  It turns out
+-- Android does not follow this convention, and so we now defer parsing
+-- dynamic symbol tables here, but rather provide a function `dynSymEntry`
+-- for parsing them later (e.g. when resolving relocations that refer to
+-- symbol table entries).
 dynamicEntries :: forall w
                 . ElfData
                   -- ^ Elf data
@@ -574,26 +550,36 @@ dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
   mnm_index <- optionalDynamicEntry DT_SONAME m
   mnm <- case mnm_index of
            Nothing -> pure Nothing
-           Just idx -> either (\_ -> throwError IllegalNameIndex) (pure . Just) $
-             lookupString (fromIntegral idx) strTab
+           Just idx ->
+             case lookupString (fromIntegral idx) strTab of
+               Left e -> throwError (DtSonameIllegal e)
+               Right r -> pure $! Just r
 
-  symbols <- dynSymTab strTab m
+  -- Size of each symbol table entry.
+  syment <- mandatoryDynamicEntry DT_SYMENT m
+  when (syment /= symbolTableEntrySize cl) $ do
+    throwError BadSymbolTableEntrySize
+
+  -- Get buffer that points to beginnig of symbol table
+  symtabContents <-
+    addressToFile DT_SYMTAB =<< mandatoryDynamicEntry DT_SYMTAB m
 
   version_defs <- gnuVersionDefs strTab m
-  version_reqs <- gnuVersionReqs strTab m
-
+  version_reqs <- either throwError pure . versionReqMap =<< gnuVersionReqs strTab m
 
   gnuhashAddr  <- optionalDynamicEntry DT_GNU_HASH m
   pltAddr      <- optionalDynamicEntry DT_PLTGOT m
   mdebug       <- optionalDynamicEntry DT_DEBUG m
-
+  mvs <- optionalDynamicEntry DT_VERSYM m
+  mVerContents <- traverse (addressToFile DT_VERSYM) mvs
   return $ DynSection { dynData    = d
                       , dynClass   = cl
                       , dynAddrMap = virtMap
                       , dynMap     = m
+                      , dynSymtab  = symtabContents
+                      , dynVerSym  = mVerContents
                       , dynStrTab  = strTab
                       , dynSOName  = mnm
-                      , dynSymbols = V.fromList symbols
                       , dynVersionDefs = version_defs
                       , dynVersionReqs = version_reqs
                       , dynGNUHASH_Addr = gnuhashAddr
@@ -661,40 +647,46 @@ insVersionReq m0 r = foldlM ins m0 (vn_aux r)
 versionReqMap :: [VersionReq] -> Either DynamicError VersionReqMap
 versionReqMap = foldlM insVersionReq Map.empty
 
--- | Return the symbols in this section with version information added.
-dynSymTable :: DynamicSection w
-            -> Either DynamicError (V.Vector (VersionedSymbol (ElfWordType w)))
-dynSymTable ds = runParser ds $ do
-  let dm = dynMap ds
-  let symbols = dynSymbols ds
+-- | Return the symbol with the given index.
+dynSymEntry :: forall w . DynamicSection w -> Word32 -> Either DynamicError (VersionedSymbol (ElfWordType w))
+dynSymEntry ds i = runParser ds $ elfClassInstances (dynClass ds) $ do
   let dta = dynData ds
-  mvs <- optionalDynamicEntry DT_VERSYM dm
-  case mvs of
-    Nothing ->
-      return $! (\s -> (s, VersionGlobal)) <$> symbols
-    Just vs -> do
-      verMap <- either throwError pure $ versionReqMap (dynVersionReqs ds)
-
-      -- Extract the version symbol information.
-      fileRest <- addressToFile DT_VERSYM vs
-      -- This takes each symbol table entry and associated it with the version indices
-      -- by the next two bytes in the bytestring.
-      let resolveSymVer :: ElfSymbolTableEntry a
-                        -> StateT L.ByteString (DynamicParser w) (VersionedSymbol a)
-          resolveSymVer sym = do
-            -- Drop the first two bytes
-            bs <- get
-            put (L.drop 2 bs)
-            -- Parse the version index
-            idx <- lift $ word16 dta bs
-            case idx of
-              0 -> pure (sym, VersionLocal)
-              1 -> pure (sym, VersionGlobal)
-              _ | Just verId <- Map.lookup idx verMap -> do
-                    pure (sym, VersionSpecific verId)
-                | otherwise -> do
-                    throwError $ UnresolvedVersionReqAuxIndex (steName sym) idx
-      evalStateT (traverse resolveSymVer symbols) fileRest
+  let cl = dynClass ds
+  -- Size of each symbol table enty.
+  let symEntSize :: Int64
+      symEntSize = fromIntegral (symbolTableEntrySize cl)
+  let symOff :: Int64
+      symOff = fromIntegral i * symEntSize
+  when (symOff + symEntSize > L.length (dynSymtab ds)) $ do
+    throwError (IllegalDynamicSymbolIndex i)
+  let symEntry = L.drop symOff (dynSymtab ds)
+  sym <-
+    case runGetOrFail (getSymbolTableEntry cl dta (dynStrTab ds)) symEntry of
+      Left (_,_,msg) -> throwError (ErrorParsingSymTabEntry i msg)
+      Right (_,_,sym) -> pure sym
+  case dynVerSym ds of
+    Nothing -> do
+      return $! (sym, VersionGlobal)
+    Just verBuffer -> do
+      -- Parse the version index
+      let verOffset :: Int64
+          verOffset = 2 * fromIntegral i
+      -- Check the version offset is larger enough
+      when (verOffset + 2 > L.length verBuffer) $ throwError VerSymTooSmall
+      let verIdx =
+            let g :: Int64 -> Word16
+                g j = fromIntegral (L.index verBuffer (verOffset + j))
+             in case dta of
+                  ELFDATA2LSB -> (g 1 `shiftL` 8) .|. g 0
+                  ELFDATA2MSB -> (g 0 `shiftL` 8) .|. g 1
+      case verIdx of
+        0 -> pure (sym, VersionLocal)
+        1 -> pure (sym, VersionGlobal)
+        _ ->
+          case Map.lookup verIdx (dynVersionReqs ds) of
+            Just verId -> pure (sym, VersionSpecific verId)
+            Nothing -> do
+              throwError $ UnresolvedVersionReqAuxIndex (steName sym) verIdx
 
 ------------------------------------------------------------------------
 -- Relocations
