@@ -102,7 +102,8 @@ virtAddrMap file = foldlM ins Map.empty
 
 -- | Errors found when parsing dynamic section
 data DynamicError
-   = IllegalDynamicSymbolIndex !Word32
+   = ErrorParsingSymTabEntry  !SymbolTableError
+     -- ^ Error occurred parsing dynamic symbol table entry.
    | BadValuePltRel !Integer
      -- ^ DT_PLTREL entry contained a bad value
    | ErrorParsingPLTEntries !String
@@ -113,7 +114,6 @@ data DynamicError
    | VerSymTooSmall
    | MultipleDynamicSegments
    | BadSymbolTableEntrySize
-   | ErrorParsingSymTabEntry  !Word32 !String
    | DupVersionReqAuxIndex !Word16
    | DtSonameIllegal !LookupStringError
    | ErrorParsingDynamicEntries !String
@@ -126,7 +126,8 @@ data DynamicError
      -- ^ We could not parse the given symbol table entry.
 
 instance Show DynamicError where
-  show (IllegalDynamicSymbolIndex idx) = "Symbol index " ++ show idx ++ " is out of bounds."
+  show (ErrorParsingSymTabEntry entry) =
+    show entry
   show (MandatoryEntryMissing tag) =
     "Dynamic information missing " ++ show tag
   show (EntryDuplicated tag) =
@@ -139,8 +140,6 @@ instance Show DynamicError where
   show (ErrorParsingDynamicEntries msg) = "Invalid dynamic entries: " ++ msg
   show (ErrorParsingVerDefs msg) = "Invalid version defs: " ++ msg
   show (ErrorParsingVerReqs msg) = "Invalid version reqs: " ++ msg
-  show (ErrorParsingSymTabEntry idx msg) =
-    "Could not parse symbol table entry " ++ show idx ++ ": " ++ msg
   show (ErrorParsingRelaEntries msg) = "Could not parse relocation entries: " ++ msg
   show IncorrectRelSize = "DT_RELENT has unexpected size"
   show IncorrectRelaSize = "DT_RELAENT has unexpected size"
@@ -648,22 +647,17 @@ versionReqMap :: [VersionReq] -> Either DynamicError VersionReqMap
 versionReqMap = foldlM insVersionReq Map.empty
 
 -- | Return the symbol with the given index.
-dynSymEntry :: forall w . DynamicSection w -> Word32 -> Either DynamicError (VersionedSymbol (ElfWordType w))
+dynSymEntry :: forall w
+            .  DynamicSection w -- ^ Dynamic section information
+            -> Word32 -- ^ Index of symbol table entry.
+            -> Either DynamicError (VersionedSymbol (ElfWordType w))
 dynSymEntry ds i = runParser ds $ elfClassInstances (dynClass ds) $ do
-  let dta = dynData ds
-  let cl = dynClass ds
-  -- Size of each symbol table enty.
-  let symEntSize :: Int64
-      symEntSize = fromIntegral (symbolTableEntrySize cl)
-  let symOff :: Int64
-      symOff = fromIntegral i * symEntSize
-  when (symOff + symEntSize > L.length (dynSymtab ds)) $ do
-    throwError (IllegalDynamicSymbolIndex i)
-  let symEntry = L.drop symOff (dynSymtab ds)
+  -- Parse symbol table entry
   sym <-
-    case runGetOrFail (getSymbolTableEntry cl dta (dynStrTab ds)) symEntry of
-      Left (_,_,msg) -> throwError (ErrorParsingSymTabEntry i msg)
-      Right (_,_,sym) -> pure sym
+    case parseSymbolTableEntry (dynClass ds) (dynData ds) (dynStrTab ds) (dynSymtab ds) i of
+      Left e -> throwError (ErrorParsingSymTabEntry e)
+      Right sym -> pure sym
+  -- Parse version information if present.
   case dynVerSym ds of
     Nothing -> do
       return $! (sym, VersionGlobal)
@@ -676,7 +670,7 @@ dynSymEntry ds i = runParser ds $ elfClassInstances (dynClass ds) $ do
       let verIdx =
             let g :: Int64 -> Word16
                 g j = fromIntegral (L.index verBuffer (verOffset + j))
-             in case dta of
+             in case dynData ds of
                   ELFDATA2LSB -> (g 1 `shiftL` 8) .|. g 0
                   ELFDATA2MSB -> (g 0 `shiftL` 8) .|. g 1
       case verIdx of

@@ -121,6 +121,8 @@ module Data.ElfEdit
   , ElfSymbolTableEntry(..)
   , ppSymbolTableEntries
   , symbolTableEntrySize
+  , parseSymbolTableEntry
+  , getSymbolTableEntries
   , module Data.ElfEdit.SymbolEnums
     -- ** Elf symbol visibility
   , steVisibility
