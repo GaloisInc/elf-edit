@@ -94,7 +94,12 @@ module Data.ElfEdit
   , ElfGetResult(..)
   , ElfParseError(..)
   , parseElf
+  , parseElfOrDie
   , SomeElf(..)
+  , showElfHeaderError
+  , dieElfHeaderError
+  , showElfParseErrors
+  , dieElfParseErrors
     -- * Writing Elf files
   , renderElf
     -- ** Layout information
