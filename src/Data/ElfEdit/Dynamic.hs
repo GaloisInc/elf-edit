@@ -155,6 +155,7 @@ instance Show DynamicError where
 ------------------------------------------------------------------------
 -- DynamicMap
 
+-- | Map tags to the values associated with that tag.
 type DynamicMap w = Map.Map ElfDynamicTag [ElfWordType w]
 
 insertDynamic :: Dynamic v ->  Map.Map ElfDynamicTag [v] -> Map.Map ElfDynamicTag [v]

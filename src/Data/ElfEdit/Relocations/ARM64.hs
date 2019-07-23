@@ -12,7 +12,7 @@ module Data.ElfEdit.Relocations.ARM64
   ) where
 
 import qualified Data.Map.Strict          as Map
-import           Data.Word                (Word8)
+import           Data.Word
 
 import           Data.ElfEdit.Relocations
 import           Data.ElfEdit.Types       (ElfClass (..), ppHex)
@@ -21,17 +21,32 @@ import           Data.ElfEdit.Types       (ElfClass (..), ppHex)
 -- ARM_RelocationType
 
 -- | Relocation types for ARM64 code.
-newtype ARM64_RelocationType = ARM64_RelocationType { fromARM_RelocationType :: Word8 }
+newtype ARM64_RelocationType = ARM64_RelocationType { fromARM_RelocationType :: Word32 }
   deriving (Eq,Ord)
 
+pattern R_AARCH64_ABS64 :: ARM64_RelocationType
+pattern R_AARCH64_ABS64 = ARM64_RelocationType 257
+
+pattern R_AARCH64_GLOB_DAT :: ARM64_RelocationType
+pattern R_AARCH64_GLOB_DAT = ARM64_RelocationType 1025
+
 pattern R_AARCH64_JUMP_SLOT :: ARM64_RelocationType
-pattern R_AARCH64_JUMP_SLOT = ARM64_RelocationType 2
+pattern R_AARCH64_JUMP_SLOT = ARM64_RelocationType 1026
+
+pattern R_AARCH64_RELATIVE :: ARM64_RelocationType
+pattern R_AARCH64_RELATIVE = ARM64_RelocationType 1027
+
+pattern R_AARCH64_TLS_DTPMOD64 :: ARM64_RelocationType
+pattern R_AARCH64_TLS_DTPMOD64 = ARM64_RelocationType 1029
 
 arm_RelocationTypes :: Map.Map ARM64_RelocationType String
 arm_RelocationTypes = Map.fromList
-  [ (,) R_AARCH64_JUMP_SLOT "R_AARCH64_JUMP_SLOT"
+  [ (,) R_AARCH64_ABS64     "R_AARCH64_ABS64"
+  , (,) R_AARCH64_GLOB_DAT "R_AARCH64_GLOB_DAT"
+  , (,) R_AARCH64_JUMP_SLOT "R_AARCH64_JUMP_SLOT"
+  , (,) R_AARCH64_RELATIVE  "R_AARCH64_RELATIVE"
+  , (,) R_AARCH64_TLS_DTPMOD64 "R_AARCH64_TLS_DTPMOD64"
   ]
-
 
 instance Show ARM64_RelocationType where
   show i =

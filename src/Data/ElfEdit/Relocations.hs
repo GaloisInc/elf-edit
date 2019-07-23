@@ -26,6 +26,8 @@ module Data.ElfEdit.Relocations
   , relOffset
   , relaOffset
   , relaToRel
+  , relocationSymIndex
+  , relocationTypeVal
   , isRelativeRelaEntry
   , ppRelaEntries
   , elfRelEntries
