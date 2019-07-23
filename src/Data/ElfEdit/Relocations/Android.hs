@@ -68,7 +68,7 @@ readByte = Parser $ do
 readSLEB128' :: Int -> Natural -> Parser s Integer
 readSLEB128' w v = seq w $ seq v $ do
   b <- fromIntegral <$> readByte
-g  let w' = w+7
+  let w' = w+7
   let v' = v .|. (b .&. 0x7f) `shiftL` w
   if b `testBit` 7 then
     readSLEB128' w' v'
