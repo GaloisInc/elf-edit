@@ -16,6 +16,7 @@ module Data.ElfEdit.Get
     -- * elfHeaderInfo low-level interface
   , ElfHeaderInfo
   , header
+  , headerPhdrs
   , parseElfHeaderInfo
   , SomeElf(..)
   , getElf
@@ -401,9 +402,9 @@ phdrByIndex :: ElfHeaderInfo w -- ^ Information for parsing
 phdrByIndex ehi i = elfClassInstances (headerClass (header ehi)) $
   Get.runGet (getPhdr ehi i) (tableEntry (phdrTable ehi) i (fileContents ehi))
 
--- | Return list of segments with contents.
-rawSegments :: ElfHeaderInfo w -> [Phdr w]
-rawSegments ehi = phdrByIndex ehi <$> enumCnt 0 (entryNum (phdrTable ehi))
+-- | Return list of segments program headers from
+headerPhdrs :: ElfHeaderInfo w -> [Phdr w]
+headerPhdrs ehi = phdrByIndex ehi <$> enumCnt 0 (entryNum (phdrTable ehi))
 
 -- | Return section and file offset and size.
 getSectionAndRange :: HasCallStack
@@ -791,7 +792,7 @@ getElf :: forall w
        .  ElfHeaderInfo w
        -> ([ElfParseError], Elf w)
 getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
-  let phdrs = rawSegments ehi
+  let phdrs = headerPhdrs ehi
   let -- Return range used to store name index.
       nameRange :: Range (ElfWordType w)
       nameRange = fst $ nameSectionInfo ehi

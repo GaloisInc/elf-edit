@@ -89,6 +89,7 @@ module Data.ElfEdit
   , Phdr(..)
   , FileOffset(..)
   , phdrFileRange
+  , headerPhdrs
     -- * Reading Elf files
   , hasElfMagic
   , ElfGetResult(..)
@@ -169,6 +170,7 @@ module Data.ElfEdit
     -- * Low level information
   , ElfHeaderInfo
   , parseElfHeaderInfo
+  , header
   , getElf
     -- * Gnu-specific extensions
   , GnuStack(..)

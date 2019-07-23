@@ -4,6 +4,7 @@ Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
 Defines the tags used in the dynamic section.
 -}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
@@ -15,6 +16,7 @@ import           Data.Foldable
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32)
+import           Numeric (showHex)
 
 newtype ElfDynamicTag = ElfDynamicTag { fromElfDynamicTag :: Word32 }
   deriving (Eq, Ord, Num)
@@ -78,6 +80,7 @@ pattern DT_ANDROID_RELA   = ElfDynamicTag 0x60000011
 
 pattern DT_ANDROID_RELASZ :: ElfDynamicTag
 pattern DT_ANDROID_RELASZ = ElfDynamicTag 0x60000012
+
 
 -- | The start of OS specific tags.
 --
@@ -144,15 +147,26 @@ pattern DT_VERNEED         = ElfDynamicTag 0x6ffffffe
 -- | Number of needed versions.
 pattern DT_VERNEEDNUM = ElfDynamicTag 0x6fffffff
 
-
 pattern OLD_DT_HIOS :: ElfDynamicTag
 pattern OLD_DT_HIOS = ElfDynamicTag 0x6fffffff
+
+pattern DT_LOPROC :: ElfDynamicTag
+pattern DT_LOPROC = ElfDynamicTag 0x70000000
+
+-- | The number of entries in the dynamic symbol table.
+pattern DT_ARM_SYMTABSZ :: ElfDynamicTag
+pattern DT_ARM_SYMTABSZ = 0x70000001
+
+pattern DT_HIPROC :: ElfDynamicTag
+pattern DT_HIPROC = ElfDynamicTag 0x7fffffff
 
 
 instance Show ElfDynamicTag where
   show = \tag -> case Map.lookup tag elfDynamicTagNameMap of
                    Just r -> r
-                   Nothing -> "ElfDynamicTag " ++ show (fromElfDynamicTag tag)
+                   Nothing
+                     | tag < OLD_DT_LOOS -> "ElfDynamicTag " ++ show (fromElfDynamicTag tag)
+                     | otherwise -> "ElfDynamicTag 0x" ++ showHex (fromElfDynamicTag tag) ""
     where
       merge new old = old ++ "|" ++ new
       ins m (k,v) = Map.insertWith merge k v m
@@ -198,7 +212,7 @@ instance Show ElfDynamicTag where
         , (,) DT_ANDROID_REL     "DT_ANDROID_REL"
         , (,) DT_ANDROID_RELSZ   "DT_ANDROID_RELSZ"
         , (,) DT_ANDROID_RELA    "DT_ANDROID_RELA"
-        , (,) DT_ANDROID_RELSZ   "DT_ANDROID_RELASZ"
+        , (,) DT_ANDROID_RELASZ  "DT_ANDROID_RELASZ"
 
         , (,) DT_HIOS            "DT_HIOS"
 
@@ -239,4 +253,7 @@ instance Show ElfDynamicTag where
         , (,) DT_VERDEFNUM       "DT_VERDEFNUM"
         , (,) DT_VERNEED         "DT_VERNEED"
         , (,) DT_VERNEEDNUM      "DT_VERNEEDNUM"
+        , (,) DT_LOPROC "DT_LOPROC"
+        , (,) DT_ARM_SYMTABSZ "DT_ARM_SYMTABSZ"
+        , (,) DT_HIPROC "DT_HIPROC"
         ]
