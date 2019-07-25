@@ -135,6 +135,7 @@ module Data.ElfEdit.Enums
   , pattern EM_ARCA
   , pattern EM_UNICORE
   , pattern EM_TI_C6000
+  , pattern EM_QDSP6
   , pattern EM_L1OM
   , pattern EM_K1OM
   , pattern EM_AARCH64
@@ -450,6 +451,10 @@ pattern EM_UNICORE     = ElfMachine 110
 -- ^ Microprocessor series from PKU-Unity Ltd. and MPRC of Peking University
 pattern EM_TI_C6000    = ElfMachine 140
 -- ^ Texas Instruments TMS320C6000 DSP family
+
+pattern EM_QDSP6 :: ElfMachine
+pattern EM_QDSP6 = ElfMachine 164
+
 pattern EM_L1OM        = ElfMachine 180
 -- ^ Intel L10M
 pattern EM_K1OM        = ElfMachine 181
@@ -565,6 +570,7 @@ elfMachineNameMap = Map.fromList
   , (,) EM_ARCA "EM_ARCA"
   , (,) EM_UNICORE "EM_UNICORE"
   , (,) EM_TI_C6000 "EM_TI_C6000"
+  , (,) EM_QDSP6 "EM_QDSP6"
   , (,) EM_L1OM "EM_L1OM"
   , (,) EM_K1OM "EM_K1OM"
   , (,) EM_AARCH64 "EM_AARCH64"

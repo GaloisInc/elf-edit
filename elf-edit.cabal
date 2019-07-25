@@ -43,7 +43,7 @@ library
     Data.ElfEdit.Relocations
     Data.ElfEdit.Relocations.Android
     Data.ElfEdit.Relocations.ARM32
-    Data.ElfEdit.Relocations.ARM64
+    Data.ElfEdit.Relocations.AARCH64
     Data.ElfEdit.Relocations.I386
     Data.ElfEdit.Relocations.X86_64
     Data.ElfEdit.Sections

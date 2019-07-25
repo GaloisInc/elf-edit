@@ -28,6 +28,7 @@ module Data.ElfEdit.Dynamic
   , dynamicEntries
   , getDynamicSectionFromSegments
   , DynamicMap
+  , parseDynamicMap
   , dynSymEntry
   , DynamicError(..)
     -- Version information
@@ -43,6 +44,7 @@ module Data.ElfEdit.Dynamic
     -- * Virtual address map
   , VirtAddrMap
   , virtAddrMap
+  , lookupVirtAddrContents
   ) where
 
 import           Control.Monad
@@ -51,6 +53,7 @@ import           Control.Monad.Reader
 import           Data.Binary.Get hiding (runGet)
 import           Data.Bits
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Unsafe as B
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as L
 import           Data.Foldable
@@ -71,7 +74,10 @@ import           Data.ElfEdit.Types
 
 -- | Maps the start of memory offsets in Elf file to the file contents backing that
 -- memory
-type VirtAddrMap w = Map.Map (ElfWordType w) L.ByteString
+newtype VirtAddrMap w = VAM (Map.Map (ElfWordType w) L.ByteString)
+
+instance Show (ElfWordType w) => Show (VirtAddrMap w) where
+  show (VAM m) = "VAM (" ++ show m ++ ")"
 
 -- | Creates a virtual address map from bytestring and list of program headers.
 --
@@ -80,7 +86,7 @@ virtAddrMap :: Integral (ElfWordType w)
             => L.ByteString -- ^ File contents
             -> [Phdr w] -- ^ Program headers
             -> Maybe (VirtAddrMap w)
-virtAddrMap file = foldlM ins Map.empty
+virtAddrMap file phdrList = VAM <$> foldlM ins Map.empty phdrList
   where -- Insert phdr into map if it is loadable
         ins m phdr
             -- If segment is not loadable or empty, leave map unchanged
@@ -97,13 +103,26 @@ virtAddrMap file = foldlM ins Map.empty
                 n              = phdrFileSize phdr
                 new_contents   = sliceL (dta,n) file
 
+-- | Return the contents in the Elf file starting from the given address
+-- offset.
+lookupVirtAddrContents :: Integral (ElfWordType w)
+                       => ElfWordType w
+                       -> VirtAddrMap w
+                       -> Maybe L.ByteString
+lookupVirtAddrContents addr (VAM m) =
+  case Map.lookupLE addr m of
+    Just (prev, contents) | addr - prev <= fromIntegral (L.length contents) -> do
+      let seg_offset = addr - prev
+      Just $! L.drop (fromIntegral seg_offset) contents
+    _ -> Nothing
+
 ------------------------------------------------------------------------
 -- DynamicError
 
 -- | Errors found when parsing dynamic section
 data DynamicError
-   = ErrorParsingSymTabEntry  !SymbolTableError
-     -- ^ Error occurred parsing dynamic symbol table entry.
+   = UnexpectedEndOfDynamicEntries
+   | ErrorParsingSymTabEntry !SymbolTableError
    | BadValuePltRel !Integer
      -- ^ DT_PLTREL entry contained a bad value
    | ErrorParsingPLTEntries !String
@@ -112,11 +131,11 @@ data DynamicError
    | IncorrectRelaSize
    | UnresolvedVersionReqAuxIndex !B.ByteString !Word16
    | VerSymTooSmall
+   | InvalidDynamicSegmentFileRange
    | MultipleDynamicSegments
    | BadSymbolTableEntrySize
    | DupVersionReqAuxIndex !Word16
    | DtSonameIllegal !LookupStringError
-   | ErrorParsingDynamicEntries !String
    | ErrorParsingVerDefs !String
    | ErrorParsingVerReqs !String
    | MandatoryEntryMissing    !ElfDynamicTag
@@ -126,8 +145,9 @@ data DynamicError
      -- ^ We could not parse the given symbol table entry.
 
 instance Show DynamicError where
-  show (ErrorParsingSymTabEntry entry) =
-    show entry
+  show UnexpectedEndOfDynamicEntries =
+    "Dynamic section ended before DT_NULL entry."
+  show (ErrorParsingSymTabEntry e) = show e
   show (MandatoryEntryMissing tag) =
     "Dynamic information missing " ++ show tag
   show (EntryDuplicated tag) =
@@ -137,7 +157,6 @@ instance Show DynamicError where
   show (EntrySizeTooSmall tag) =
     show tag ++ "refers past end of memory segment."
   show BadSymbolTableEntrySize = "Unexpected symbol table entry size."
-  show (ErrorParsingDynamicEntries msg) = "Invalid dynamic entries: " ++ msg
   show (ErrorParsingVerDefs msg) = "Invalid version defs: " ++ msg
   show (ErrorParsingVerReqs msg) = "Invalid version reqs: " ++ msg
   show (ErrorParsingRelaEntries msg) = "Could not parse relocation entries: " ++ msg
@@ -149,11 +168,19 @@ instance Show DynamicError where
   show (UnresolvedVersionReqAuxIndex sym idx) =
     "Symbol " ++ BSC.unpack sym ++ " has unresolvable version requirement index " ++ show idx ++ "."
   show VerSymTooSmall = "File ends before end of symbol version table."
+  show InvalidDynamicSegmentFileRange = "Dynamic segment file range is out of range of file."
   show MultipleDynamicSegments = "File contained multiple dynamic segments."
   show (BadValuePltRel v) = "DT_PLTREL entry contained an unexpected value " ++ show v ++ "."
 
 ------------------------------------------------------------------------
 -- DynamicMap
+
+-- | Dynamic array entry
+data Dynamic w
+   = Dynamic { dynamicTag :: !ElfDynamicTag
+             , _dynamicVal :: !w
+             }
+  deriving (Show)
 
 -- | Map tags to the values associated with that tag.
 type DynamicMap w = Map.Map ElfDynamicTag [ElfWordType w]
@@ -218,11 +245,11 @@ addressToFile tag addr = do
   cl       <- asks fileClass
   m        <- asks fileAddrMap
   elfClassInstances cl $ do
-  case Map.lookupLE addr m of
-    Just (prev, contents) | addr - prev <= fromIntegral (L.length contents) -> do
-      let seg_offset = addr - prev
-      return $ L.drop (fromIntegral seg_offset) contents
-    _ -> throwError $ EntryAddressNotFound tag
+  case lookupVirtAddrContents addr m of
+    Just contents ->
+      return $ contents
+    _ ->
+      throwError $ EntryAddressNotFound tag
 
 addressRangeToFile :: (ElfDynamicTag, ElfDynamicTag)
                    -> Range (ElfWordType w)
@@ -238,31 +265,76 @@ addressRangeToFile (tag_off, tag_size) (off, sz) = do
 ------------------------------------------------------------------------
 -- Dynamic
 
--- | Dynamic array entry
-data Dynamic w
-   = Dynamic { dynamicTag :: !ElfDynamicTag
-             , _dynamicVal :: !w
-             }
-  deriving (Show)
+word32le :: B.ByteString -> Word32
+word32le = \s ->
+      fromIntegral (s `B.unsafeIndex` 3) `shiftL` 24
+  .|. fromIntegral (s `B.unsafeIndex` 2) `shiftL` 16
+  .|. fromIntegral (s `B.unsafeIndex` 1) `shiftL`  8
+  .|. fromIntegral (s `B.unsafeIndex` 0)
 
--- | Read dynamic array entry.
-getDynamic :: forall w . ElfClass w -> ElfData -> Get (Dynamic (ElfWordType w))
-getDynamic w d = elfClassInstances w $ do
-  tag <- getRelaWord w d :: Get (ElfWordType w)
-  v   <- getRelaWord w d
-  return $! Dynamic (ElfDynamicTag (fromIntegral tag)) v
 
-dynamicList :: ElfClass w -> ElfData -> Get [Dynamic (ElfWordType w)]
-dynamicList w d = go []
-  where go l = do
-          done <- isEmpty
-          if done then
-            return l
-           else do
-            e <- getDynamic w d
-            case dynamicTag e of
-              DT_NULL -> return (reverse l)
-              _ -> go (e:l)
+word32be :: B.ByteString -> Word32
+word32be = \s ->
+      fromIntegral (s `B.unsafeIndex` 0) `shiftL` 24
+  .|. fromIntegral (s `B.unsafeIndex` 1) `shiftL` 16
+  .|. fromIntegral (s `B.unsafeIndex` 2) `shiftL`  8
+  .|. fromIntegral (s `B.unsafeIndex` 3)
+
+word64le :: B.ByteString -> Word64
+word64le = \s ->
+      fromIntegral (s `B.unsafeIndex` 7) `shiftL` 56
+  .|. fromIntegral (s `B.unsafeIndex` 6) `shiftL` 48
+  .|. fromIntegral (s `B.unsafeIndex` 5) `shiftL` 40
+  .|. fromIntegral (s `B.unsafeIndex` 4) `shiftL` 32
+  .|. fromIntegral (s `B.unsafeIndex` 3) `shiftL` 24
+  .|. fromIntegral (s `B.unsafeIndex` 2) `shiftL` 16
+  .|. fromIntegral (s `B.unsafeIndex` 1) `shiftL`  8
+  .|. fromIntegral (s `B.unsafeIndex` 0)
+
+word64be :: B.ByteString -> Word64
+word64be = \s ->
+      fromIntegral (s `B.unsafeIndex` 0) `shiftL` 56
+  .|. fromIntegral (s `B.unsafeIndex` 1) `shiftL` 48
+  .|. fromIntegral (s `B.unsafeIndex` 2) `shiftL` 40
+  .|. fromIntegral (s `B.unsafeIndex` 3) `shiftL` 32
+  .|. fromIntegral (s `B.unsafeIndex` 4) `shiftL` 24
+  .|. fromIntegral (s `B.unsafeIndex` 5) `shiftL` 16
+  .|. fromIntegral (s `B.unsafeIndex` 6) `shiftL`  8
+  .|. fromIntegral (s `B.unsafeIndex` 7)
+
+relaWord :: ElfClass w -> ElfData -> B.ByteString -> ElfWordType w
+relaWord ELFCLASS32 ELFDATA2LSB = word32le
+relaWord ELFCLASS32 ELFDATA2MSB = word32be
+relaWord ELFCLASS64 ELFDATA2LSB = word64le
+relaWord ELFCLASS64 ELFDATA2MSB = word64be
+
+relaWordSize :: ElfClass w -> Int
+relaWordSize ELFCLASS32 = 4
+relaWordSize ELFCLASS64 = 8
+
+buildDynamicMap :: ElfClass w
+                -> ElfData
+                -> DynamicMap w
+                -> B.ByteString
+                -> Maybe (DynamicMap w)
+buildDynamicMap cl d m bs
+    | B.length bs == 0 = Just m
+    | B.length bs < 2*sz = Nothing
+    | otherwise =
+      let tag = elfClassInstances cl $ ElfDynamicTag (fromIntegral (relaWord cl d bs))
+          v   = relaWord cl d (B.drop sz bs)
+          m' = insertDynamic (Dynamic tag v) m
+          bs' = B.drop (2*sz) bs
+       in case tag of
+            DT_NULL -> Just m'
+            _ -> seq m' $ seq bs' $ buildDynamicMap cl d m' bs'
+  where sz = relaWordSize cl
+
+parseDynamicMap :: ElfClass w
+                -> ElfData
+                -> B.ByteString
+                -> Maybe (DynamicMap w)
+parseDynamicMap cl d b = buildDynamicMap cl d Map.empty b
 
 ------------------------------------------------------------------------
 -- GNU extension
@@ -540,10 +612,11 @@ dynamicEntries :: forall w
                -> Either DynamicError (DynamicSection w)
 dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
  runDynamicParser d cl virtMap $ do
+  let dstrict = L.toStrict dynamic
   m <-
-    case runGetOrFail (dynamicList cl d) dynamic of
-      Left  (_,_,msg)  -> throwError (ErrorParsingDynamicEntries msg)
-      Right (_,_,elts) -> pure (foldl' (flip insertDynamic) Map.empty elts)
+    case parseDynamicMap cl d dstrict of
+      Nothing -> throwError $ UnexpectedEndOfDynamicEntries
+      Just m -> pure m
 
   strTab <- getDynStrTab m
 
@@ -602,8 +675,12 @@ getDynamicSectionFromSegments hdr ph contents virtMap = elfClassInstances (heade
   case filter (\phdr -> phdrSegmentType phdr == PT_DYNAMIC) ph of
     [] -> Nothing
     dynPhdr:dynRest | null dynRest -> do
-      let dynContents = sliceL (phdrFileRange dynPhdr) contents
-      Just $ dynamicEntries (headerData hdr) (headerClass hdr) virtMap dynContents
+      let (i,c) = phdrFileRange dynPhdr
+      if toInteger i + toInteger c <= toInteger (L.length contents) then do
+        let dynContents = sliceL (phdrFileRange dynPhdr) contents
+        Just $ dynamicEntries (headerData hdr) (headerClass hdr) virtMap dynContents
+       else
+        Just $ Left InvalidDynamicSegmentFileRange
     _ -> do
       Just $ Left MultipleDynamicSegments
 

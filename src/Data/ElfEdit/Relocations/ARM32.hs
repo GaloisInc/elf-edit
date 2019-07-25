@@ -12,11 +12,7 @@ ARM32 relocation types.
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
 #endif
 module Data.ElfEdit.Relocations.ARM32
-  ( ARM32_RelocationType(..)
-  , pattern R_ARM_COPY
-  , pattern R_ARM_GLOB_DAT
-  , pattern R_ARM_JUMP_SLOT
-  , pattern R_ARM_RELATIVE
+  ( module Data.ElfEdit.Relocations.ARM32
  ) where
 
 import qualified Data.Map.Strict          as Map

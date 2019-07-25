@@ -90,6 +90,7 @@ module Data.ElfEdit
   , FileOffset(..)
   , phdrFileRange
   , headerPhdrs
+  , headerSections
     -- * Reading Elf files
   , hasElfMagic
   , ElfGetResult(..)
@@ -154,7 +155,7 @@ module Data.ElfEdit
     -- ** ARM32 relocations
   , module Data.ElfEdit.Relocations.ARM32
     -- ** ARM64 relocations
-  , module Data.ElfEdit.Relocations.ARM64
+  , module Data.ElfEdit.Relocations.AARCH64
     -- ** Low-level utilities
   , relocationSymIndex
   , relocationTypeVal
@@ -195,7 +196,7 @@ import           Data.ElfEdit.Layout
 import           Data.ElfEdit.Relocations
 import           Data.ElfEdit.Relocations.Android
 import           Data.ElfEdit.Relocations.ARM32
-import           Data.ElfEdit.Relocations.ARM64
+import           Data.ElfEdit.Relocations.AARCH64
 import           Data.ElfEdit.Relocations.I386
 import           Data.ElfEdit.Relocations.X86_64
 import           Data.ElfEdit.Sections

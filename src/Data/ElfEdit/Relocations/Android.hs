@@ -19,7 +19,6 @@ import           Control.Monad.Reader
 import           Control.Monad.ST
 import           Data.Bits
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BSC
 import           Data.STRef
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
@@ -40,7 +39,7 @@ data AndroidDecodeError
    | AndroidInvalidValue
 
 instance Show AndroidDecodeError where
-  show (AndroidUnsupportedFormat pr) =  "Unsupported relocations format: " ++ BSC.unpack pr
+  show (AndroidUnsupportedFormat pr) =  "Unsupported relocations format: " ++ show pr
   show AndroidEndOfData = "Data terminated before all entries read"
   show AndroidInvalidValue = "Value read from stream is out of range."
 

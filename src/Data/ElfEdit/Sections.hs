@@ -53,6 +53,7 @@ module Data.ElfEdit.Sections
 
 import           Data.Bits
 import qualified Data.ByteString as B
+import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import           Data.Word
 import           Numeric (showHex)
@@ -195,22 +196,116 @@ pattern SHT_SHLIB = ElfSectionType 10
 pattern SHT_DYNSYM :: ElfSectionType
 pattern SHT_DYNSYM   = ElfSectionType 11
 
+-- | Pointers to initialization  functions.
+pattern SHT_INIT_ARRAY :: ElfSectionType
+pattern SHT_INIT_ARRAY = ElfSectionType 14
+
+-- | Pointers to termination functions.
+pattern SHT_FINI_ARRAY :: ElfSectionType
+pattern SHT_FINI_ARRAY = ElfSectionType 15
+
+-- | Pointers to  pre-init functions.
+pattern SHT_PREINIT_ARRAY :: ElfSectionType
+pattern SHT_PREINIT_ARRAY = ElfSectionType 16
+
+-- | Section group
+pattern SHT_GROUP :: ElfSectionType
+pattern SHT_GROUP = ElfSectionType 17
+
+-- | Indices for SHN_XINDEX entries.
+pattern SHT_SYMTAB_SHNDX :: ElfSectionType
+pattern SHT_SYMTAB_SHNDX = ElfSectionType 18
+
+-- |  OS-specific section header types.
+pattern SHT_LOOS :: ElfSectionType
+pattern SHT_LOOS = ElfSectionType 0x60000000
+
+-- | Android packed relocation section.
+pattern SHT_ANDROID_REL :: ElfSectionType
+pattern SHT_ANDROID_REL = ElfSectionType 0x60000001
+
+-- | Android packed relocation section.
+pattern SHT_ANDROID_RELA :: ElfSectionType
+pattern SHT_ANDROID_RELA = ElfSectionType 0x60000002
+
+-- | Object attributes.
+pattern SHT_GNU_ATTRIBUTES :: ElfSectionType
+pattern SHT_GNU_ATTRIBUTES = ElfSectionType 0x6ffffff5
+-- | GNU-style hash table.
+pattern SHT_GNU_HASH :: ElfSectionType
+pattern SHT_GNU_HASH = ElfSectionType 0x6ffffff6
+-- | GNU version definitions.
+pattern SHT_GNU_verdef :: ElfSectionType
+pattern SHT_GNU_verdef = ElfSectionType 0x6ffffffd
+-- | GNU version references.
+pattern SHT_GNU_verneed :: ElfSectionType
+pattern SHT_GNU_verneed = ElfSectionType 0x6ffffffe
+-- | GNU symbol versions table.
+pattern SHT_GNU_versym :: ElfSectionType
+pattern SHT_GNU_versym = ElfSectionType 0x6fffffff
+-- | Highest operating system-specific type.
+pattern SHT_HIOS :: ElfSectionType
+pattern SHT_HIOS = ElfSectionType 0x6fffffff
+
+-- | Lowest processor arch-specific type.
+pattern SHT_LOPROC :: ElfSectionType
+pattern SHT_LOPROC = ElfSectionType 0x70000000
+-- |  Exception Index table
+pattern SHT_ARM_EXIDX :: ElfSectionType
+pattern SHT_ARM_EXIDX = ElfSectionType 0x70000001
+-- | BPABI DLL dynamic linking pre-emption map
+pattern SHT_ARM_PREEMPTMAP :: ElfSectionType
+pattern SHT_ARM_PREEMPTMAP = ElfSectionType 0x70000002
+
+pattern SHT_ARM_ATTRIBUTES     :: ElfSectionType
+pattern SHT_ARM_ATTRIBUTES     = ElfSectionType 0x70000003
+pattern SHT_ARM_DEBUGOVERLAY   :: ElfSectionType
+pattern SHT_ARM_DEBUGOVERLAY   = ElfSectionType 0x70000004
+pattern SHT_ARM_OVERLAYSECTION :: ElfSectionType
+pattern SHT_ARM_OVERLAYSECTION = ElfSectionType 0x70000005
+
+sectionTagMap :: Map.Map ElfSectionType String
+sectionTagMap = Map.fromList
+  [ (,) SHT_NULL      "SHT_NULL"
+  , (,) SHT_PROGBITS  "SHT_PROGBITS"
+  , (,) SHT_SYMTAB    "SHT_SYMTAB"
+  , (,) SHT_STRTAB    "SHT_STRTAB"
+  , (,) SHT_RELA      "SHT_RELA"
+  , (,) SHT_HASH      "SHT_HASH"
+  , (,) SHT_DYNAMIC   "SHT_DYNAMIC"
+  , (,) SHT_NOTE      "SHT_NOTE"
+  , (,) SHT_NOBITS    "SHT_NOBITS"
+  , (,) SHT_REL       "SHT_REL"
+  , (,) SHT_SHLIB     "SHT_SHLIB"
+  , (,) SHT_DYNSYM    "SHT_DYNSYM"
+  , (,) SHT_INIT_ARRAY    "SHT_INIT_ARRAY"
+  , (,) SHT_FINI_ARRAY    "SHT_FINI_ARRAY"
+  , (,) SHT_PREINIT_ARRAY "SHT_PREINIT_ARRAY"
+  , (,) SHT_GROUP         "SHT_GROUP"
+  , (,) SHT_SYMTAB_SHNDX  "SHT_SYMTAB_SHNDX"
+  , (,) SHT_LOOS          "SHT_LOOS"
+  , (,) SHT_ANDROID_REL   "SHT_ANDROID_REL"
+  , (,) SHT_ANDROID_RELA  "SHT_ANDROID_RELA"
+  , (,) SHT_GNU_ATTRIBUTES "SHT_GNU_ATTRIBUTES"
+  , (,) SHT_GNU_HASH       "SHT_GNU_HASH"
+  , (,) SHT_GNU_verdef     "SHT_GNU_verdef"
+  , (,) SHT_GNU_verneed    "SHT_GNU_verneed"
+  , (,) SHT_GNU_versym     "SHT_GNU_versym"
+  , (,) SHT_HIOS           "SHT_HIOS"
+  , (,) SHT_LOPROC         "SHT_LOPROC"
+  , (,) SHT_ARM_EXIDX          "SHT_ARM_EXIDX"
+  , (,) SHT_ARM_PREEMPTMAP     "SHT_ARM_PREEMPTMAP"
+  , (,) SHT_ARM_ATTRIBUTES     "SHT_ARM_ATTRIBUTES"
+  , (,) SHT_ARM_DEBUGOVERLAY   "SHT_ARM_DEBUGOVERLAY"
+  , (,) SHT_ARM_OVERLAYSECTION "SHT_ARM_OVERLAYSECTION"
+  ]
+
 instance Show ElfSectionType where
   show tp =
-    case tp of
-      SHT_NULL     -> "SHT_NULL"
-      SHT_PROGBITS -> "SHT_PROGBITS"
-      SHT_SYMTAB   -> "SHT_SYMTAB"
-      SHT_STRTAB   -> "SHT_STRTAB"
-      SHT_RELA     -> "SHT_RELA"
-      SHT_HASH     -> "SHT_HASH"
-      SHT_DYNAMIC  -> "SHT_DYNAMIC"
-      SHT_NOTE     -> "SHT_NOTE"
-      SHT_NOBITS   -> "SHT_NOBITS"
-      SHT_REL      -> "SHT_REL"
-      SHT_SHLIB    -> "SHT_SHLIB"
-      SHT_DYNSYM   -> "SHT_DYNSYM"
-      ElfSectionType w -> "(Unknown type " ++ show w ++ ")"
+    case Map.lookup tp sectionTagMap of
+      Just nm -> nm
+      Nothing | tp < SHT_LOOS -> show (fromElfSectionType tp)
+              | otherwise -> showHex (fromElfSectionType tp) ""
 
 ------------------------------------------------------------------------
 -- ElfSectionFlags
