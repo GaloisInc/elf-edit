@@ -25,6 +25,10 @@ import           Data.ElfEdit.Types       (ElfClass (..), ppHex)
 -- ARM_RelocationType
 
 -- | Relocation types for AARCH64 code.
+--
+-- N.B.  The type intentionally uses mixedcase for "AArch64" to match
+-- ARM's names while the patterns use all capitals to match the
+-- constants in `elf.h`
 newtype AArch64_RelocationType = AArch64_RelocationType { fromARM_RelocationType :: Word32 }
   deriving (Eq,Ord)
 
