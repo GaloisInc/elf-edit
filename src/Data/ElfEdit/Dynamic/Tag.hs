@@ -1,14 +1,13 @@
 {-
-Copyright        : (c) Galois, Inc 2016
+Copyright        : (c) Galois, Inc 2016-2019
 Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
 Defines the tags used in the dynamic section.
 -}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternSynonyms #-}
-#if __GLASGOW_HASKELL__ >= 800
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
-#endif
 module Data.ElfEdit.Dynamic.Tag
   ( module Data.ElfEdit.Dynamic.Tag
   ) where
@@ -17,9 +16,10 @@ import           Data.Foldable
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32)
+import           Numeric (showHex)
 
 newtype ElfDynamicTag = ElfDynamicTag { fromElfDynamicTag :: Word32 }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Num)
 
 pattern DT_NULL            = ElfDynamicTag 0
 pattern DT_NEEDED          = ElfDynamicTag 1
@@ -59,8 +59,34 @@ pattern DT_PREINIT_ARRAY   = ElfDynamicTag 32
 -- | Size in bytes of DT_PREINIT_ARRAY
 pattern DT_PREINIT_ARRAYSZ = ElfDynamicTag 33
 
-pattern DT_LOOS            = ElfDynamicTag 0x60000000
-pattern DT_HIOS            = ElfDynamicTag 0x6FFFFFFF
+
+pattern OLD_DT_LOOS :: ElfDynamicTag
+pattern OLD_DT_LOOS        = ElfDynamicTag 0x60000000
+
+-- | The start of OS specific tags.
+--
+-- Linux uses this value for DT_LOOS
+pattern DT_LOOS :: ElfDynamicTag
+pattern DT_LOOS = ElfDynamicTag 0x6000000d
+
+pattern DT_ANDROID_REL :: ElfDynamicTag
+pattern DT_ANDROID_REL    = ElfDynamicTag 0x6000000f
+
+pattern DT_ANDROID_RELSZ :: ElfDynamicTag
+pattern DT_ANDROID_RELSZ  = ElfDynamicTag 0x60000010
+
+pattern DT_ANDROID_RELA :: ElfDynamicTag
+pattern DT_ANDROID_RELA   = ElfDynamicTag 0x60000011
+
+pattern DT_ANDROID_RELASZ :: ElfDynamicTag
+pattern DT_ANDROID_RELASZ = ElfDynamicTag 0x60000012
+
+
+-- | The start of OS specific tags.
+--
+-- Linux uses this value for DT_HIOS
+pattern DT_HIOS :: ElfDynamicTag
+pattern DT_HIOS = ElfDynamicTag 0x6ffff000
 
 pattern DT_VALRNGLO        = ElfDynamicTag 0x6ffffd00
 -- | Prelinking timestamp
@@ -119,13 +145,28 @@ pattern DT_VERDEF          = ElfDynamicTag 0x6ffffffc
 pattern DT_VERDEFNUM       = ElfDynamicTag 0x6ffffffd
 pattern DT_VERNEED         = ElfDynamicTag 0x6ffffffe
 -- | Number of needed versions.
-pattern DT_VERNEEDNUM      = ElfDynamicTag 0x6fffffff
+pattern DT_VERNEEDNUM = ElfDynamicTag 0x6fffffff
+
+pattern OLD_DT_HIOS :: ElfDynamicTag
+pattern OLD_DT_HIOS = ElfDynamicTag 0x6fffffff
+
+pattern DT_LOPROC :: ElfDynamicTag
+pattern DT_LOPROC = ElfDynamicTag 0x70000000
+
+-- | The number of entries in the dynamic symbol table.
+pattern DT_ARM_SYMTABSZ :: ElfDynamicTag
+pattern DT_ARM_SYMTABSZ = 0x70000001
+
+pattern DT_HIPROC :: ElfDynamicTag
+pattern DT_HIPROC = ElfDynamicTag 0x7fffffff
 
 
 instance Show ElfDynamicTag where
   show = \tag -> case Map.lookup tag elfDynamicTagNameMap of
                    Just r -> r
-                   Nothing -> "ElfDynamicTag " ++ show (fromElfDynamicTag tag)
+                   Nothing
+                     | tag < OLD_DT_LOOS -> "ElfDynamicTag " ++ show (fromElfDynamicTag tag)
+                     | otherwise -> "ElfDynamicTag 0x" ++ showHex (fromElfDynamicTag tag) ""
     where
       merge new old = old ++ "|" ++ new
       ins m (k,v) = Map.insertWith merge k v m
@@ -165,8 +206,16 @@ instance Show ElfDynamicTag where
         , (,) DT_PREINIT_ARRAY   "DT_PREINIT_ARRAY"
         , (,) DT_PREINIT_ARRAYSZ "DT_PREINIT_ARRAYSZ"
 
+        , (,) OLD_DT_LOOS        "OLD_DT_LOOS"
         , (,) DT_LOOS            "DT_LOOS"
+
+        , (,) DT_ANDROID_REL     "DT_ANDROID_REL"
+        , (,) DT_ANDROID_RELSZ   "DT_ANDROID_RELSZ"
+        , (,) DT_ANDROID_RELA    "DT_ANDROID_RELA"
+        , (,) DT_ANDROID_RELASZ  "DT_ANDROID_RELASZ"
+
         , (,) DT_HIOS            "DT_HIOS"
+
         , (,) DT_VALRNGLO        "DT_VALRNGLO"
         , (,) DT_GNU_PRELINKED   "DT_GNU_PRELINKED"
         , (,) DT_GNU_CONFLICTSZ  "DT_GNU_CONFLICTSZ"
@@ -204,4 +253,7 @@ instance Show ElfDynamicTag where
         , (,) DT_VERDEFNUM       "DT_VERDEFNUM"
         , (,) DT_VERNEED         "DT_VERNEED"
         , (,) DT_VERNEEDNUM      "DT_VERNEEDNUM"
+        , (,) DT_LOPROC "DT_LOPROC"
+        , (,) DT_ARM_SYMTABSZ "DT_ARM_SYMTABSZ"
+        , (,) DT_HIPROC "DT_HIPROC"
         ]

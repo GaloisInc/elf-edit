@@ -89,6 +89,8 @@ module Data.ElfEdit
   , Phdr(..)
   , FileOffset(..)
   , phdrFileRange
+  , headerPhdrs
+  , headerSections
     -- * Reading Elf files
   , hasElfMagic
   , ElfGetResult(..)
@@ -134,16 +136,18 @@ module Data.ElfEdit
     -- * Relocations
   , IsRelocationType(..)
   , RelocationWord
-    -- ** Implicit addend
+    -- ** Relocation types
   , RelEntry(..)
   , relOffset
-  , elfRelEntries
-    -- ** Explicit addend
   , RelaEntry(..)
   , relaOffset
   , ppRelaEntries
-  , elfRelaEntries
   , relaToRel
+    -- ** Relocation parsing
+  , elfRelEntries
+  , elfRelaEntries
+  , decodeAndroidRelaEntries
+  , AndroidDecodeError(..)
     -- ** 32-bit x86 relocations
   , module Data.ElfEdit.Relocations.I386
     -- ** 64-bit x86 relocations
@@ -151,7 +155,10 @@ module Data.ElfEdit
     -- ** ARM32 relocations
   , module Data.ElfEdit.Relocations.ARM32
     -- ** ARM64 relocations
-  , module Data.ElfEdit.Relocations.ARM64
+  , module Data.ElfEdit.Relocations.AArch64
+    -- ** Low-level utilities
+  , relocationSymIndex
+  , relocationTypeVal
     -- * Dynamic symbol table and relocations
   , DynamicSection(..)
   , module Data.ElfEdit.Dynamic
@@ -164,6 +171,7 @@ module Data.ElfEdit
     -- * Low level information
   , ElfHeaderInfo
   , parseElfHeaderInfo
+  , header
   , getElf
     -- * Gnu-specific extensions
   , GnuStack(..)
@@ -186,8 +194,9 @@ import           Data.ElfEdit.Enums
 import           Data.ElfEdit.Get
 import           Data.ElfEdit.Layout
 import           Data.ElfEdit.Relocations
+import           Data.ElfEdit.Relocations.Android
 import           Data.ElfEdit.Relocations.ARM32
-import           Data.ElfEdit.Relocations.ARM64
+import           Data.ElfEdit.Relocations.AArch64
 import           Data.ElfEdit.Relocations.I386
 import           Data.ElfEdit.Relocations.X86_64
 import           Data.ElfEdit.Sections

@@ -16,11 +16,12 @@ module Data.ElfEdit.Get
     -- * elfHeaderInfo low-level interface
   , ElfHeaderInfo
   , header
+  , headerPhdrs
+  , headerSections
   , parseElfHeaderInfo
   , SomeElf(..)
   , getElf
   , ElfParseError(..)
-  , getSectionTable
   , SymbolTableError(..)
   , parseSymbolTableEntry
   , getSymbolTableEntries
@@ -168,7 +169,7 @@ instance Show ElfParseError where
     =  showString "The segment " . shows i . showString " ends at offset 0x"
     . showHex end . showString " which is after 0x" . showHex fileSize . showString "."
   showsPrec _ (PhdrSizeIncreased i adj)
-    =  showString "The size of segment " . shows i . showString " increased by "
+    = showString "The size of segment " . shows i . showString " increased by "
     . shows adj . showString " bytes to fit shifted contents."
 
 ------------------------------------------------------------------------
@@ -382,28 +383,38 @@ data ElfHeaderInfo w = ElfHeaderInfo {
        -- ^ Size of ehdr table
      , phdrTable :: !(TableLayout w)
        -- ^ Layout of segment header table.
-     , getPhdr :: !(Word16 -> Get (Phdr w))
-       -- ^ Function for reading elf segments.
      , shdrNameIdx :: !Word16
        -- ^ Index of section for storing section names.
      , shdrTable :: !(TableLayout w)
        -- ^ Layout of section header table.
-     , getShdr   :: !(GetShdrFn (ElfWordType w))
-       -- ^ Function for reading elf sections.
      , fileContents :: !B.ByteString
        -- ^ Contents of file as a bytestring.
      }
+
+-- | Function for reading elf segments.
+getPhdr :: ElfHeader w -> Word16 -> Get (Phdr w)
+getPhdr h =
+  case headerClass h of
+    ELFCLASS32 -> getPhdr32 (headerData h)
+    ELFCLASS64 -> getPhdr64 (headerData h)
+
+-- | Function for reading elf sections.
+getShdr :: ElfHeaderInfo w -> GetShdrFn (ElfWordType w)
+getShdr ehi =
+  case headerClass (header ehi) of
+    ELFCLASS32 -> getShdr32 (headerData (header ehi)) (fileContents ehi)
+    ELFCLASS64 -> getShdr64 (headerData (header ehi)) (fileContents ehi)
 
 -- | Parse program header at given index
 phdrByIndex :: ElfHeaderInfo w -- ^ Information for parsing
             -> Word16 -- ^ Index
             -> Phdr w
 phdrByIndex ehi i = elfClassInstances (headerClass (header ehi)) $
-  Get.runGet (getPhdr ehi i) (tableEntry (phdrTable ehi) i (fileContents ehi))
+  Get.runGet (getPhdr (header ehi) i) (tableEntry (phdrTable ehi) i (fileContents ehi))
 
--- | Return list of segments with contents.
-rawSegments :: ElfHeaderInfo w -> [Phdr w]
-rawSegments ehi = phdrByIndex ehi <$> enumCnt 0 (entryNum (phdrTable ehi))
+-- | Return list of segments program headers from
+headerPhdrs :: ElfHeaderInfo w -> [Phdr w]
+headerPhdrs ehi = phdrByIndex ehi <$> enumCnt 0 (entryNum (phdrTable ehi))
 
 -- | Return section and file offset and size.
 getSectionAndRange :: HasCallStack
@@ -531,8 +542,8 @@ phdrName phdr = "segment" ++ show (phdrSegmentIndex phdr)
 
 -- | Get list of sections from Elf parse info.
 -- This includes the initial section
-getSectionTable :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection (ElfWordType w))
-getSectionTable ehi = V.generate cnt $ getSectionByIndex
+headerSections :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection (ElfWordType w))
+headerSections ehi = V.generate cnt $ getSectionByIndex
   where cnt = fromIntegral (entryNum (shdrTable ehi)) :: Int
 
         c = headerClass (header ehi)
@@ -791,7 +802,7 @@ getElf :: forall w
        .  ElfHeaderInfo w
        -> ([ElfParseError], Elf w)
 getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
-  let phdrs = rawSegments ehi
+  let phdrs = headerPhdrs ehi
   let -- Return range used to store name index.
       nameRange :: Range (ElfWordType w)
       nameRange = fst $ nameSectionInfo ehi
@@ -966,10 +977,8 @@ parseElf32ParseInfo d ei_osabi ei_abiver b = do
                   { header       = hdr
                   , ehdrSize     = e_ehsize
                   , phdrTable    = TableLayout e_phoff expected_phdr_entry_size e_phnum
-                  , getPhdr      = getPhdr32 d
                   , shdrNameIdx  = e_shstrndx
                   , shdrTable    = TableLayout e_shoff expected_shdr_entry_size e_shnum
-                  , getShdr      = getShdr32 d b
                   , fileContents = b
                   }
 
@@ -1015,10 +1024,8 @@ parseElf64ParseInfo d ei_osabi ei_abiver b = do
                   { header       = hdr
                   , ehdrSize     = e_ehsize
                   , phdrTable    = TableLayout e_phoff expected_phdr_entry_size e_phnum
-                  , getPhdr      = getPhdr64 d
                   , shdrNameIdx  = e_shstrndx
                   , shdrTable    = TableLayout e_shoff expected_shdr_entry_size e_shnum
-                  , getShdr      = getShdr64 d b
                   , fileContents = b
                   }
 
