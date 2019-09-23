@@ -72,6 +72,10 @@ newtype ElfSectionIndex = ElfSectionIndex { fromElfSectionIndex :: Word16 }
 pattern SHN_UNDEF :: ElfSectionIndex
 pattern SHN_UNDEF = ElfSectionIndex 0
 
+-- | Start of reserved indices.
+pattern SHN_LORESERVE :: ElfSectionIndex
+pattern SHN_LORESERVE = ElfSectionIndex 0xff00
+
 -- | Associated symbol is absolute.
 pattern SHN_ABS :: ElfSectionIndex
 pattern SHN_ABS = ElfSectionIndex 0xfff1
@@ -83,9 +87,6 @@ pattern SHN_ABS = ElfSectionIndex 0xfff1
 pattern SHN_COMMON :: ElfSectionIndex
 pattern SHN_COMMON = ElfSectionIndex 0xfff2
 
--- | Start of reserved indices.
-pattern SHN_LORESERVE :: ElfSectionIndex
-pattern SHN_LORESERVE = ElfSectionIndex 0xff00
 
 -- | Start of processor specific.
 pattern SHN_LOPROC :: ElfSectionIndex

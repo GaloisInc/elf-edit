@@ -1,7 +1,6 @@
 {-
 This contains a parser for the compressed relocation table used in
 Android.
-
 -}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
