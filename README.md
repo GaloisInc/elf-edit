@@ -20,5 +20,5 @@ we have a new name.
 To build with Stack, first symlink to one of the provided YAML
 files. For example
 
-    ln -fs stack-8.2.yaml stack.yaml
+    ln -fs stack-8.6.yaml stack.yaml
     stack build

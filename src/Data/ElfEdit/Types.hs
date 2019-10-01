@@ -574,7 +574,7 @@ instance ElfWidthConstraints w => Show (ElfSegment w) where
 ------------------------------------------------------------------------
 -- ElfHeader
 
--- | This contain entry for the Elf header.
+-- | Elf header information that does not need further parsing.
 data ElfHeader w = ElfHeader { headerData       :: !ElfData
                              , headerClass      :: !(ElfClass w)
                              , headerOSABI      :: !ElfOSABI

@@ -17,16 +17,20 @@ module Data.ElfEdit.Get
     -- * elfHeaderInfo low-level interface
   , ElfHeaderInfo
   , header
+  , headerPhdrs
+  , headerSections
   , parseElfHeaderInfo
   , SomeElf(..)
   , getElf
   , ElfParseError(..)
-  , getSectionTable
   , getSymbolTableEntry
   , showElfHeaderError
   , dieElfHeaderError
   , showElfParseErrors
   , dieElfParseErrors
+  , SymbolTableError(..)
+  , parseSymbolTableEntry
+  , getSymbolTableEntries
     -- * Utilities
   , getWord16
   , getWord32
@@ -38,6 +42,7 @@ module Data.ElfEdit.Get
 
 import           Control.Lens
 import           Control.Monad
+import           Control.Monad.Except
 import qualified Control.Monad.State.Strict as MTL
 import           Data.Binary
 import           Data.Binary.Get
@@ -47,6 +52,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as L
 import           Data.Foldable (foldl', foldlM)
+import           Data.Int
 import           Data.List (partition, sortBy)
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -64,6 +70,7 @@ import           Data.ElfEdit.Layout
   , elfMagic
   , phdrEntrySize
   , shdrEntrySize
+  , symbolTableEntrySize
   )
 import           Data.ElfEdit.Types
 import           Data.ElfEdit.Utils (enumCnt)
@@ -133,8 +140,8 @@ lookupString o b | toInteger o >= toInteger (B.length b) = Left $ IllegalStrtabI
 
 -- | A parse error
 data ElfParseError
-  = ElfSymtabError !String
-    -- ^ Error related to symtab parsing
+  = ElfSymtabError !SymbolTableError
+    -- ^ We received an error parsing the symbol table section.
   | GnuStackNotRW
     -- ^ The GNU Stack segment was not read and write.
   | MultipleGnuStacks
@@ -154,7 +161,7 @@ data ElfParseError
 
 instance Show ElfParseError where
   showsPrec _ (ElfSymtabError msg) =
-    showString "Could not parse symtab entries: " . showString msg
+    showString "Could not parse symtab entries: " . shows msg
   showsPrec _ UnassociatedGnuRelro =
    showString "Could not resolve load segment for GNU relro segment."
   showsPrec _ GnuStackNotRW =
@@ -169,7 +176,7 @@ instance Show ElfParseError where
     =  showString "The segment " . shows i . showString " ends at offset 0x"
     . showHex end . showString " which is after 0x" . showHex fileSize . showString "."
   showsPrec _ (PhdrSizeIncreased i adj)
-    =  showString "The size of segment " . shows i . showString " increased by "
+    = showString "The size of segment " . shows i . showString " increased by "
     . shows adj . showString " bytes to fit shifted contents."
 
 ------------------------------------------------------------------------
@@ -383,28 +390,38 @@ data ElfHeaderInfo w = ElfHeaderInfo {
        -- ^ Size of ehdr table
      , phdrTable :: !(TableLayout w)
        -- ^ Layout of segment header table.
-     , getPhdr :: !(Word16 -> Get (Phdr w))
-       -- ^ Function for reading elf segments.
      , shdrNameIdx :: !Word16
        -- ^ Index of section for storing section names.
      , shdrTable :: !(TableLayout w)
        -- ^ Layout of section header table.
-     , getShdr   :: !(GetShdrFn (ElfWordType w))
-       -- ^ Function for reading elf sections.
      , fileContents :: !B.ByteString
        -- ^ Contents of file as a bytestring.
      }
+
+-- | Function for reading elf segments.
+getPhdr :: ElfHeader w -> Word16 -> Get (Phdr w)
+getPhdr h =
+  case headerClass h of
+    ELFCLASS32 -> getPhdr32 (headerData h)
+    ELFCLASS64 -> getPhdr64 (headerData h)
+
+-- | Function for reading elf sections.
+getShdr :: ElfHeaderInfo w -> GetShdrFn (ElfWordType w)
+getShdr ehi =
+  case headerClass (header ehi) of
+    ELFCLASS32 -> getShdr32 (headerData (header ehi)) (fileContents ehi)
+    ELFCLASS64 -> getShdr64 (headerData (header ehi)) (fileContents ehi)
 
 -- | Parse program header at given index
 phdrByIndex :: ElfHeaderInfo w -- ^ Information for parsing
             -> Word16 -- ^ Index
             -> Phdr w
 phdrByIndex ehi i = elfClassInstances (headerClass (header ehi)) $
-  Get.runGet (getPhdr ehi i) (tableEntry (phdrTable ehi) i (fileContents ehi))
+  Get.runGet (getPhdr (header ehi) i) (tableEntry (phdrTable ehi) i (fileContents ehi))
 
--- | Return list of segments with contents.
-rawSegments :: ElfHeaderInfo w -> [Phdr w]
-rawSegments ehi = phdrByIndex ehi <$> enumCnt 0 (entryNum (phdrTable ehi))
+-- | Return list of segments program headers from
+headerPhdrs :: ElfHeaderInfo w -> [Phdr w]
+headerPhdrs ehi = phdrByIndex ehi <$> enumCnt 0 (entryNum (phdrTable ehi))
 
 -- | Return section and file offset and size.
 getSectionAndRange :: HasCallStack
@@ -426,50 +443,90 @@ nameSectionInfo ehi =
 ------------------------------------------------------------------------
 -- Symbol table entries
 
+-- | Error from parsing a symbol table
+data SymbolTableError
+   = InvalidName !Word32 !LookupStringError
+     -- ^ The name of the symbol at the given index could not be obtained.
+   | IllegalSymbolIndex !Word32
+     -- ^ The index above exceeds the size of the symbol table.
+   | InvalidLink !Word32
+     -- ^ The link attribute of the section did not refer to a valid
+     -- symbol table.
+
+instance Show SymbolTableError where
+  show (InvalidName idx msg) = "Error parsing symbol " ++ show idx ++ " name: " ++ show msg
+  show (IllegalSymbolIndex idx) = "Index " ++ show idx ++ " exceeds number of entries."
+  show (InvalidLink lnk) = "The link index " ++ show lnk ++ " was invalid."
+
 -- | Create a symbol table entry from a Get monad
 getSymbolTableEntry :: ElfClass w
                     -> ElfData
                     -> B.ByteString
                        -- ^ The string table
-                      -> Get (ElfSymbolTableEntry (ElfWordType w))
-getSymbolTableEntry ELFCLASS32 d strTab = do
-  nameIdx <- getWord32 d
-  value <- getWord32 d
-  size  <- getWord32 d
-  info  <- getWord8
-  other <- getWord8
-  sTlbIdx <- ElfSectionIndex <$> getWord16 d
+                    -> Word32
+                       -- ^ The index of the symbol in table
+                    -> ExceptT SymbolTableError Get (ElfSymbolTableEntry (ElfWordType w))
+getSymbolTableEntry ELFCLASS32 d strTab idx = do
+  nameIdx <- lift $ getWord32 d
+  value <- lift $ getWord32 d
+  size  <- lift $ getWord32 d
+  info  <- lift $ getWord8
+  other <- lift $ getWord8
+  sTlbIdx <- lift $ getWord16 d
   let (typ,bind) = infoToTypeAndBind info
   nm <- case lookupString nameIdx strTab of
-          Left e -> fail (show e)
+          Left e -> throwError (InvalidName idx e)
           Right v -> pure v
-  return $ EST { steName  = nm
-               , steType  = typ
-               , steBind  = bind
-               , steOther = other
-               , steIndex = sTlbIdx
-               , steValue = value
-               , steSize  = size
-               }
-getSymbolTableEntry ELFCLASS64 d strTab = do
-  nameIdx <- getWord32 d
-  info <- getWord8
-  other <- getWord8
-  sTlbIdx <- ElfSectionIndex <$> getWord16 d
-  symVal <- getWord64 d
-  size <- getWord64 d
+  pure $! EST { steName  = nm
+              , steType  = typ
+              , steBind  = bind
+              , steOther = other
+              , steIndex = ElfSectionIndex sTlbIdx
+              , steValue = value
+              , steSize  = size
+              }
+getSymbolTableEntry ELFCLASS64 d strTab idx = do
+  nameIdx <- lift $ getWord32 d
+  info    <- lift $ getWord8
+  other   <- lift $ getWord8
+  sTlbIdx <- lift $ getWord16 d
+  symVal  <- lift $ getWord64 d
+  size    <- lift $ getWord64 d
   nm <- case lookupString nameIdx strTab of
-          Left e -> fail (show e)
+          Left e -> throwError (InvalidName idx e)
           Right v -> pure v
   let (typ,bind) = infoToTypeAndBind info
-  return $ EST { steName  = nm
-               , steType  = typ
-               , steBind  = bind
-               , steOther = other
-               , steIndex = sTlbIdx
-               , steValue = symVal
-               , steSize  = size
-               }
+  pure $! EST { steName  = nm
+              , steType  = typ
+              , steBind  = bind
+              , steOther = other
+              , steIndex = ElfSectionIndex sTlbIdx
+              , steValue = symVal
+              , steSize  = size
+              }
+
+-- | Parse a symbol table entry
+parseSymbolTableEntry :: ElfClass w -- ^ Identifies 32 or 64-bit elf.
+                      -> ElfData -- ^ Endianness
+                      -> B.ByteString
+                       -- ^ The string table
+                      -> L.ByteString
+                         -- ^ Contents of symbol table.
+                      -> Word32
+                         -- ^ Index of symbol table to retrieve
+                      -> Either SymbolTableError (ElfSymbolTableEntry (ElfWordType w))
+parseSymbolTableEntry cl d strTab symTab idx = do
+  let symEntSize :: Int64
+      symEntSize = elfClassInstances cl $ fromIntegral (symbolTableEntrySize cl)
+  let symOff :: Int64
+      symOff = fromIntegral idx * symEntSize
+  let symEntry = L.drop symOff symTab
+  when (symEntSize > L.length symTab) $ do
+    Left (IllegalSymbolIndex idx)
+  case runGetOrFail (runExceptT (getSymbolTableEntry cl d strTab idx)) symEntry of
+    -- This should never occur.
+    Left (_,_,msg) -> error $ "Internal error on parseSymbolTableEntry: " ++ msg
+    Right (_,_,r) -> r
 
 ------------------------------------------------------------------------
 -- Region parsing
@@ -492,8 +549,8 @@ phdrName phdr = "segment" ++ show (phdrSegmentIndex phdr)
 
 -- | Get list of sections from Elf parse info.
 -- This includes the initial section
-getSectionTable :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection (ElfWordType w))
-getSectionTable ehi = V.generate cnt $ getSectionByIndex
+headerSections :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection (ElfWordType w))
+headerSections ehi = V.generate cnt $ getSectionByIndex
   where cnt = fromIntegral (entryNum (shdrTable ehi)) :: Int
 
         c = headerClass (header ehi)
@@ -512,19 +569,35 @@ isSymtabSection s
   && elfSectionType s == SHT_SYMTAB
 
 -- | Parse the section as a list of symbol table entries.
-getSymbolTableEntries :: ElfHeader w
-                      -> V.Vector (Range (ElfWordType w), ElfSection (ElfWordType w))
+getSymbolTableEntries :: ElfClass w
+                      -> ElfData
+                      -> (Word32 -> Maybe (ElfSection (ElfWordType w)))
+                         -- ^ Function that given a section index
+                         -- returns the section associated with that
+                         -- index (if any).
                       -> ElfSection (ElfWordType w)
-                      -> Either String [ElfSymbolTableEntry (ElfWordType w)]
-getSymbolTableEntries hdr sections s = do
-  let link   = elfSectionLink s
+                         -- ^ Symtab section
+                      -> Either SymbolTableError [ElfSymbolTableEntry (ElfWordType w)]
+getSymbolTableEntries cl dta sectionFn s = do
+  strtab <-
+    case sectionFn (elfSectionLink s) of
+      Just t -> Right $ elfSectionData t
+      Nothing -> Left $! InvalidLink (elfSectionLink s)
 
-  strtab <- if 0 <= link && link < fromIntegral (V.length sections) then
-              Right $ elfSectionData (snd (sections V.! fromIntegral link))
-             else
-              Left "Could not find section string table."
-  let getEntry = getSymbolTableEntry (headerClass hdr) (headerData hdr) strtab
-  runGetMany getEntry (L.fromChunks [elfSectionData s])
+  let symEntSize :: Int
+      symEntSize = elfClassInstances cl $ fromIntegral (symbolTableEntrySize cl)
+
+  let symData = elfSectionData s
+
+  let symDataSize = B.length symData
+  -- Get number of entries (ignore extra bytes as they may be padding)
+  let n :: Word32
+      n = fromIntegral $ symDataSize `quot` symEntSize
+
+  let symtab = L.fromChunks [elfSectionData s]
+  case traverse (parseSymbolTableEntry cl dta strtab symtab) [0..(n-1)] of
+    Left e -> Left e
+    Right l -> Right l
 
 
 -- | Maps each offset in the file to the contents that begin at that region.
@@ -736,7 +809,7 @@ getElf :: forall w
        .  ElfHeaderInfo w
        -> ([ElfParseError], Elf w)
 getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
-  let phdrs = rawSegments ehi
+  let phdrs = headerPhdrs ehi
   let -- Return range used to store name index.
       nameRange :: Range (ElfWordType w)
       nameRange = fst $ nameSectionInfo ehi
@@ -792,8 +865,9 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
           , elfSectionName s == ".strtab"
           , elfSectionType s == SHT_STRTAB =
             pure $ ElfDataStrtab (elfSectionIndex s)
-          | isSymtabSection s =
-              case getSymbolTableEntries (header ehi) section_vec s of
+          | isSymtabSection s = do
+              let sectionFn idx = snd <$> section_vec V.!? fromIntegral idx
+              case getSymbolTableEntries (headerClass (header ehi)) (headerData (header ehi)) sectionFn s of
                 Left msg -> do
                   warn (ElfSymtabError msg)
                   pure (ElfDataSection s)
@@ -910,10 +984,8 @@ parseElf32ParseInfo d ei_osabi ei_abiver b = do
                   { header       = hdr
                   , ehdrSize     = e_ehsize
                   , phdrTable    = TableLayout e_phoff expected_phdr_entry_size e_phnum
-                  , getPhdr      = getPhdr32 d
                   , shdrNameIdx  = e_shstrndx
                   , shdrTable    = TableLayout e_shoff expected_shdr_entry_size e_shnum
-                  , getShdr      = getShdr32 d b
                   , fileContents = b
                   }
 
@@ -959,10 +1031,8 @@ parseElf64ParseInfo d ei_osabi ei_abiver b = do
                   { header       = hdr
                   , ehdrSize     = e_ehsize
                   , phdrTable    = TableLayout e_phoff expected_phdr_entry_size e_phnum
-                  , getPhdr      = getPhdr64 d
                   , shdrNameIdx  = e_shstrndx
                   , shdrTable    = TableLayout e_shoff expected_shdr_entry_size e_shnum
-                  , getShdr      = getShdr64 d b
                   , fileContents = b
                   }
 

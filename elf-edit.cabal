@@ -1,5 +1,5 @@
 Name:          elf-edit
-Version:       0.33
+Version:       0.35
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
@@ -21,7 +21,7 @@ source-repository head
 
 library
   build-depends:
-    base >= 4.8 && < 5,
+    base >= 4.11 && < 5,
     ansi-wl-pprint,
     binary,
     bytestring,
@@ -41,7 +41,9 @@ library
     Data.ElfEdit.Get
     Data.ElfEdit.Layout
     Data.ElfEdit.Relocations
+    Data.ElfEdit.Relocations.Android
     Data.ElfEdit.Relocations.ARM32
+    Data.ElfEdit.Relocations.AArch64
     Data.ElfEdit.Relocations.I386
     Data.ElfEdit.Relocations.X86_64
     Data.ElfEdit.Sections

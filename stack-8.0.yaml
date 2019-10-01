@@ -1,6 +1,0 @@
-flags: {}
-packages:
-- '.'
-extra-deps:
-- tasty-hunit-0.10.0.1
-resolver: lts-9.21
