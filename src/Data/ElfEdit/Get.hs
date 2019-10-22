@@ -97,7 +97,7 @@ runGetMany g bs0 = start [] (L.toChunks bs0)
 
 -- | @tryParse msg f v@ returns @fromJust (f v)@ is @f v@ returns a value,
 -- and calls @fail@ otherwise.
-tryParse :: Monad m => String -> (a -> Maybe b) -> a -> m b
+tryParse :: MonadFail m => String -> (a -> Maybe b) -> a -> m b
 tryParse desc toFn = maybe (fail ("Invalid " ++ desc)) return . toFn
 
 ------------------------------------------------------------------------
