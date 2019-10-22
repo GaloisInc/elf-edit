@@ -37,6 +37,7 @@ module Data.ElfEdit.Get
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Except
+import qualified Control.Monad.Fail as Fail
 import qualified Control.Monad.State.Strict as MTL
 import           Data.Binary
 import           Data.Binary.Get
@@ -97,7 +98,7 @@ runGetMany g bs0 = start [] (L.toChunks bs0)
 
 -- | @tryParse msg f v@ returns @fromJust (f v)@ is @f v@ returns a value,
 -- and calls @fail@ otherwise.
-tryParse :: MonadFail m => String -> (a -> Maybe b) -> a -> m b
+tryParse :: Fail.MonadFail m => String -> (a -> Maybe b) -> a -> m b
 tryParse desc toFn = maybe (fail ("Invalid " ++ desc)) return . toFn
 
 ------------------------------------------------------------------------
