@@ -179,6 +179,7 @@ module Data.ElfEdit
   ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)
+import qualified Control.Monad.Fail as Fail
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Bits
@@ -333,7 +334,7 @@ hasSegmentType tp s = elfSegmentType s == tp
 -- | Return elf interpreter in a PT_INTERP segment if one exists, or Nothing is no interpreter
 -- is defined.  This will call the Monad fail operation if the contents of the data cannot be
 -- parsed.
-elfInterpreter :: Monad m => Elf w -> m (Maybe FilePath)
+elfInterpreter :: Fail.MonadFail m => Elf w -> m (Maybe FilePath)
 elfInterpreter e =
   case filter (hasSegmentType PT_INTERP) (elfSegments e) of
     [] -> return Nothing
