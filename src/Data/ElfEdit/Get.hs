@@ -565,34 +565,24 @@ isSymtabSection s
 -- | Parse the section as a list of symbol table entries.
 getSymbolTableEntries :: ElfClass w
                       -> ElfData
-                      -> (Word32 -> Maybe (ElfSection (ElfWordType w)))
-                         -- ^ Function that given a section index
-                         -- returns the section associated with that
-                         -- index (if any).
-                      -> ElfSection (ElfWordType w)
+                      -> BSC.ByteString
+                         -- ^ String table for symtab
+                      -> BSC.ByteString
                          -- ^ Symtab section
                       -> Either SymbolTableError [ElfSymbolTableEntry (ElfWordType w)]
-getSymbolTableEntries cl dta sectionFn s = do
-  strtab <-
-    case sectionFn (elfSectionLink s) of
-      Just t -> Right $ elfSectionData t
-      Nothing -> Left $! InvalidLink (elfSectionLink s)
-
+getSymbolTableEntries cl dta strtab symtab = do
   let symEntSize :: Int
       symEntSize = elfClassInstances cl $ fromIntegral (symbolTableEntrySize cl)
 
-  let symData = elfSectionData s
-
-  let symDataSize = B.length symData
+  let symDataSize = B.length symtab
   -- Get number of entries (ignore extra bytes as they may be padding)
   let n :: Word32
       n = fromIntegral $ symDataSize `quot` symEntSize
 
-  let symtab = L.fromChunks [elfSectionData s]
-  case traverse (parseSymbolTableEntry cl dta strtab symtab) [0..(n-1)] of
+  let symtabData = L.fromChunks [symtab]
+  case traverse (parseSymbolTableEntry cl dta strtab symtabData) [0..(n-1)] of
     Left e -> Left e
     Right l -> Right l
-
 
 -- | Maps each offset in the file to the contents that begin at that region.
 data CollectedRegion w
@@ -860,18 +850,26 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
           , elfSectionType s == SHT_STRTAB =
             pure $ ElfDataStrtab (elfSectionIndex s)
           | isSymtabSection s = do
-              let sectionFn idx = snd <$> section_vec V.!? fromIntegral idx
-              case getSymbolTableEntries (headerClass (header ehi)) (headerData (header ehi)) sectionFn s of
-                Left msg -> do
-                  warn (ElfSymtabError msg)
+              case section_vec V.!? fromIntegral (elfSectionLink s) of
+                Nothing -> do
+                  warn (ElfSymtabError (InvalidLink (elfSectionLink s)))
                   pure (ElfDataSection s)
-                Right entries -> do
-                  let symtab =
-                        ElfSymbolTable { elfSymbolTableIndex = elfSectionIndex s
-                                       , elfSymbolTableEntries = V.fromList entries
-                                       , elfSymbolTableLocalEntries = elfSectionInfo s
-                                       }
-                  pure $ ElfDataSymtab symtab
+                Just (_, strtab) -> do
+                  let hdr = header ehi
+                  let cl = headerClass hdr
+                  let dta = headerData hdr
+                  let strtabData = elfSectionData strtab
+                  case getSymbolTableEntries cl dta strtabData (elfSectionData s) of
+                    Left msg -> do
+                      warn (ElfSymtabError msg)
+                      pure (ElfDataSection s)
+                    Right entries -> do
+                      let symtab =
+                            ElfSymbolTable { elfSymbolTableIndex = elfSectionIndex s
+                                           , elfSymbolTableEntries = V.fromList entries
+                                           , elfSymbolTableLocalEntries = elfSectionInfo s
+                                           }
+                      pure $ ElfDataSymtab symtab
           | otherwise =
               pure $ ElfDataSection s
     let insertSection :: CollectedRegionList w
