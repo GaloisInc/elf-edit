@@ -144,8 +144,12 @@ module Data.ElfEdit
   , ppRelaEntries
   , relaToRel
     -- ** Relocation parsing
-  , elfRelEntries
-  , elfRelaEntries
+  , Data.ElfEdit.Relocations.elfRelEntries
+  , Data.ElfEdit.Relocations.elfRelaEntries
+  , Data.ElfEdit.Relocations.relEntry
+  , Data.ElfEdit.Relocations.relaEntry
+  , Data.ElfEdit.Relocations.relEntSize
+  , Data.ElfEdit.Relocations.relaEntSize
   , decodeAndroidRelaEntries
   , AndroidDecodeError(..)
     -- ** 32-bit x86 relocations

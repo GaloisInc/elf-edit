@@ -798,18 +798,18 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
       nameRange :: Range (ElfWordType w)
       nameRange = fst $ nameSectionInfo ehi
 
-  let section_cnt :: Word16
-      section_cnt = entryNum $ shdrTable ehi
+  let sectionCnt :: Word16
+      sectionCnt = entryNum $ shdrTable ehi
 
-  let section_names = slice nameRange $ fileContents ehi
+  let sectionNames = slice nameRange $ fileContents ehi
 
       -- Get vector with section information
-  let section_vec :: V.Vector (Range (ElfWordType w), ElfSection (ElfWordType w))
-      section_vec = V.generate (fromIntegral section_cnt) $
-        getSectionAndRange ehi (Just section_names) . fromIntegral
+  let sectionVec :: V.Vector (Range (ElfWordType w), ElfSection (ElfWordType w))
+      sectionVec = V.generate (fromIntegral sectionCnt) $
+        getSectionAndRange ehi (Just sectionNames) . fromIntegral
 
   let msymtab :: Maybe (Range (ElfWordType w), ElfSection (ElfWordType w))
-      msymtab = V.find (\(_,s) -> isSymtabSection s) section_vec
+      msymtab = V.find (\(_,s) -> isSymtabSection s) sectionVec
 
   let mstrtab_index  = elfSectionLink . snd <$> msymtab
 
@@ -836,9 +836,9 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
   postSections <- do
     -- Get list of all sections other than the first section (which is skipped)
     let sections :: [(Range (ElfWordType w), ElfSection (ElfWordType w))]
-        sections = fmap (\i -> section_vec V.! fromIntegral i)
+        sections = fmap (\i -> sectionVec V.! fromIntegral i)
                    $ filter (\i -> i /= shdrNameIdx ehi && i /= 0)
-                   $ enumCnt 0 section_cnt
+                   $ enumCnt 0 sectionCnt
     -- Define table with regions for sections.
     -- TODO: Modify this so that it correctly recognizes the GOT section
     -- and generate the appropriate type.
@@ -850,7 +850,7 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
           , elfSectionType s == SHT_STRTAB =
             pure $ ElfDataStrtab (elfSectionIndex s)
           | isSymtabSection s = do
-              case section_vec V.!? fromIntegral (elfSectionLink s) of
+              case sectionVec V.!? fromIntegral (elfSectionLink s) of
                 Nothing -> do
                   warn (ElfSymtabError (InvalidLink (elfSectionLink s)))
                   pure (ElfDataSection s)

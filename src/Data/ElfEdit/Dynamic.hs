@@ -126,7 +126,7 @@ data DynamicError
    | BadValuePltRel !Integer
      -- ^ DT_PLTREL entry contained a bad value
    | ErrorParsingPLTEntries !String
-   | ErrorParsingRelaEntries !String
+   | ErrorRelaBufferNotMultiple
    | IncorrectRelSize
    | IncorrectRelaSize
    | UnresolvedVersionReqAuxIndex !B.ByteString !Word16
@@ -159,7 +159,8 @@ instance Show DynamicError where
   show BadSymbolTableEntrySize = "Unexpected symbol table entry size."
   show (ErrorParsingVerDefs msg) = "Invalid version defs: " ++ msg
   show (ErrorParsingVerReqs msg) = "Invalid version reqs: " ++ msg
-  show (ErrorParsingRelaEntries msg) = "Could not parse relocation entries: " ++ msg
+  show ErrorRelaBufferNotMultiple =
+    "Rela buffer must be a multiple of rela entry size."
   show IncorrectRelSize = "DT_RELENT has unexpected size"
   show IncorrectRelaSize = "DT_RELAENT has unexpected size"
   show (ErrorParsingPLTEntries msg) = "Could not parse PLT relocation entries: " ++ msg
@@ -630,7 +631,7 @@ dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
 
   -- Size of each symbol table entry.
   syment <- mandatoryDynamicEntry DT_SYMENT m
-  when (syment /= symbolTableEntrySize cl) $ do
+  when (syment /= fromIntegral (symbolTableEntrySize cl)) $ do
     throwError BadSymbolTableEntrySize
 
   -- Get buffer that points to beginnig of symbol table
@@ -820,11 +821,15 @@ dynRelaEntries :: forall tp
                -> Either DynamicError [RelaEntry tp]
 dynRelaEntries ds = do
   dynRelaBuf <- dynRelaBuffer ds
+  let cl :: ElfClass (RelocationWidth tp)
+      cl = relaWidth (undefined :: tp)
   case dynRelaBuf of
     Nothing -> pure []
-    Just buf -> do
-      either (throwError . ErrorParsingRelaEntries) pure $
-        elfRelaEntries (dynData ds) buf
+    Just buf ->
+      case L.length buf `quotRem` relaEntSize cl of
+        (n, 0) ->
+          Right $ relaEntry (dynData ds) (L.toStrict buf) <$> [0..fromIntegral n-1]
+        _ -> Left ErrorRelaBufferNotMultiple
 
 -- | Information about the PLT relocations in a dynamic section.
 data PLTEntries tp

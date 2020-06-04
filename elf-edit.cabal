@@ -1,5 +1,5 @@
 Name:          elf-edit
-Version:       0.36
+Version:       0.37
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
@@ -34,6 +34,7 @@ library
   hs-source-dirs:  src
   exposed-modules:
     Data.ElfEdit
+    Data.ElfEdit.ByteString
   other-modules:
     Data.ElfEdit.Dynamic
     Data.ElfEdit.Dynamic.Tag
