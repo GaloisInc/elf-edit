@@ -304,7 +304,8 @@ shdrFields ELFCLASS64 = shdr64Fields
 ------------------------------------------------------------------------
 -- Symbol table
 
-symbolTableEntrySize :: ElfClass w -> ElfWordType w
+-- | Return the size of a symbol table entry.
+symbolTableEntrySize :: ElfClass w -> Int
 symbolTableEntrySize ELFCLASS32 = 16
 symbolTableEntrySize ELFCLASS64 = 24
 
@@ -312,7 +313,7 @@ symbolTableEntrySize ELFCLASS64 = 24
 symbolTableSize :: ElfClass w -> ElfSymbolTable (ElfWordType w) -> ElfWordType w
 symbolTableSize c symtab = elfClassInstances c $
   let cnt = fromIntegral $ V.length $ elfSymbolTableEntries symtab
-   in symbolTableEntrySize c * cnt
+   in fromIntegral (symbolTableEntrySize c) * cnt
 
 -- | Write a symbol table entry to a builder
 renderSymbolTableEntry :: ElfClass w
@@ -376,7 +377,7 @@ symtabSection cl d name_map this_strtab_idx symtab = s
                        , elfSectionLink  = fromIntegral this_strtab_idx
                        , elfSectionInfo  = elfSymbolTableLocalEntries symtab
                        , elfSectionAddrAlign = symtabAlign cl
-                       , elfSectionEntSize = symbolTableEntrySize cl
+                       , elfSectionEntSize = fromIntegral (symbolTableEntrySize cl)
                        , elfSectionData = dta
                        }
 
