@@ -78,6 +78,7 @@ module Data.ElfEdit
   , pattern PT_GNU_RELRO
   , pattern PT_HIOS
   , pattern PT_LOPROC
+  , pattern PT_ARM_EXIDX
   , pattern PT_HIPROC
     -- ** Elf segment flags
   , ElfSegmentFlags
