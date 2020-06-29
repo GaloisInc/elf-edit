@@ -14,6 +14,7 @@ Defines function for parsing dynamic section.
 {-# LANGUAGE UndecidableInstances #-}
 module Data.ElfEdit.Dynamic
   ( module Data.ElfEdit.Dynamic.Tag
+  , module Data.ElfEdit.VirtAddrMap
   , DynamicSection(..)
   , dynNeeded
   , Data.ElfEdit.Get.LookupStringError(..)
@@ -41,10 +42,6 @@ module Data.ElfEdit.Dynamic
   , VersionReq(..)
   , VersionReqAux(..)
   , VersionTableValue(..)
-    -- * Virtual address map
-  , VirtAddrMap
-  , virtAddrMap
-  , lookupVirtAddrContents
   ) where
 
 import           Control.Monad
@@ -68,53 +65,7 @@ import           Data.ElfEdit.Get
 import           Data.ElfEdit.Layout
 import           Data.ElfEdit.Relocations
 import           Data.ElfEdit.Types
-
-------------------------------------------------------------------------
--- Utilities
-
--- | Maps the start of memory offsets in Elf file to the file contents backing that
--- memory
-newtype VirtAddrMap w = VAM (Map.Map (ElfWordType w) L.ByteString)
-
-instance Show (ElfWordType w) => Show (VirtAddrMap w) where
-  show (VAM m) = "VAM (" ++ show m ++ ")"
-
--- | Creates a virtual address map from bytestring and list of program headers.
---
--- Returns 'Nothing' if the map could not be created due to overlapping segments.
-virtAddrMap :: Integral (ElfWordType w)
-            => L.ByteString -- ^ File contents
-            -> [Phdr w] -- ^ Program headers
-            -> Maybe (VirtAddrMap w)
-virtAddrMap file phdrList = VAM <$> foldlM ins Map.empty phdrList
-  where -- Insert phdr into map if it is loadable
-        ins m phdr
-            -- If segment is not loadable or empty, leave map unchanged
-          | phdrSegmentType phdr /= PT_LOAD || n == 0 = pure m
-            -- If segment overlaps with a previous segment, then return
-            -- 'Nothing' to indicate an error.
-          | Just (prev, old) <- Map.lookupLE addr m
-          , addr - prev < fromIntegral (L.length old) = Nothing
-            -- Insert phdr into map
-          | otherwise =
-            pure $! Map.insert addr new_contents m
-          where addr = phdrSegmentVirtAddr phdr
-                FileOffset dta = phdrFileStart phdr
-                n              = phdrFileSize phdr
-                new_contents   = sliceL (dta,n) file
-
--- | Return the contents in the Elf file starting from the given address
--- offset.
-lookupVirtAddrContents :: Integral (ElfWordType w)
-                       => ElfWordType w
-                       -> VirtAddrMap w
-                       -> Maybe L.ByteString
-lookupVirtAddrContents addr (VAM m) =
-  case Map.lookupLE addr m of
-    Just (prev, contents) | addr - prev <= fromIntegral (L.length contents) -> do
-      let seg_offset = addr - prev
-      Just $! L.drop (fromIntegral seg_offset) contents
-    _ -> Nothing
+import           Data.ElfEdit.VirtAddrMap
 
 ------------------------------------------------------------------------
 -- DynamicError
@@ -524,7 +475,7 @@ data DynamicSection w
                 , dynDebug :: !(Maybe (ElfWordType w))
                 }
 
-deriving instance Show (ElfWordType w)
+deriving instance (Show (ElfWordType w), Integral (ElfWordType w))
   => Show (DynamicSection w)
 
 -- | Get values of DT_NEEDED entries
