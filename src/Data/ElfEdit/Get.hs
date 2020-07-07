@@ -543,7 +543,7 @@ phdrName phdr = "segment" ++ show (phdrSegmentIndex phdr)
 
 -- | Get list of sections from Elf parse info.
 -- This includes the initial section
-headerSections :: forall w . ElfHeaderInfo w -> V.Vector (ElfSection (ElfWordType w))
+headerSections :: forall w . ElfHeaderInfo w -> V.Vector (Range (ElfWordType w), ElfSection (ElfWordType w))
 headerSections ehi = V.generate cnt $ getSectionByIndex
   where cnt = fromIntegral (entryNum (shdrTable ehi)) :: Int
 
@@ -553,9 +553,8 @@ headerSections ehi = V.generate cnt $ getSectionByIndex
         names :: B.ByteString
         names = snd $ nameSectionInfo ehi
 
-        getSectionByIndex :: Int -> ElfSection (ElfWordType w)
         getSectionByIndex i = elfClassInstances c $
-          snd $ getSectionAndRange ehi (Just names) (fromIntegral i)
+          getSectionAndRange ehi (Just names) (fromIntegral i)
 
 isSymtabSection :: ElfSection w -> Bool
 isSymtabSection s
