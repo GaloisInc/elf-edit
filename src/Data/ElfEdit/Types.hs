@@ -77,6 +77,7 @@ module Data.ElfEdit.Types
   , pattern PT_PAX_FLAGS
   , pattern PT_HIOS
   , pattern PT_LOPROC
+  , pattern PT_ARM_EXIDX
   , pattern PT_HIPROC
     -- ** Elf segment flags
   , ElfSegmentFlags(..)
@@ -375,6 +376,11 @@ pattern PT_HIOS    = ElfSegmentType 0x6fffffff
 -- | Start of OS-specific
 pattern PT_LOPROC :: ElfSegmentType
 pattern PT_LOPROC  = ElfSegmentType 0x70000000
+
+-- | Exception unwinding tables
+pattern PT_ARM_EXIDX :: ElfSegmentType
+pattern PT_ARM_EXIDX  = ElfSegmentType 0x70000001
+
 -- | End of OS-specific
 pattern PT_HIPROC :: ElfSegmentType
 pattern PT_HIPROC  = ElfSegmentType 0x7fffffff
