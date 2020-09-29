@@ -48,6 +48,7 @@ library
     Data.ElfEdit.Relocations.I386
     Data.ElfEdit.Relocations.X86_64
     Data.ElfEdit.Sections
+    Data.ElfEdit.ShdrEntry
     Data.ElfEdit.SymbolEnums
     Data.ElfEdit.Types
     Data.ElfEdit.Utils

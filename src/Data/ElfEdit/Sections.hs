@@ -48,7 +48,13 @@ module Data.ElfEdit.Sections
   , shf_alloc
   , shf_execinstr
   , shf_merge
+  , shf_strings
+  , shf_info_link
+  , shf_link_order
+  , shf_os_nonconforming
+  , shf_group
   , shf_tls
+  , shf_compressed
   ) where
 
 import           Data.Bits
@@ -317,7 +323,7 @@ newtype ElfSectionFlags w = ElfSectionFlags { fromElfSectionFlags :: w }
 
 instance (Bits w, Integral w, Show w) => Show (ElfSectionFlags w) where
   showsPrec d (ElfSectionFlags w) = showFlags "shf_none" names d w
-    where names = V.fromList ["shf_write", "shf_alloc", "shf_execinstr", "8", "shf_merge"]
+    where names = V.fromList ["shf_write", "shf_alloc", "shf_execinstr", "8", "shf_merge", "shf_strings"]
 
 -- | Empty set of flags
 shf_none :: Num w => ElfSectionFlags w
@@ -340,12 +346,36 @@ shf_execinstr = ElfSectionFlags 0x4
 shf_merge :: Num w => ElfSectionFlags w
 shf_merge = ElfSectionFlags 0x10
 
+-- | Section contians null terminated strings.
+shf_strings :: Num w => ElfSectionFlags w
+shf_strings = ElfSectionFlags 0x20
+
+-- | Section info contains section header index.
+shf_info_link :: Num w => ElfSectionFlags w
+shf_info_link = ElfSectionFlags 0x40
+
+-- | Section info contains section index this applies.
+shf_link_order :: Num w => ElfSectionFlags w
+shf_link_order = ElfSectionFlags 0x80
+
+-- | Non-standard OS specific handling required.
+shf_os_nonconforming :: Num w => ElfSectionFlags w
+shf_os_nonconforming = ElfSectionFlags 0x100
+
+-- | Section is a member of a group.
+shf_group :: Num w => ElfSectionFlags w
+shf_group = ElfSectionFlags 0x200
+
 -- | Section contains TLS data (".tdata" or ".tbss")
 --
 -- Information in it may be modified by the dynamic linker, but is only copied
 -- once the binary is linked.
 shf_tls :: Num w => ElfSectionFlags w
 shf_tls = ElfSectionFlags 0x400
+
+-- | Section contains compressed data.
+shf_compressed :: Num w => ElfSectionFlags w
+shf_compressed = ElfSectionFlags 0x800
 
 ------------------------------------------------------------------------
 -- ElfSection

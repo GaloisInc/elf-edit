@@ -1,6 +1,6 @@
 {-|
 Module           : Data.ElfEdit.Layout
-Copyright        : (c) Galois, Inc 2016
+Copyright        : (c) Galois, Inc 2016-2020
 License          : BSD3
 Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
@@ -90,8 +90,8 @@ module Data.ElfEdit
   , Phdr(..)
   , FileOffset(..)
   , phdrFileRange
-  , headerPhdrs
   , headerSections
+  , headerFileContents
     -- * Reading Elf files
   , hasElfMagic
   , ElfGetResult(..)
@@ -101,23 +101,22 @@ module Data.ElfEdit
     -- * Writing Elf files
   , renderElf
     -- ** Layout information
-  , ElfLayout
+  , ElfLayout(..)
   , elfLayout
-  , elfLayoutHeader
   , elfLayoutData
   , elfLayoutClass
-  , elfLayoutRegions
   , elfLayoutBytes
   , elfLayoutSize
   , elfMagic
   , ehdrSize
   , phdrEntrySize
-  , shdrEntrySize
+  , Data.ElfEdit.ShdrEntry.shdrEntrySize
+  , Ehdr(..)
+  , layoutEhdr
   , buildElfHeader
-  , buildElfSegmentHeaderTable
+  , Data.ElfEdit.Layout.buildElfSegmentHeaderTable
   , buildElfSectionHeaderTable
   , elfRegionFileSize
-  , Shdr
   , shdrs
     -- * Symbol Table Entries
   , ElfSymbolTable(..)
@@ -173,14 +172,46 @@ module Data.ElfEdit
   , stringTable
   , ElfWordType
   , ElfIntType
-    -- * Low level information
-  , ElfHeaderInfo
-  , parseElfHeaderInfo
-  , header
-  , getElf
     -- * Gnu-specific extensions
   , GnuStack(..)
   , GnuRelroRegion(..)
+    -- * Low level information
+  , ElfHeaderInfo
+  , Data.ElfEdit.Get.shdrNameIdx
+  , parseElfHeaderInfo
+  , header
+  , getElf
+    -- ** Section headers
+  , Data.ElfEdit.ShdrEntry.ShdrEntry(..)
+  , Data.ElfEdit.ShdrEntry.shdrFileSize
+  , Data.ElfEdit.ShdrEntry.shdrFileRange
+  , Data.ElfEdit.ShdrEntry.writeShdrEntry
+  , Data.ElfEdit.Layout.strtabShdr
+  , Data.ElfEdit.Layout.symtabShdr
+  , Data.ElfEdit.Layout.renderSymbolTableEntry
+    -- * Misc
+  , Data.ElfEdit.Get.phdrCount
+  , Data.ElfEdit.Get.phdrByIndex
+  , Data.ElfEdit.Get.lookupString
+  , Data.ElfEdit.Layout.startOfFile
+  , Data.ElfEdit.Layout.emptyElfSection
+  , Data.ElfEdit.Layout.layoutRegion
+  , Data.ElfEdit.Layout.gnuStackPhdr
+  , Data.ElfEdit.Layout.addPhdrToLayout
+  , Data.ElfEdit.Layout.addSectionHeadersToLayout
+  , Data.ElfEdit.Layout.addSectionToLayout
+  , Data.ElfEdit.Layout.strtabSection
+  , Data.ElfEdit.Layout.symtabSection
+  , Data.ElfEdit.Layout.sectionContents
+  , Data.ElfEdit.Layout.incOffset
+  , Data.ElfEdit.Layout.alignFileOffset
+  , Data.ElfEdit.Layout.shdrAlign
+  , Data.ElfEdit.Layout.incOutputSize
+  , Data.ElfEdit.Layout.alignmentPadding
+  , Data.ElfEdit.Layout.symtabAlign
+  , Data.ElfEdit.Get.headerSectionCount
+  , Data.ElfEdit.Get.headerSectionHeaders
+  , Data.ElfEdit.Get.getShdrEntry
   ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)
@@ -205,6 +236,7 @@ import           Data.ElfEdit.Relocations.ARM32
 import           Data.ElfEdit.Relocations.AArch64
 import           Data.ElfEdit.Relocations.I386
 import           Data.ElfEdit.Relocations.X86_64
+import           Data.ElfEdit.ShdrEntry
 import           Data.ElfEdit.Sections
 import           Data.ElfEdit.SymbolEnums
 import           Data.ElfEdit.Types
@@ -289,11 +321,11 @@ instance Show ElfSymbolVisibility where
 -- ElfSymbolTableEntry
 
 
-steVisibility :: ElfSymbolTableEntry w -> ElfSymbolVisibility
+steVisibility :: ElfSymbolTableEntry nm w -> ElfSymbolVisibility
 steVisibility e = ElfSymbolVisibility (steOther e .&. 0x3)
 
 -- | Pretty print symbol table entries in format used by readelf.
-ppSymbolTableEntries :: (Integral w, Bits w, Show w) => [ElfSymbolTableEntry w] -> Doc
+ppSymbolTableEntries :: (Integral w, Bits w, Show w) => [ElfSymbolTableEntry B.ByteString w] -> Doc
 ppSymbolTableEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
   where entries = zipWith ppSymbolTableEntry [0..] l
         cols = [ ("Num:",     alignRight 6)
@@ -306,7 +338,7 @@ ppSymbolTableEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entri
                , ("Name",     id)
                ]
 
-ppSymbolTableEntry :: (Integral w, Bits w, Show w) => Int -> ElfSymbolTableEntry w -> [String]
+ppSymbolTableEntry :: (Integral w, Bits w, Show w) => Int -> ElfSymbolTableEntry B.ByteString w -> [String]
 ppSymbolTableEntry i e =
   [ show i ++ ":"
   , ppHex (steValue e)
@@ -324,7 +356,7 @@ ppSymbolTableEntry i e =
 -- These are sections labeled, ".symtab" with type SHT_SYMTAB.
 -- There should be at most one symbol table, but we return a list in case the
 -- elf file happens to contain multiple symbol tables.
-elfSymtab :: Elf w -> [ElfSymbolTable (ElfWordType w)]
+elfSymtab :: Elf w -> [ElfSymbolTable B.ByteString (ElfWordType w)]
 elfSymtab = asumDataRegions f
   where f (ElfDataSymtab s) = [s]
         f _ = []

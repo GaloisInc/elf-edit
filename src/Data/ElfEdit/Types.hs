@@ -93,12 +93,20 @@ module Data.ElfEdit.Types
     -- * Utilities
   , hasPermissions
   , ppHex
+  , getWord16
+  , getWord32
+  , getWord64
+  , putWord16
+  , putWord32
+  , putWord64
   ) where
 
 import           Control.Applicative
 import           Control.Lens hiding (enum)
+import qualified Data.Binary.Get as Get
 import           Data.Bits
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Builder as Bld
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import qualified Data.Map as Map
@@ -220,6 +228,33 @@ fromElfData :: ElfData -> Word8
 fromElfData ELFDATA2LSB = 1
 fromElfData ELFDATA2MSB = 2
 
+getWord16 :: ElfData -> Get.Get Word16
+getWord16 ELFDATA2LSB = Get.getWord16le
+getWord16 ELFDATA2MSB = Get.getWord16be
+
+getWord32 :: ElfData -> Get.Get Word32
+getWord32 ELFDATA2LSB = Get.getWord32le
+getWord32 ELFDATA2MSB = Get.getWord32be
+
+getWord64 :: ElfData -> Get.Get Word64
+getWord64 ELFDATA2LSB = Get.getWord64le
+getWord64 ELFDATA2MSB = Get.getWord64be
+
+-- | Convert 'Word16' to data using appropriate endianess.
+putWord16 :: ElfData -> Word16 -> Bld.Builder
+putWord16 ELFDATA2LSB = Bld.word16LE
+putWord16 ELFDATA2MSB = Bld.word16BE
+
+-- | Convert 'Word32' to data using appropriate endianess.
+putWord32 :: ElfData -> Word32 -> Bld.Builder
+putWord32 ELFDATA2LSB = Bld.word32LE
+putWord32 ELFDATA2MSB = Bld.word32BE
+
+-- | Convert 'Word64' to data using appropriate endianess.
+putWord64 :: ElfData -> Word64 -> Bld.Builder
+putWord64 ELFDATA2LSB = Bld.word64LE
+putWord64 ELFDATA2MSB = Bld.word64BE
+
 ------------------------------------------------------------------------
 -- ElfGOT
 
@@ -264,15 +299,10 @@ elfGotSection g =
 -- Some of this information is automatically retrieved
 -- for your convenience (including symbol name, description of the enclosing
 -- section, and definition).
-data ElfSymbolTableEntry w = EST
-    { steName             :: !B.ByteString
-      -- ^ This is the name of the symbol
-      --
-      -- We use bytestrings for encoding the name rather than a 'Text'
-      -- or 'String' value because the elf format does not specify an
-      -- encoding for symbol table entries -- it only specifies that
-      -- they are null-terminated.  This also makes checking equality
-      -- and reading symbol tables faster.
+data ElfSymbolTableEntry nm w = EST
+    { steName             :: !nm
+      -- ^ This is the name of the symbol.  This is a parameter so we can
+      -- support both bytestrings and offsets.
     , steType             :: !ElfSymbolType
     , steBind             :: !ElfSymbolBinding
     , steOther            :: !Word8
@@ -298,10 +328,12 @@ typeAndBindToInfo (ElfSymbolType tp) (ElfSymbolBinding b) = tp .|. (b `shiftL` 4
 -- ElfSymbolTable
 
 -- | This entry corresponds to the symbol table index.
-data ElfSymbolTable w
+--
+-- The name of a symbol is a paramter to support indices and bytestrings.
+data ElfSymbolTable nm w
   = ElfSymbolTable { elfSymbolTableIndex :: !Word16
                      -- ^ Index of section storing symbol table
-                   , elfSymbolTableEntries :: !(V.Vector (ElfSymbolTableEntry w))
+                   , elfSymbolTableEntries :: !(V.Vector (ElfSymbolTableEntry nm w))
                      -- ^ Vector of symbol table entries.
                      --
                      -- Local entries should appear before global entries in vector.
@@ -533,7 +565,7 @@ data ElfDataRegion w
      -- ^ A global offset table.
    | ElfDataStrtab !Word16
      -- ^ Elf strtab section (with index)
-   | ElfDataSymtab !(ElfSymbolTable (ElfWordType w))
+   | ElfDataSymtab !(ElfSymbolTable B.ByteString (ElfWordType w))
      -- ^ Elf symtab section
    | ElfDataSection !(ElfSection (ElfWordType w))
      -- ^ A section that has no special interpretation.

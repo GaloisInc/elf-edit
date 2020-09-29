@@ -705,7 +705,7 @@ data VersionTableValue
      -- ^ Symbol version information
 
 -- | Identifies a symbol entry along with a possible version constraint for the symbol.
-type VersionedSymbol w = (ElfSymbolTableEntry w, VersionTableValue)
+type VersionedSymbol w = (ElfSymbolTableEntry B.ByteString w, VersionTableValue)
 
 -- | Maps the version requirement index to the appropriate version.
 type VersionReqMap = Map.Map Word16 VersionId

@@ -20,20 +20,21 @@ This defines the 'ElfLayout' class which is used for writing elf files.
 {-# LANGUAGE UndecidableInstances #-}
 module Data.ElfEdit.Layout
   ( -- * ElfLayout
-    ElfLayout
-  , elfLayoutHeader
+    ElfLayout(..)
+--  , elfLayoutHeader
   , elfLayoutClass
   , elfLayoutData
-  , elfLayoutRegions
+--  , elfLayoutRegions
   , Phdr(..)
   , phdrFileRange
   , phdrs
   , allPhdrs
-  , Shdr
   , shdrs
   , elfLayout
   , elfLayoutBytes
   , elfLayoutSize
+  , Ehdr(..)
+  , layoutEhdr
   , buildElfHeader
   , buildElfSegmentHeaderTable
   , buildElfSectionHeaderTable
@@ -50,15 +51,35 @@ module Data.ElfEdit.Layout
   , elfMagic
   , ehdrSize
   , phdrEntrySize
-  , shdrEntrySize
   , stringTable
   , strtabSection
   , symbolTableEntrySize
   , symbolTableSize
+  , renderSymbolTableEntry
+    -- * Special section header defines
+  , strtabShdr
+  , symtabShdr
     -- * Utilities
   , putWord16
   , putWord32
   , putWord64
+    -- * Misc
+  , startOfFile
+  , emptyElfSection
+  , layoutRegion
+  , gnuStackPhdr
+  , addPhdrToLayout
+  , buildRegions
+  , addSectionHeadersToLayout
+  , addSectionToLayout
+  , symtabSection
+  , sectionContents
+  , incOffset
+  , alignFileOffset
+  , shdrAlign
+  , incOutputSize
+  , alignmentPadding
+  , symtabAlign
   ) where
 
 import           Control.Exception (assert)
@@ -80,6 +101,7 @@ import           Data.Word
 import           Numeric
 
 import           Data.ElfEdit.Enums
+import           Data.ElfEdit.ShdrEntry
 import           Data.ElfEdit.Types
 
 ------------------------------------------------------------------------
@@ -93,29 +115,6 @@ updateSeq f l0 =
     h Seq.:< l -> compose <$> f h <*> updateSeq f l
       where compose Nothing  r = r
             compose (Just e) r = e Seq.<| r
-
--- | Return true if number is a power of two.
-isPowerTwo :: (Bits x, Num x) => x -> Bool
-isPowerTwo x = x .&. (x-1) == 0
-
-
-------------------------------------------------------------------------
--- Serializtion utilities
-
--- | Convert 'Word16' to data using appropriate endianess.
-putWord16 :: ElfData -> Word16 -> Bld.Builder
-putWord16 ELFDATA2LSB = Bld.word16LE
-putWord16 ELFDATA2MSB = Bld.word16BE
-
--- | Convert 'Word32' to data using appropriate endianess.
-putWord32 :: ElfData -> Word32 -> Bld.Builder
-putWord32 ELFDATA2LSB = Bld.word32LE
-putWord32 ELFDATA2MSB = Bld.word32BE
-
--- | Convert 'Word64' to data using appropriate endianess.
-putWord64 :: ElfData -> Word64 -> Bld.Builder
-putWord64 ELFDATA2LSB = Bld.word64LE
-putWord64 ELFDATA2MSB = Bld.word64BE
 
 ------------------------------------------------------------------------
 -- FileOffset
@@ -154,7 +153,7 @@ isAligned (FileOffset o) align
 -- | `alignFileOffset align off` rounds `off` to the smallest multiple
 -- of `align` not less than `offset`.
 alignmentPadding :: Integral w => FileOffset w -> FileOffset w -> Bld.Builder
-alignmentPadding (FileOffset o') (FileOffset o) = Bld.byteString $ B.replicate (fromIntegral (o' - o)) 0
+alignmentPadding (FileOffset o) (FileOffset o') = Bld.byteString $ B.replicate (fromIntegral (o' - o)) 0
 
 ------------------------------------------------------------------------
 -- Phdr
@@ -252,54 +251,7 @@ writeRecord fields d v =
 -- Shdr
 
 -- | Contains Elf section data, name offset, and data offset.
-type Shdr w = (ElfSection (ElfWordType w), Word32, ElfWordType w)
-
-elfShdrOffset :: (Bits x, Num x) => ElfSection x -> x -> x
-elfShdrOffset s o
-  | B.null (elfSectionData s)
-  , addr <- elfSectionAddr s
-  , algn <- elfSectionAddrAlign s
-  , isPowerTwo algn
-  , mask <- algn - 1
-    -- If address and offset do not match alignment constraint
-  , addr .&. mask /= o .&. mask
-  = (o .&. complement mask) + algn + (addr .&. mask)
-elfShdrOffset _ o = o
-
-shdr32Fields :: ElfRecord (Shdr 32)
-shdr32Fields =
-  [ ("sh_name",      EFWord32 (\(_,n,_) -> n))
-  , ("sh_type",      EFWord32 (\(s,_,_) -> fromElfSectionType  $ elfSectionType s))
-  , ("sh_flags",     EFWord32 (\(s,_,_) -> fromElfSectionFlags $ elfSectionFlags s))
-  , ("sh_addr",      EFWord32 (\(s,_,_) -> elfSectionAddr s))
-  , ("sh_offset",    EFWord32 (\(s,_,o) -> elfShdrOffset s o))
-  , ("sh_size",      EFWord32 (\(s,_,_) -> elfSectionSize s))
-  , ("sh_link",      EFWord32 (\(s,_,_) -> elfSectionLink s))
-  , ("sh_info",      EFWord32 (\(s,_,_) -> elfSectionInfo s))
-  , ("sh_addralign", EFWord32 (\(s,_,_) -> elfSectionAddrAlign s))
-  , ("sh_entsize",   EFWord32 (\(s,_,_) -> elfSectionEntSize s))
-  ]
-
--- Fields that take section, name offset, data offset, and data length.
-shdr64Fields :: ElfRecord (Shdr 64)
-shdr64Fields =
-  [ ("sh_name",      EFWord32 (\(_,n,_) -> n))
-  , ("sh_type",      EFWord32 (\(s,_,_) -> fromElfSectionType  $ elfSectionType s))
-  , ("sh_flags",     EFWord64 (\(s,_,_) -> fromElfSectionFlags $ elfSectionFlags s))
-  , ("sh_addr",      EFWord64 (\(s,_,_) -> elfSectionAddr s))
-  , ("sh_offset",    EFWord64 (\(s,_,o) -> elfShdrOffset s o))
-  , ("sh_size",      EFWord64 (\(s,_,_) -> elfSectionSize s))
-  , ("sh_link",      EFWord32 (\(s,_,_) -> elfSectionLink s))
-  , ("sh_info",      EFWord32 (\(s,_,_) -> elfSectionInfo s))
-  , ("sh_addralign", EFWord64 (\(s,_,_) -> elfSectionAddrAlign s))
-  , ("sh_entsize",   EFWord64 (\(s,_,_) -> elfSectionEntSize s))
-  ]
-
-
-
-shdrFields :: ElfClass w -> ElfRecord (Shdr w)
-shdrFields ELFCLASS32 = shdr32Fields
-shdrFields ELFCLASS64 = shdr64Fields
+type Shdr w = (ElfSection w, Word32, w)
 
 ------------------------------------------------------------------------
 -- Symbol table
@@ -310,7 +262,7 @@ symbolTableEntrySize ELFCLASS32 = 16
 symbolTableEntrySize ELFCLASS64 = 24
 
 -- | Get size of symbol table
-symbolTableSize :: ElfClass w -> ElfSymbolTable (ElfWordType w) -> ElfWordType w
+symbolTableSize :: ElfClass w -> ElfSymbolTable nm (ElfWordType w) -> ElfWordType w
 symbolTableSize c symtab = elfClassInstances c $
   let cnt = fromIntegral $ V.length $ elfSymbolTableEntries symtab
    in fromIntegral (symbolTableEntrySize c) * cnt
@@ -318,19 +270,17 @@ symbolTableSize c symtab = elfClassInstances c $
 -- | Write a symbol table entry to a builder
 renderSymbolTableEntry :: ElfClass w
                        -> ElfData
-                       -> (B.ByteString -> Word32)
-                          -- ^ Function that maps a bytestring to the index associated with it.
-                       -> ElfSymbolTableEntry (ElfWordType w)
+                       -> ElfSymbolTableEntry Word32 (ElfWordType w)
                        -> Bld.Builder
-renderSymbolTableEntry ELFCLASS32 d = \nameFn s ->
-    putWord32 d (nameFn (steName s))
+renderSymbolTableEntry ELFCLASS32 d s =
+  putWord32 d (steName s)
     <> putWord32 d (steValue s)
     <> putWord32 d (steSize  s)
     <> Bld.word8 (typeAndBindToInfo (steType s) (steBind s))
     <> Bld.word8 (steOther s)
     <> putWord16 d (fromElfSectionIndex (steIndex s))
-renderSymbolTableEntry ELFCLASS64 d = \nameFn s ->
-  putWord32 d (nameFn (steName s))
+renderSymbolTableEntry ELFCLASS64 d s =
+  putWord32 d (steName s)
   <> Bld.word8 (typeAndBindToInfo (steType s) (steBind s))
   <> Bld.word8 (steOther s)
   <> putWord16 d (fromElfSectionIndex (steIndex s))
@@ -342,49 +292,90 @@ symtabAlign :: ElfClass w -> ElfWordType w
 symtabAlign ELFCLASS32 = 4
 symtabAlign ELFCLASS64 = 8
 
--- | Create an elf section for symbol table and string table of symbol names.
-symtabData :: ElfClass w
-           -> ElfData
-           -> Map B.ByteString Word32
-              -- ^ Maps symbol table names to offset.
-           -> ElfSymbolTable (ElfWordType w) -- ^ The symbol table
-           -> Bld.Builder
-symtabData cl d name_map symtab = bld
-  where entries = elfSymbolTableEntries symtab
-        nameFn nm =
-          case Map.lookup nm name_map of
-            Just name_idx -> name_idx
-            Nothing -> error "internal: symtabData given undefined symbol name."
-        bld = mconcat $ V.toList $ renderSymbolTableEntry cl d nameFn <$> entries
+-- | Create a section header for a symbol table
+symtabShdr :: ElfClass w
+           -> nm -- ^ Name of symtab (typically ".symtab")
+           -> Word16 -- ^ Index of string table for symbol names
+           -> Word32 -- ^ Number of entries that are local
+           -> FileOffset (ElfWordType w)
+           -- ^ Offset of file that section must be after.
+           --
+           -- We align section so the actual location may be larger.
+           -> ElfWordType w
+           -- ^ Size of section
+           -> ShdrEntry nm (ElfWordType w)
+symtabShdr cl nm strtabIdx localCnt o sz = elfClassInstances cl $
+  let align = symtabAlign cl
+      o' = alignFileOffset align o
+   in ShdrEntry { shdrName = nm
+                , shdrType  = SHT_SYMTAB
+                , shdrFlags = shf_none
+                , shdrAddr  = 0
+                , shdrOff   = fromFileOffset o'
+                , shdrSize  = sz
+                , shdrLink  = fromIntegral strtabIdx
+                , shdrInfo  = localCnt
+                , shdrAddrAlign = symtabAlign cl
+                , shdrEntSize = fromIntegral (symbolTableEntrySize cl)
+                }
 
 -- | Create an elf section for symbol table and string table of symbol names.
 symtabSection :: ElfClass w
               -> ElfData
               -> Map B.ByteString Word32
               -> Word16 -- ^ Index of string table for symbol names
-              -> ElfSymbolTable (ElfWordType w) -- ^ The symbol table
+              -> ElfSymbolTable B.ByteString (ElfWordType w) -- ^ The symbol table
               -> ElfSection (ElfWordType w)
-symtabSection cl d name_map this_strtab_idx symtab = s
-  where bld = symtabData cl d name_map symtab
+symtabSection cl d nameMap thisStrtabIdx symtab = sec
+  where nameFn nm =
+          case Map.lookup nm nameMap of
+            Just nameIdx -> nameIdx
+            Nothing -> error "internal: symtabData given undefined symbol name."
+        renderSym s = renderSymbolTableEntry cl d (s { steName = nameFn (steName s) })
+        bld = mconcat $ V.toList $ renderSym <$> elfSymbolTableEntries symtab
         dta = L.toStrict $ Bld.toLazyByteString bld
-        s = elfClassInstances cl $
+        sec = elfClassInstances cl $
             ElfSection { elfSectionIndex = elfSymbolTableIndex symtab
                        , elfSectionName  = ".symtab"
                        , elfSectionType  = SHT_SYMTAB
                        , elfSectionFlags = shf_none
                        , elfSectionAddr  = 0
                        , elfSectionSize  = fromIntegral (B.length dta)
-                       , elfSectionLink  = fromIntegral this_strtab_idx
+                       , elfSectionLink  = fromIntegral thisStrtabIdx
                        , elfSectionInfo  = elfSymbolTableLocalEntries symtab
                        , elfSectionAddrAlign = symtabAlign cl
                        , elfSectionEntSize = fromIntegral (symbolTableEntrySize cl)
                        , elfSectionData = dta
                        }
 
+
 ------------------------------------------------------------------------
 -- strtabSection
 
--- | Create a section for the section name table from the data.
+-- | Create a section header for a string tabl.
+strtabShdr :: Num w
+           => nm
+           -- ^ Name of section
+           -> w
+           -- ^ Offset of section
+           -> w
+           -- ^ Size of section
+           -> ShdrEntry nm w
+strtabShdr nm o sz =
+  ShdrEntry { shdrName = nm
+            , shdrType = SHT_STRTAB
+            , shdrFlags = shf_none
+            , shdrAddr = 0
+            , shdrOff  = o
+            , shdrSize = sz
+            , shdrLink = 0
+            , shdrInfo = 0
+            , shdrAddrAlign = 1
+            , shdrEntSize = 0
+            }
+
+
+-- | Create a section for a string table.
 strtabSection :: Num w
               => B.ByteString
                  -- ^ Name of section
@@ -557,7 +548,7 @@ data ElfLayout w = ElfLayout {
         -- ^ Offset to section header table.
       , _shstrndx :: !Word16
         -- ^ Index of section for string table.
-      , _shdrs :: !(Map Word16 (Shdr w))
+      , _shdrs :: !(Map Word16 (ShdrEntry Word32 (ElfWordType w)))
         -- ^ Map each section index to the section header entry for that section.
       }
 
@@ -571,6 +562,10 @@ elfLayoutData = headerData . elfLayoutHeader
 elfOutputSize :: Simple Lens (ElfLayout w) (FileOffset (ElfWordType w))
 elfOutputSize = lens _elfOutputSize (\s v -> s { _elfOutputSize = v })
 
+-- | Increment output size
+incOutputSize :: Num (ElfWordType w) => ElfWordType w -> ElfLayout w -> ElfLayout w
+incOutputSize n l = l & elfOutputSize %~ (`incOffset` n)
+
 phdrTableOffset :: Simple Lens (ElfLayout w) (FileOffset (ElfWordType w))
 phdrTableOffset = lens _phdrTableOffset (\s v -> s { _phdrTableOffset = v })
 
@@ -583,7 +578,7 @@ shdrTableOffset = lens _shdrTableOffset (\s v -> s { _shdrTableOffset = v })
 shstrndx :: Simple Lens (ElfLayout w) Word16
 shstrndx = lens _shstrndx (\s v -> s { _shstrndx = v })
 
-shdrs :: Simple Lens (ElfLayout w) (Map Word16 (Shdr w))
+shdrs :: Simple Lens (ElfLayout w) (Map Word16 (ShdrEntry Word32 (ElfWordType w)))
 shdrs = lens _shdrs (\s v -> s { _shdrs = v })
 
 -- | Return total size of elf file.
@@ -625,6 +620,21 @@ emptyElfSection =
              , elfSectionData      = B.empty
              }
 
+initShdrEntry :: Num w => nm -> ShdrEntry nm w
+initShdrEntry nm =
+  ShdrEntry { shdrName = nm
+            , shdrType = SHT_NULL
+            , shdrFlags = shf_none
+            , shdrAddr = 0
+            , shdrOff  = 0
+            , shdrSize = 0
+            , shdrLink = 0
+            , shdrInfo = 0
+            , shdrAddrAlign = 0
+            , shdrEntSize = 0
+            }
+
+
 -- | Add section information to layout.
 -- This may call an erorr if not defined.
 addSectionToLayout :: ElfWidthConstraints w
@@ -655,33 +665,43 @@ addSectionToLayout l s inLoad
         fileOff =  l^.elfOutputSize
         idx = elfSectionIndex s
      in l & elfOutputSize .~ incOffset alignedOff (elfSectionFileSize s)
-          & shdrs %~ Map.insert idx (s, no, fromFileOffset alignedOff)
+          & shdrs %~ Map.insert idx (mkShdrEntry (s, no, fromFileOffset alignedOff))
 
-addGnuStackToLayout :: ElfLayout w -> GnuStack -> ElfLayout w
-addGnuStackToLayout l gnuStack
-  | Map.member (gnuStackSegmentIndex gnuStack) (l^.phdrs) =
-      error $ "Gnu stack segment index " ++ show (gnuStackSegmentIndex gnuStack)
-         ++ " already exists."
-  | otherwise = elfClassInstances (elfLayoutClass l) $ do
-      let thisIdx = gnuStackSegmentIndex gnuStack
-          perm | gnuStackIsExecutable gnuStack = pf_r .|. pf_w .|. pf_x
-               |  otherwise = pf_r .|. pf_w
-          phdr = Phdr { phdrSegmentIndex = thisIdx
-                      , phdrSegmentType  = PT_GNU_STACK
-                      , phdrSegmentFlags = perm
-                      , phdrSegmentVirtAddr = 0
-                      , phdrSegmentPhysAddr = 0
-                      , phdrSegmentAlign = 0x8
-                      , phdrFileStart = startOfFile
-                      , phdrFileSize  = 0
-                      , phdrMemSize   = 0
-                  }
-       in l & phdrs %~ Map.insert thisIdx phdr
+addSectionHeadersToLayout :: ElfLayout w -> ElfLayout w
+addSectionHeadersToLayout l = elfClassInstances  (elfLayoutClass l) $
+   let cl = elfLayoutClass l
+       shdrCnt = elfLayoutShdrCount l
+       o' = alignFileOffset (shdrAlign cl) (l^.elfOutputSize)
+       shdrTableSize = shdrCnt * fromIntegral (shdrEntrySize cl)
+    in l & shdrTableOffset .~ o'
+         & elfOutputSize   .~ incOffset o' shdrTableSize
+
+
+gnuStackPhdr :: Num (ElfWordType w) => GnuStack -> Phdr w
+gnuStackPhdr gnuStack =
+  let thisIdx = gnuStackSegmentIndex gnuStack
+      perm | gnuStackIsExecutable gnuStack = pf_r .|. pf_w .|. pf_x
+           |  otherwise = pf_r .|. pf_w
+   in Phdr { phdrSegmentIndex = thisIdx
+           , phdrSegmentType  = PT_GNU_STACK
+           , phdrSegmentFlags = perm
+           , phdrSegmentVirtAddr = 0
+           , phdrSegmentPhysAddr = 0
+           , phdrSegmentAlign = 0x8
+           , phdrFileStart = startOfFile
+           , phdrFileSize  = 0
+           , phdrMemSize   = 0
+           }
+
+addPhdrToLayout :: String -> ElfLayout w -> Phdr w -> ElfLayout w
+addPhdrToLayout nm l phdr
+  | Map.member (phdrSegmentIndex phdr) (l^.phdrs) =
+      error $ nm ++ " " ++ show (phdrSegmentIndex phdr) ++ " already exists."
+  | otherwise =
+      l & phdrs %~ Map.insert (phdrSegmentIndex phdr) phdr
 
 addRelroToLayout :: ElfLayout w -> GnuRelroRegion w -> ElfLayout w
 addRelroToLayout l r
-  | Map.member (relroSegmentIndex r) (l^.phdrs) =
-    error $ "Relro has duplicate index"
   | otherwise = elfClassInstances (elfLayoutClass l) $ do
       let refIdx = relroRefSegmentIndex r
       case Map.lookup refIdx (l^.phdrs) of
@@ -700,7 +720,7 @@ addRelroToLayout l r
                           , phdrFileSize  = relroSize r
                           , phdrMemSize   = relroSize r
                           }
-           in l & phdrs %~ Map.insert thisIdx phdr
+           in addPhdrToLayout "Relro segment index" l phdr
 
 ------------------------------------------------------------------------
 -- Layout information
@@ -732,12 +752,6 @@ phdrEntrySize32 = sizeOfRecord phdr32Fields
 phdrEntrySize64 :: Word16
 phdrEntrySize64 = sizeOfRecord phdr64Fields
 
-shdrEntrySize32 :: Word16
-shdrEntrySize32 = sizeOfRecord shdr32Fields
-
-shdrEntrySize64 :: Word16
-shdrEntrySize64 = sizeOfRecord shdr64Fields
-
 -- | Size of the main elf header table for given width.
 ehdrSize :: ElfClass w -> Word16
 ehdrSize ELFCLASS32 = ehdrSize32
@@ -747,11 +761,6 @@ ehdrSize ELFCLASS64 = ehdrSize64
 phdrEntrySize :: ElfClass w -> Word16
 phdrEntrySize ELFCLASS32 = phdrEntrySize32
 phdrEntrySize ELFCLASS64 = phdrEntrySize64
-
--- | Size of entry in Elf section header table for given width.
-shdrEntrySize :: ElfClass w -> Word16
-shdrEntrySize ELFCLASS32 = shdrEntrySize32
-shdrEntrySize ELFCLASS64 = shdrEntrySize64
 
 -- | Return alignment constraint on elf
 phdrAlign :: ElfClass w -> ElfWordType w
@@ -763,43 +772,62 @@ shdrAlign :: ElfClass w -> ElfWordType w
 shdrAlign ELFCLASS32 = 4
 shdrAlign ELFCLASS64 = 8
 
-ehdr32Fields :: ElfRecord (ElfLayout 32)
+-- | Information to be rendered into Elf header record at start of file.
+data Ehdr w = Ehdr { ehdrHeader :: !(ElfHeader w)
+                   , ehdrPhoff :: !(FileOffset (ElfWordType w))
+                   , ehdrShoff :: !(FileOffset (ElfWordType w))
+                   , ehdrPhnum :: !Word16
+                   , ehdrShnum :: !Word16
+                   , ehdrShstrndx :: !Word16
+                   }
+
+-- | Get ehdr from elf layout
+layoutEhdr :: ElfLayout w -> Ehdr w
+layoutEhdr l = Ehdr { ehdrHeader   = elfLayoutHeader l
+                    , ehdrPhoff    = l^.phdrTableOffset
+                    , ehdrShoff    = l^.shdrTableOffset
+                    , ehdrPhnum    = phnum l
+                    , ehdrShnum    = shnum l
+                    , ehdrShstrndx = l^.shstrndx
+                    }
+
+ehdr32Fields :: ElfRecord (Ehdr 32)
 ehdr32Fields =
-  [ ("e_ident",     EFBS 16  $ elfIdentBuilder . elfLayoutHeader)
-  , ("e_type",      EFWord16 $ fromElfType     . headerType    . elfLayoutHeader)
-  , ("e_machine",   EFWord16 $ fromElfMachine  . headerMachine . elfLayoutHeader)
+  [ ("e_ident",     EFBS 16  $ elfIdentBuilder . ehdrHeader)
+  , ("e_type",      EFWord16 $ fromElfType     . headerType    . ehdrHeader)
+  , ("e_machine",   EFWord16 $ fromElfMachine  . headerMachine . ehdrHeader)
   , ("e_version",   EFWord32 $ \_ -> fromIntegral expectedElfVersion)
-  , ("e_entry",     EFWord32 $ headerEntry . elfLayoutHeader)
-  , ("e_phoff",     EFWord32 $ fromFileOffset . view phdrTableOffset)
-  , ("e_shoff",     EFWord32 $ fromFileOffset . view shdrTableOffset)
-  , ("e_flags",     EFWord32 $ headerFlags . elfLayoutHeader)
+  , ("e_entry",     EFWord32 $ headerEntry . ehdrHeader)
+  , ("e_phoff",     EFWord32 $ fromFileOffset . ehdrPhoff)
+  , ("e_shoff",     EFWord32 $ fromFileOffset . ehdrShoff)
+  , ("e_flags",     EFWord32 $ headerFlags . ehdrHeader)
   , ("e_ehsize",    EFWord16 $ \_ -> ehdrSize32)
   , ("e_phentsize", EFWord16 $ \_ -> phdrEntrySize32)
-  , ("e_phnum",     EFWord16 $ phnum)
-  , ("e_shentsize", EFWord16 $ \_ -> shdrEntrySize32)
-  , ("e_shnum",     EFWord16 $ shnum)
-  , ("e_shstrndx",  EFWord16 $ view shstrndx)
+  , ("e_phnum",     EFWord16 $ ehdrPhnum)
+  , ("e_shentsize", EFWord16 $ \_ -> 40)
+  , ("e_shnum",     EFWord16 $ ehdrShnum)
+  , ("e_shstrndx",  EFWord16 $ ehdrShstrndx)
   ]
 
-ehdr64Fields :: ElfRecord (ElfLayout 64)
+ehdr64Fields :: ElfRecord (Ehdr 64)
 ehdr64Fields =
-  [ ("e_ident",     EFBS 16  $ elfIdentBuilder . elfLayoutHeader)
-  , ("e_type",      EFWord16 $ fromElfType    . headerType    . elfLayoutHeader)
-  , ("e_machine",   EFWord16 $ fromElfMachine . headerMachine . elfLayoutHeader)
+  [ ("e_ident",     EFBS 16  $ elfIdentBuilder . ehdrHeader)
+  , ("e_type",      EFWord16 $ fromElfType    . headerType    . ehdrHeader)
+  , ("e_machine",   EFWord16 $ fromElfMachine . headerMachine . ehdrHeader)
   , ("e_version",   EFWord32 $ \_ -> fromIntegral expectedElfVersion)
-  , ("e_entry",     EFWord64 $ headerEntry . elfLayoutHeader)
-  , ("e_phoff",     EFWord64 $ fromFileOffset . view phdrTableOffset)
-  , ("e_shoff",     EFWord64 $ fromFileOffset . view shdrTableOffset)
-  , ("e_flags",     EFWord32 $ headerFlags . elfLayoutHeader)
+  , ("e_entry",     EFWord64 $ headerEntry . ehdrHeader)
+  , ("e_phoff",     EFWord64 $ fromFileOffset . ehdrPhoff)
+  , ("e_shoff",     EFWord64 $ fromFileOffset . ehdrShoff)
+  , ("e_flags",     EFWord32 $ headerFlags . ehdrHeader)
   , ("e_ehsize",    EFWord16 $ \_ -> ehdrSize64)
   , ("e_phentsize", EFWord16 $ \_ -> phdrEntrySize64)
-  , ("e_phnum",     EFWord16 $ phnum)
-  , ("e_shentsize", EFWord16 $ \_ -> shdrEntrySize64)
-  , ("e_shnum",     EFWord16 $ shnum)
-  , ("e_shstrndx",  EFWord16 $ view shstrndx)
+  , ("e_phnum",     EFWord16 $ ehdrPhnum)
+  , ("e_shentsize", EFWord16 $ \_ -> 64)
+  , ("e_shnum",     EFWord16 $ ehdrShnum)
+  , ("e_shstrndx",  EFWord16 $ ehdrShstrndx)
   ]
 
-ehdrFields :: ElfClass w -> ElfRecord (ElfLayout w)
+ehdrFields :: ElfClass w -> ElfRecord (Ehdr w)
 ehdrFields ELFCLASS32 = ehdr32Fields
 ehdrFields ELFCLASS64 = ehdr64Fields
 
@@ -836,23 +864,32 @@ phdrFields ELFCLASS64 = phdr64Fields
 -- Render Elf layout
 
 -- | Render the main ELF header.
-buildElfHeader :: ElfLayout w -> Bld.Builder
-buildElfHeader l = writeRecord (ehdrFields (headerClass hdr)) d l
-  where hdr = elfLayoutHeader l
+buildElfHeader :: Ehdr w -> Bld.Builder
+buildElfHeader e = writeRecord (ehdrFields (headerClass hdr)) d e
+  where hdr = ehdrHeader e
         d = headerData hdr
 
 -- | Render the ELF segment header table.
-buildElfSegmentHeaderTable :: ElfHeader w -> [Phdr w] -> Bld.Builder
-buildElfSegmentHeaderTable hdr l =
-    mconcat $ writeRecord (phdrFields cl) d <$> l
-  where cl = headerClass hdr
-        d = headerData hdr
+buildElfSegmentHeaderTable :: ElfClass w -> ElfData -> [Phdr w] -> Bld.Builder
+buildElfSegmentHeaderTable cl d l = mconcat $ writeRecord (phdrFields cl) d <$> l
+
+
+mkShdrEntry :: Shdr w -> ShdrEntry Word32 w
+mkShdrEntry (s,n,o) = ShdrEntry { shdrName = n
+                                , shdrType = elfSectionType s
+                                , shdrFlags = elfSectionFlags s
+                                , shdrAddr = elfSectionAddr s
+                                , shdrOff  = o
+                                , shdrSize = elfSectionSize s
+                                , shdrLink = elfSectionLink s
+                                , shdrInfo = elfSectionInfo s
+                                , shdrAddrAlign = elfSectionAddrAlign s
+                                , shdrEntSize = elfSectionEntSize s
+                                }
 
 -- | Render the ELF section header table.
-buildElfSectionHeaderTable :: ElfHeader w -> [Shdr w] -> Bld.Builder
-buildElfSectionHeaderTable hdr sl = mconcat $ writeRecord (shdrFields cl) d <$> sl
-  where d  = headerData hdr
-        cl = headerClass hdr
+buildElfSectionHeaderTable :: ElfClass w -> ElfData -> [ShdrEntry Word32 (ElfWordType w)] -> Bld.Builder
+buildElfSectionHeaderTable cl d sl = mconcat $ writeShdrEntry d cl <$> sl
 
 -- | This returns true if we can ignore the region file offset
 -- alignment constraint as the size is zero.
@@ -915,22 +952,22 @@ buildRegions l o ((reg,inLoad):rest) = do
       | o /= startOfFile ->
           error "buildRegions given elf header outside start of file."
       | otherwise ->
-        buildElfHeader l
+        buildElfHeader (layoutEhdr l)
         <> doRest (fromIntegral (ehdrSize cl))
     ElfDataSegmentHeaders
       | not (isAligned o (phdrAlign cl)) ->
           error $ "internal error: buildRegions phdr alignment check failed; Fix layoutRegion."
       | otherwise ->
           let phdrSize = fromIntegral (phnum l) * fromIntegral (phdrEntrySize cl)
-           in buildElfSegmentHeaderTable hdr (allPhdrs l)
+           in buildElfSegmentHeaderTable (headerClass hdr) (headerData hdr) (allPhdrs l)
               <> buildRegions l (o `incOffset` phdrSize) rest
     ElfDataSegment s -> do
       buildRegions l o $ ((,True) <$> F.toList (elfSegmentData s)) ++ rest
     ElfDataSectionHeaders ->
       let o' = alignFileOffset (shdrAlign cl) o
           sz = fromIntegral (shnum l) * fromIntegral (shdrEntrySize cl)
-       in alignmentPadding o' o
-            <> buildElfSectionHeaderTable hdr (Map.elems (l^.shdrs))
+       in alignmentPadding o o'
+            <> buildElfSectionHeaderTable (headerClass hdr) (headerData hdr) (Map.elems (l^.shdrs))
             <> buildRegions l (o' `incOffset` sz) rest
     ElfDataSectionNameTable idx -> do
       let s = strtabSection shstrtab idx (elfLayoutSectionNameData l)
@@ -1024,7 +1061,6 @@ layoutRegion inLoad l reg = do
   let cl = elfLayoutClass l
   let d = elfLayoutData l
   let phdrCnt = elfLayoutPhdrCount l
-  let shdrCnt = elfLayoutShdrCount l
   let o = l^.elfOutputSize
   case reg of
     ElfDataElfHeader
@@ -1082,11 +1118,7 @@ layoutRegion inLoad l reg = do
     ElfDataSectionHeaders
       | inLoad ->
           error $ "Section headers should not be within a segment."
-      | otherwise ->
-        let o' = alignFileOffset (shdrAlign cl) o
-            shdrTableSize = shdrCnt * fromIntegral (shdrEntrySize cl)
-         in l & shdrTableOffset .~ o'
-              & elfOutputSize   .~ incOffset o' shdrTableSize
+      | otherwise -> addSectionHeadersToLayout l
     ElfDataSectionNameTable idx ->
       let l' = l & shstrndx .~ idx
           s  = strtabSection shstrtab idx (elfLayoutSectionNameData l)
@@ -1103,12 +1135,12 @@ layoutRegion inLoad l reg = do
     ElfDataSection s ->
       addSectionToLayout l s inLoad
     ElfDataRaw b ->
-      l & elfOutputSize %~ (`incOffset` fromIntegral (B.length b))
+      l & incOutputSize (fromIntegral (B.length b))
 
 -- | Return layout information from elf file.
 elfLayout' :: forall w . ElfWidthConstraints w => Elf w -> ElfLayout w
 elfLayout' e = initl & flip (F.foldl' (layoutRegion False)) (e^.elfFileData)
-                     & flip (F.foldl' addGnuStackToLayout) (elfGnuStackSegment e)
+                     & flip (F.foldl' (addPhdrToLayout "GNU stack segment index")) (fmap gnuStackPhdr (elfGnuStackSegment e))
                      & flip (F.foldl' addRelroToLayout)    (elfGnuRelroRegions e)
   where sec_names = elfSectionNames e
         (nameData,nameMap) = stringTable sec_names
@@ -1137,9 +1169,8 @@ elfLayout' e = initl & flip (F.foldl' (layoutRegion False)) (e^.elfFileData)
                           , _phdrs = Map.empty
                           , _shdrTableOffset = startOfFile
                           , _shstrndx = 0
-                          , _shdrs = Map.singleton 0 $ (emptyElfSection, 0, 0)
+                          , _shdrs = Map.singleton 0 (initShdrEntry 0)
                           }
-
 
 -- | Return layout information from elf file.
 elfLayout :: Elf w -> ElfLayout w
