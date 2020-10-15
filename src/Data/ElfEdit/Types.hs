@@ -278,16 +278,16 @@ elfGotSectionFlags = shf_write .|. shf_alloc
 elfGotSection :: (Bits w, Num w) => ElfGOT w -> ElfSection w
 elfGotSection g =
   ElfSection { elfSectionIndex = elfGotIndex g
-             , elfSectionName = elfGotName g
-             , elfSectionType = SHT_PROGBITS
+             , elfSectionName  = elfGotName g
+             , elfSectionType  = SHT_PROGBITS
              , elfSectionFlags = elfGotSectionFlags
-             , elfSectionAddr = elfGotAddr g
-             , elfSectionSize = elfGotSize g
-             , elfSectionLink = 0
-             , elfSectionInfo = 0
+             , elfSectionAddr  = elfGotAddr g
+             , elfSectionSize  = elfGotSize g
+             , elfSectionLink  = 0
+             , elfSectionInfo  = 0
              , elfSectionAddrAlign = elfGotAddrAlign g
-             , elfSectionEntSize = elfGotEntSize g
-             , elfSectionData = elfGotData g
+             , elfSectionEntSize   = elfGotEntSize g
+             , elfSectionData      = elfGotData g
              }
 
 ------------------------------------------------------------------------

@@ -93,7 +93,6 @@ pattern SHN_ABS = ElfSectionIndex 0xfff1
 pattern SHN_COMMON :: ElfSectionIndex
 pattern SHN_COMMON = ElfSectionIndex 0xfff2
 
-
 -- | Start of processor specific.
 pattern SHN_LOPROC :: ElfSectionIndex
 pattern SHN_LOPROC = SHN_LORESERVE

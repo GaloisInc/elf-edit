@@ -23,6 +23,7 @@ module Data.ElfEdit.Get
   , parseElfHeaderInfo
   , phdrCount
   , phdrByIndex
+  , transShdrEntry
     -- ** Symbol table parsers
   , SymbolTableError(..)
   , parseSymbolTableEntry

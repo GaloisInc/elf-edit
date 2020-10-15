@@ -1,9 +1,4 @@
 {-|
-Module           : Data.ElfEdit.Layout
-Copyright        : (c) Galois, Inc 2016-2020
-License          : BSD3
-Maintainer       : Joe Hendrix <jhendrix@galois.com>
-
 This module provides facilities for manipulating ELF files.  It includes
 operations for both reading and writing files a well as inspecting their
 contents.
@@ -94,10 +89,16 @@ module Data.ElfEdit
   , headerFileContents
     -- * Reading Elf files
   , hasElfMagic
-  , ElfGetResult(..)
-  , ElfParseError(..)
-  , parseElf
-  , SomeElf(..)
+  , Data.ElfEdit.Get.ElfGetResult(..)
+  , Data.ElfEdit.Get.ElfParseError(..)
+  , Data.ElfEdit.Get.parseElf
+  , Data.ElfEdit.Get.SomeElf(..)
+    -- ** Low level parsing
+  , Data.ElfEdit.Get.ElfHeaderInfo
+  , Data.ElfEdit.Get.parseElfHeaderInfo
+  , Data.ElfEdit.Get.header
+  , Data.ElfEdit.Get.shdrNameIdx
+  , Data.ElfEdit.Get.getElf
     -- * Writing Elf files
   , renderElf
     -- ** Layout information
@@ -119,12 +120,12 @@ module Data.ElfEdit
   , elfRegionFileSize
   , shdrs
     -- * Symbol Table Entries
-  , ElfSymbolTable(..)
-  , ElfSymbolTableEntry(..)
+  , Data.ElfEdit.Types.ElfSymbolTable(..)
+  , Data.ElfEdit.Types.ElfSymbolTableEntry(..)
   , ppSymbolTableEntries
-  , symbolTableEntrySize
-  , parseSymbolTableEntry
-  , getSymbolTableEntries
+  , Data.ElfEdit.Layout.symbolTableEntrySize
+  , Data.ElfEdit.Get.parseSymbolTableEntry
+  , Data.ElfEdit.Get.getSymbolTableEntries
   , module Data.ElfEdit.SymbolEnums
     -- ** Elf symbol visibility
   , steVisibility
@@ -134,15 +135,15 @@ module Data.ElfEdit
   , pattern STV_HIDDEN
   , pattern STV_PROTECTED
     -- * Relocations
-  , IsRelocationType(..)
-  , RelocationWord
+  , Data.ElfEdit.Relocations.IsRelocationType(..)
+  , Data.ElfEdit.Relocations.RelocationWord
     -- ** Relocation types
-  , RelEntry(..)
-  , relOffset
-  , RelaEntry(..)
-  , relaOffset
-  , ppRelaEntries
-  , relaToRel
+  , Data.ElfEdit.Relocations.RelEntry(..)
+  , Data.ElfEdit.Relocations.relOffset
+  , Data.ElfEdit.Relocations.RelaEntry(..)
+  , Data.ElfEdit.Relocations.relaOffset
+  , Data.ElfEdit.Relocations.ppRelaEntries
+  , Data.ElfEdit.Relocations.relaToRel
     -- ** Relocation parsing
   , Data.ElfEdit.Relocations.elfRelEntries
   , Data.ElfEdit.Relocations.elfRelaEntries
@@ -150,8 +151,6 @@ module Data.ElfEdit
   , Data.ElfEdit.Relocations.relaEntry
   , Data.ElfEdit.Relocations.relEntSize
   , Data.ElfEdit.Relocations.relaEntSize
-  , decodeAndroidRelaEntries
-  , AndroidDecodeError(..)
     -- ** 32-bit x86 relocations
   , module Data.ElfEdit.Relocations.I386
     -- ** 64-bit x86 relocations
@@ -161,26 +160,22 @@ module Data.ElfEdit
     -- ** ARM64 relocations
   , module Data.ElfEdit.Relocations.AArch64
     -- ** Low-level utilities
-  , relocationSymIndex
-  , relocationTypeVal
+  , Data.ElfEdit.Relocations.relocationSymIndex
+  , Data.ElfEdit.Relocations.relocationTypeVal
+    -- ** Android-specific utilities
+  , Data.ElfEdit.Relocations.Android.AndroidDecodeError(..)
+  , Data.ElfEdit.Relocations.Android.decodeAndroidRelaEntries
     -- * Dynamic symbol table and relocations
-  , DynamicSection(..)
   , module Data.ElfEdit.Dynamic
     -- * Common definitions
-  , Range
-  , hasPermissions
-  , stringTable
-  , ElfWordType
-  , ElfIntType
+  , Data.ElfEdit.Types.Range
+  , Data.ElfEdit.Types.hasPermissions
+  , Data.ElfEdit.Layout.stringTable
+  , Data.ElfEdit.Types.ElfWordType
+  , Data.ElfEdit.Relocations.ElfIntType
     -- * Gnu-specific extensions
-  , GnuStack(..)
-  , GnuRelroRegion(..)
-    -- * Low level information
-  , ElfHeaderInfo
-  , Data.ElfEdit.Get.shdrNameIdx
-  , parseElfHeaderInfo
-  , header
-  , getElf
+  , Data.ElfEdit.Types.GnuStack(..)
+  , Data.ElfEdit.Types.GnuRelroRegion(..)
     -- ** Section headers
   , Data.ElfEdit.ShdrEntry.ShdrEntry(..)
   , Data.ElfEdit.ShdrEntry.shdrFileSize
@@ -212,6 +207,7 @@ module Data.ElfEdit
   , Data.ElfEdit.Get.headerSectionCount
   , Data.ElfEdit.Get.headerSectionHeaders
   , Data.ElfEdit.Get.getShdrEntry
+  , Data.ElfEdit.Get.transShdrEntry
   ) where
 
 import           Control.Lens ((^.), (^..), filtered, over)
