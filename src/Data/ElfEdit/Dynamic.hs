@@ -53,7 +53,6 @@ import           Control.Monad.Reader
 import           Data.Binary.Get hiding (runGet)
 import           Data.Bits
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Unsafe as B
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as L
 import           Data.Foldable
@@ -63,6 +62,7 @@ import           Data.Maybe
 import           Data.Word
 import           Numeric (showHex)
 
+import           Data.ElfEdit.ByteString
 import           Data.ElfEdit.Dynamic.Tag
 import           Data.ElfEdit.Get
 import           Data.ElfEdit.Layout
@@ -266,48 +266,11 @@ addressRangeToFile (tag_off, tag_size) (off, sz) = do
 ------------------------------------------------------------------------
 -- Dynamic
 
-word32le :: B.ByteString -> Word32
-word32le = \s ->
-      fromIntegral (s `B.unsafeIndex` 3) `shiftL` 24
-  .|. fromIntegral (s `B.unsafeIndex` 2) `shiftL` 16
-  .|. fromIntegral (s `B.unsafeIndex` 1) `shiftL`  8
-  .|. fromIntegral (s `B.unsafeIndex` 0)
-
-
-word32be :: B.ByteString -> Word32
-word32be = \s ->
-      fromIntegral (s `B.unsafeIndex` 0) `shiftL` 24
-  .|. fromIntegral (s `B.unsafeIndex` 1) `shiftL` 16
-  .|. fromIntegral (s `B.unsafeIndex` 2) `shiftL`  8
-  .|. fromIntegral (s `B.unsafeIndex` 3)
-
-word64le :: B.ByteString -> Word64
-word64le = \s ->
-      fromIntegral (s `B.unsafeIndex` 7) `shiftL` 56
-  .|. fromIntegral (s `B.unsafeIndex` 6) `shiftL` 48
-  .|. fromIntegral (s `B.unsafeIndex` 5) `shiftL` 40
-  .|. fromIntegral (s `B.unsafeIndex` 4) `shiftL` 32
-  .|. fromIntegral (s `B.unsafeIndex` 3) `shiftL` 24
-  .|. fromIntegral (s `B.unsafeIndex` 2) `shiftL` 16
-  .|. fromIntegral (s `B.unsafeIndex` 1) `shiftL`  8
-  .|. fromIntegral (s `B.unsafeIndex` 0)
-
-word64be :: B.ByteString -> Word64
-word64be = \s ->
-      fromIntegral (s `B.unsafeIndex` 0) `shiftL` 56
-  .|. fromIntegral (s `B.unsafeIndex` 1) `shiftL` 48
-  .|. fromIntegral (s `B.unsafeIndex` 2) `shiftL` 40
-  .|. fromIntegral (s `B.unsafeIndex` 3) `shiftL` 32
-  .|. fromIntegral (s `B.unsafeIndex` 4) `shiftL` 24
-  .|. fromIntegral (s `B.unsafeIndex` 5) `shiftL` 16
-  .|. fromIntegral (s `B.unsafeIndex` 6) `shiftL`  8
-  .|. fromIntegral (s `B.unsafeIndex` 7)
-
 relaWord :: ElfClass w -> ElfData -> B.ByteString -> ElfWordType w
-relaWord ELFCLASS32 ELFDATA2LSB = word32le
-relaWord ELFCLASS32 ELFDATA2MSB = word32be
-relaWord ELFCLASS64 ELFDATA2LSB = word64le
-relaWord ELFCLASS64 ELFDATA2MSB = word64be
+relaWord ELFCLASS32 ELFDATA2LSB = bsWord32le
+relaWord ELFCLASS32 ELFDATA2MSB = bsWord32be
+relaWord ELFCLASS64 ELFDATA2LSB = bsWord64le
+relaWord ELFCLASS64 ELFDATA2MSB = bsWord64be
 
 relaWordSize :: ElfClass w -> Int
 relaWordSize ELFCLASS32 = 4
