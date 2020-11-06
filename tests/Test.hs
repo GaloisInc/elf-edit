@@ -120,7 +120,7 @@ testDynSymTable = do
     let isVer VersionSpecific{} = True
         isVer VersionLocal  = False
         isVer VersionGlobal = False
-    let symInfo :: (ElfSymbolTableEntry u, VersionTableValue) -> (C8.ByteString, Bool)
+    let symInfo :: (ElfSymbolTableEntry B.ByteString u, VersionTableValue) -> (C8.ByteString, Bool)
         symInfo (s,v) = (steName s, isVer v)
     -- Statically define expected symbol information.
     let expectedSymInfo = [("",False), ("__libc_start_main",True), ("__gmon_start__", False)]
