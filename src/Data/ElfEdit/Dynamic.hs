@@ -11,12 +11,11 @@ Defines function for parsing dynamic section.
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Data.ElfEdit.Dynamic
-  ( module Data.ElfEdit.Dynamic.Tag
-  , DynamicSection(..)
+  ( DynamicSection(..)
   , dynNeeded
-  , Data.ElfEdit.Get.LookupStringError(..)
   , dynInit
   , dynFini
   , dynUnparsed
@@ -31,7 +30,10 @@ module Data.ElfEdit.Dynamic
   , parseDynamicMap
   , dynSymEntry
   , DynamicError(..)
-    -- Version information
+    -- ** Tag
+  , module Data.ElfEdit.Dynamic.Tag
+    -- ** Version information
+  , VersionReqMap
   , VersionedSymbol
   , VersionId(..)
   , VersionDef(..)
@@ -41,7 +43,7 @@ module Data.ElfEdit.Dynamic
   , VersionReq(..)
   , VersionReqAux(..)
   , VersionTableValue(..)
-    -- * Virtual address map
+    -- ** Virtual address map
   , VirtAddrMap
   , virtAddrMap
   , lookupVirtAddrContents
@@ -54,9 +56,7 @@ import           Data.Binary.Get hiding (runGet)
 import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BSC
-import qualified Data.ByteString.Lazy as L
 import           Data.Foldable
-import           Data.Int (Int64)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
 import           Data.Word
@@ -64,17 +64,20 @@ import           Numeric (showHex)
 
 import           Data.ElfEdit.ByteString
 import           Data.ElfEdit.Dynamic.Tag
-import           Data.ElfEdit.Get
-import           Data.ElfEdit.Layout
-import           Data.ElfEdit.Relocations
-import           Data.ElfEdit.Types
+import           Data.ElfEdit.Prim.Ehdr
+import           Data.ElfEdit.Prim.File
+import           Data.ElfEdit.Prim.Phdr
+import           Data.ElfEdit.Prim.StringTable
+import           Data.ElfEdit.Prim.SymbolTable
+import           Data.ElfEdit.Relocations.Common
+import           Data.ElfEdit.Utils (strictRunGetOrFail)
 
 ------------------------------------------------------------------------
 -- Utilities
 
 -- | Maps the start of memory offsets in Elf file to the file contents backing that
 -- memory
-newtype VirtAddrMap w = VAM (Map.Map (ElfWordType w) L.ByteString)
+newtype VirtAddrMap w = VAM (Map.Map (ElfWordType w) B.ByteString)
 
 instance Show (ElfWordType w) => Show (VirtAddrMap w) where
   show (VAM m) = "VAM (" ++ show m ++ ")"
@@ -83,37 +86,35 @@ instance Show (ElfWordType w) => Show (VirtAddrMap w) where
 --
 -- Returns 'Nothing' if the map could not be created due to overlapping segments.
 virtAddrMap :: Integral (ElfWordType w)
-            => L.ByteString -- ^ File contents
+            => B.ByteString -- ^ File contents
             -> [Phdr w] -- ^ Program headers
             -> Maybe (VirtAddrMap w)
 virtAddrMap file phdrList = VAM <$> foldlM ins Map.empty phdrList
   where -- Insert phdr into map if it is loadable
         ins m phdr
             -- If segment is not loadable or empty, leave map unchanged
-          | phdrSegmentType phdr /= PT_LOAD || n == 0 = pure m
+          | phdrSegmentType phdr /= PT_LOAD || phdrFileSize phdr == 0 = pure m
             -- If segment overlaps with a previous segment, then return
             -- 'Nothing' to indicate an error.
           | Just (prev, old) <- Map.lookupLE addr m
-          , addr - prev < fromIntegral (L.length old) = Nothing
+          , addr - prev < fromIntegral (B.length old) = Nothing
             -- Insert phdr into map
           | otherwise =
-            pure $! Map.insert addr new_contents m
+            pure $! Map.insert addr newContents m
           where addr = phdrSegmentVirtAddr phdr
-                FileOffset dta = phdrFileStart phdr
-                n              = phdrFileSize phdr
-                new_contents   = sliceL (dta,n) file
+                newContents    = slice (phdrFileRange phdr) file
 
 -- | Return the contents in the Elf file starting from the given address
 -- offset.
 lookupVirtAddrContents :: Integral (ElfWordType w)
                        => ElfWordType w
                        -> VirtAddrMap w
-                       -> Maybe L.ByteString
+                       -> Maybe B.ByteString
 lookupVirtAddrContents addr (VAM m) =
   case Map.lookupLE addr m of
-    Just (prev, contents) | addr - prev <= fromIntegral (L.length contents) -> do
+    Just (prev, contents) | addr - prev <= fromIntegral (B.length contents) -> do
       let seg_offset = addr - prev
-      Just $! L.drop (fromIntegral seg_offset) contents
+      Just $! B.drop (fromIntegral seg_offset) contents
     _ -> Nothing
 
 ------------------------------------------------------------------------
@@ -122,7 +123,7 @@ lookupVirtAddrContents addr (VAM m) =
 -- | Errors found when parsing dynamic section
 data DynamicError
    = UnexpectedEndOfDynamicEntries
-   | ErrorParsingSymTabEntry !SymbolTableError
+   | ErrorParsingSymTabEntry !SymtabError
    | BadValuePltRel !Integer
      -- ^ DT_PLTREL entry contained a bad value
    | ErrorParsingPLTEntries !String
@@ -241,7 +242,7 @@ mandatoryDynamicEntry tag m =
 
 addressToFile :: ElfDynamicTag -- ^ Tag this address was defined in
               -> ElfWordType w -- ^ Address in memory.
-              -> DynamicParser w L.ByteString
+              -> DynamicParser w B.ByteString
 addressToFile tag addr = do
   cl       <- asks fileClass
   m        <- asks fileAddrMap
@@ -252,16 +253,18 @@ addressToFile tag addr = do
     _ ->
       throwError $ EntryAddressNotFound tag
 
-addressRangeToFile :: (ElfDynamicTag, ElfDynamicTag)
-                   -> Range (ElfWordType w)
-                   -> DynamicParser w L.ByteString
-addressRangeToFile (tag_off, tag_size) (off, sz) = do
+addressRangeToFile :: ElfDynamicTag -- ^ Tag for offset
+                   -> ElfDynamicTag -- ^ Tag for size
+                   -> ElfWordType w -- ^ Address
+                   -> ElfWordType w -- ^ Size
+                   -> DynamicParser w B.ByteString
+addressRangeToFile tagOff tagSize off sz = do
   cl <- asks fileClass
   elfClassInstances cl $ do
-  bs <- addressToFile tag_off off
-  when (L.length bs < fromIntegral sz) $ do
-    throwError $ EntrySizeTooSmall tag_size
-  pure $! L.take (fromIntegral sz) bs
+  bs <- addressToFile tagOff off
+  when (B.length bs < fromIntegral sz) $ do
+    throwError $ EntrySizeTooSmall tagSize
+  pure $! B.take (fromIntegral sz) bs
 
 ------------------------------------------------------------------------
 -- Dynamic
@@ -304,19 +307,19 @@ parseDynamicMap cl d b = buildDynamicMap cl d Map.empty b
 -- GNU extension
 
 -- | Parses a linked list
-gnuLinkedList :: (L.ByteString -> Get a) -- ^ Function for reading.
+gnuLinkedList :: (B.ByteString -> Get a) -- ^ Function for reading.
               -> ElfData
               -> Int -- ^ Number of entries expected.
-              -> L.ByteString -- ^ Buffer to read.
+              -> B.ByteString -- ^ Buffer to read.
               -> Either String [a]
 gnuLinkedList readFn d = go []
   where readNextVal b = (,) <$> readFn b <*> getWord32 d
         go prev 0 _ = return (reverse prev)
         go prev cnt b =
-          case runGetOrFail (readNextVal b) b of
+          case strictRunGetOrFail (readNextVal b) b of
             Left (_,_,msg) -> Left msg
             Right (_,_,(d',next)) -> do
-              go (d':prev) (cnt-1) (L.drop (fromIntegral next) b)
+              go (d':prev) (cnt-1) (B.drop (fromIntegral next) b)
 
 ------------------------------------------------------------------------
 -- VersionDef
@@ -357,7 +360,7 @@ getOffsetString d strTab = do
   either (fail . show) pure $
     lookupString o strTab
 
-readVersionDef :: ElfData -> B.ByteString -> L.ByteString -> Get VersionDef
+readVersionDef :: ElfData -> B.ByteString -> B.ByteString -> Get VersionDef
 readVersionDef d strTab b = do
   ver   <- getWord16 d
   when (ver /= 1) $
@@ -367,11 +370,11 @@ readVersionDef d strTab b = do
   cnt   <- getWord16 d
   hash  <- getWord32 d
   aux   <- getWord32 d
-  let entry_cnt = fromIntegral cnt
-  let entry_buffer = L.drop (fromIntegral aux) b
+  let entryCnt = fromIntegral cnt
+  let entryBuffer = B.drop (fromIntegral aux) b
   entries <-
     either fail pure $
-    gnuLinkedList (\_ -> getOffsetString d strTab) d entry_cnt entry_buffer
+    gnuLinkedList (\_ -> getOffsetString d strTab) d entryCnt entryBuffer
   case entries of
     [] -> fail "Expected version definition name"
     nm:par -> do
@@ -430,7 +433,7 @@ data VersionReq = VersionReq { vn_file :: B.ByteString
                              } deriving (Show)
 
 
-readVersionReq :: ElfData -> B.ByteString -> L.ByteString -> Get VersionReq
+readVersionReq :: ElfData -> B.ByteString -> B.ByteString -> Get VersionReq
 readVersionReq d strTab b = do
   ver <- getWord16 d
   when (ver /= 1) $ do
@@ -438,9 +441,9 @@ readVersionReq d strTab b = do
   cnt  <- getWord16 d
   file <- getOffsetString d strTab
   aux  <- getWord32 d
-  let entry_buffer = L.drop (fromIntegral aux) b
+  let entryBuffer = B.drop (fromIntegral aux) b
   entries <- either fail pure $
-    gnuLinkedList (\_ -> readVersionReqAux d strTab) d (fromIntegral cnt) entry_buffer
+    gnuLinkedList (\_ -> readVersionReqAux d strTab) d (fromIntegral cnt) entryBuffer
   return VersionReq { vn_file = file
                     , vn_aux = entries
                     }
@@ -456,11 +459,50 @@ gnuVersionReqs strTab dm = do
   case mvn of
     Nothing -> return []
     Just vn -> do
-      req_buffer <- addressToFile DT_VERNEED vn
+      reqBuffer <- addressToFile DT_VERNEED vn
       vnnum <- mandatoryDynamicEntry DT_VERNEEDNUM dm
       elfClassInstances (fileClass ctx) $ do
       either (throwError . ErrorParsingVerReqs) pure $
-        gnuLinkedList (readVersionReq d strTab) d (fromIntegral vnnum) req_buffer
+        gnuLinkedList (readVersionReq d strTab) d (fromIntegral vnnum) reqBuffer
+
+-- Symbol version information
+
+-- | Identifies a version in an Elf file
+data VersionId
+   = VersionId { verFile :: !B.ByteString
+                 -- ^ Name of file symbol is expected in
+               , verName :: !B.ByteString
+                 -- ^ Name of version this belongs to.
+               } deriving (Show)
+
+data VersionTableValue
+   = VersionLocal
+     -- ^ Symbol is local and not available outside object
+   | VersionGlobal
+     -- ^ Symbol is defined in object and globally available
+   | VersionSpecific !VersionId
+     -- ^ Symbol version information
+
+-- | Identifies a symbol entry along with a possible version constraint for the symbol.
+type VersionedSymbol w = (SymtabEntry B.ByteString w, VersionTableValue)
+
+-- | Maps the version requirement index to the appropriate version.
+type VersionReqMap = Map.Map Word16 VersionId
+
+insVersionReq :: VersionReqMap -> VersionReq -> Either DynamicError VersionReqMap
+insVersionReq m0 r = foldlM ins m0 (vn_aux r)
+  where file = vn_file r
+        ins m a =
+          case Map.lookup (vna_other a) m of
+            Nothing -> do
+              let vid = VersionId { verFile = file
+                                  , verName = vna_name a
+                                  }
+              Right $! Map.insert (vna_other a) vid m
+            Just{}  -> Left $! DupVersionReqAuxIndex (vna_other a)
+
+versionReqMap :: [VersionReq] -> Either DynamicError VersionReqMap
+versionReqMap = foldlM insVersionReq Map.empty
 
 ------------------------------------------------------------------------
 -- DynamicSection
@@ -470,11 +512,11 @@ data DynamicSection w
                 , dynClass :: !(ElfClass w)
                 , dynAddrMap :: !(VirtAddrMap w)
                 , dynMap :: !(DynamicMap w)
-                , dynSymtab :: !L.ByteString
+                , dynSymtab :: !B.ByteString
                   -- ^ Contents of file starting from begining of symbol table.
                   -- Note the dynamic section does not define the end of the symbol
                   -- table, so this buffer may contain past the end of the symbol table.
-                , dynVerSym :: !(Maybe L.ByteString)
+                , dynVerSym :: !(Maybe B.ByteString)
                   -- ^ Contents of file starting from start of .gnu.version section
                 , dynSOName :: Maybe B.ByteString
                 , dynStrTab  :: B.ByteString
@@ -510,14 +552,155 @@ dynUnparsed = Map.filterWithKey isUnparsed . dynMap
   where isUnparsed tag _ = not (tag `elem` parsed_dyntags)
 
 ------------------------------------------------------------------------
--- Parsing dynamic section
+-- Get symbol
+
+-- | Return the symbol with the given index.
+dynSymEntry :: forall w
+            .  DynamicSection w -- ^ Dynamic section information
+            -> Word32 -- ^ Index of symbol table entry.
+            -> Either DynamicError (VersionedSymbol (ElfWordType w))
+dynSymEntry ds i = runParser ds $ elfClassInstances (dynClass ds) $ do
+  -- Parse symbol table entry
+  sym <-
+    case decodeSymtabEntry (dynClass ds) (dynData ds) (dynStrTab ds) (dynSymtab ds) i of
+      Left e -> throwError (ErrorParsingSymTabEntry e)
+      Right sym -> pure sym
+  -- Parse version information if present.
+  case dynVerSym ds of
+    Nothing -> do
+      return $! (sym, VersionGlobal)
+    Just verBuffer -> do
+      -- Parse the version index
+      let verOffset :: Int
+          verOffset = 2 * fromIntegral i
+      -- Check the version offset is larger enough
+      when (verOffset + 2 > B.length verBuffer) $ throwError VerSymTooSmall
+      let verIdx =
+            let g :: Int -> Word16
+                g j = fromIntegral (B.index verBuffer (verOffset + j))
+             in case dynData ds of
+                  ELFDATA2LSB -> (g 1 `shiftL` 8) .|. g 0
+                  ELFDATA2MSB -> (g 0 `shiftL` 8) .|. g 1
+      case verIdx of
+        0 -> pure (sym, VersionLocal)
+        1 -> pure (sym, VersionGlobal)
+        _ ->
+          case Map.lookup verIdx (dynVersionReqs ds) of
+            Just verId -> pure (sym, VersionSpecific verId)
+            Nothing -> do
+              throwError $ UnresolvedVersionReqAuxIndex (steName sym) verIdx
+
+------------------------------------------------------------------------
+-- Relocations
+
+runParser :: DynamicSection w
+          -> DynamicParser w a
+          -> Either DynamicError a
+runParser ds m = runDynamicParser (dynData ds) (dynClass ds) (dynAddrMap ds) m
+
+-- | Parse the relocation entries using the dynamic tags for start and size.
+getRelaRange :: ElfDynamicTag -- ^ Tag for reading start of entries
+             -> ElfDynamicTag -- ^ Tag for reading size of entries
+             -> DynamicMap w
+             -> DynamicParser w (Maybe B.ByteString)
+getRelaRange startTag sizeTag dm = do
+  mrelaOffset <- optionalDynamicEntry startTag dm
+  case mrelaOffset of
+    Nothing -> return Nothing
+    Just relaOff -> do
+      sz  <- mandatoryDynamicEntry sizeTag dm
+      Just <$> addressRangeToFile startTag sizeTag relaOff sz
+
+-- | Return the buffer containing rel entries from the dynamic section if any.
+dynRelBuffer :: DynamicSection w
+              -> Either DynamicError (Maybe B.ByteString)
+dynRelBuffer ds = do
+  runParser ds $ do
+    mr <- getRelaRange DT_REL DT_RELSZ (dynMap ds)
+    -- Check entry size
+    case mr of
+      Nothing -> pure ()
+      Just{} -> do
+        ent <- mandatoryDynamicEntry DT_RELENT (dynMap ds)
+        let w = dynClass ds
+        when (elfClassInstances (dynClass ds) $ ent /= relEntSize w) $
+          throwError IncorrectRelSize
+    pure mr
+
+-- | Return the buffer containing rela entries from the dynamic section if any.
+dynRelaBuffer :: DynamicSection w
+              -> Either DynamicError (Maybe B.ByteString)
+dynRelaBuffer ds = do
+  runParser ds $ do
+    mr <- getRelaRange DT_RELA DT_RELASZ (dynMap ds)
+    -- Check entry size
+    case mr of
+      Nothing -> pure ()
+      Just{} -> do
+        ent <- mandatoryDynamicEntry DT_RELAENT (dynMap ds)
+        let w = dynClass ds
+        when (elfClassInstances (dynClass ds) $ ent /= relaEntSize w) $
+          throwError IncorrectRelaSize
+    pure mr
+
+-- | Return the runtime relocation entries
+dynRelaEntries :: forall tp
+               .  IsRelocationType tp
+               => DynamicSection (RelocationWidth tp)
+               -> Either DynamicError [RelaEntry tp]
+dynRelaEntries ds = do
+  dynRelaBuf <- dynRelaBuffer ds
+  let cl :: ElfClass (RelocationWidth tp)
+      cl = relaWidth (undefined :: tp)
+  case dynRelaBuf of
+    Nothing -> pure []
+    Just buf ->
+      case B.length buf `quotRem` relaEntSize cl of
+        (n, 0) ->
+          Right $ decodeRelaEntry (dynData ds) buf <$> [0..fromIntegral n-1]
+        _ -> Left ErrorRelaBufferNotMultiple
+
+-- | Information about the PLT relocations in a dynamic section.
+data PLTEntries tp
+  = PLTRel [RelEntry tp]
+  | PLTRela [RelaEntry tp]
+  | PLTEmpty
+
+-- | Parse the PLT location and relocation entries.
+--
+-- These may be applied immediately upon load, or done later if lazy binding is
+-- enabled.  They may be either all `DT_REL` entries or `DT_RELA` entries
+dynPLTRel :: IsRelocationType tp
+          => DynamicSection (RelocationWidth tp)
+          -> Either DynamicError (PLTEntries tp)
+dynPLTRel ds = do
+  runParser ds $ elfClassInstances (dynClass ds) $ do
+    mr <- getRelaRange DT_JMPREL DT_PLTRELSZ (dynMap ds)
+    case mr of
+      Nothing -> pure PLTEmpty
+      Just contents -> do
+        w <- mandatoryDynamicEntry DT_PLTREL (dynMap ds)
+        case () of
+          _ | w == fromIntegral (fromElfDynamicTag DT_RELA) ->
+              case decodeRelaEntries (dynData ds) contents of
+                Left err -> throwError $ ErrorParsingPLTEntries err
+                Right l -> pure $ PLTRela l
+            | w == fromIntegral (fromElfDynamicTag DT_REL) ->
+              case decodeRelEntries (dynData ds) contents of
+                Left err -> throwError $ ErrorParsingPLTEntries err
+                Right l -> pure $ PLTRel l
+            | otherwise ->
+              throwError $ BadValuePltRel (toInteger w)
+
+------------------------------------------------------------------------
+-- Decoding
 
 -- | Return contents of dynamic string tab.
 getDynStrTab :: DynamicMap w -> DynamicParser w B.ByteString
 getDynStrTab m = do
-  w <-  mandatoryDynamicEntry DT_STRTAB m
+  o <-  mandatoryDynamicEntry DT_STRTAB m
   sz <- mandatoryDynamicEntry DT_STRSZ m
-  L.toStrict <$> addressRangeToFile (DT_STRTAB, DT_STRSZ) (w,sz)
+  addressRangeToFile DT_STRTAB DT_STRSZ o sz
 
 parsed_dyntags :: [ElfDynamicTag]
 parsed_dyntags =
@@ -571,14 +754,13 @@ dynamicEntries :: forall w
                   -- ^ Elf class
                -> VirtAddrMap w
                   -- ^ Virtual address map
-               -> L.ByteString
+               -> B.ByteString
                   -- ^ Dynamic section contents
                -> Either DynamicError (DynamicSection w)
 dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
  runDynamicParser d cl virtMap $ do
-  let dstrict = L.toStrict dynamic
   m <-
-    case parseDynamicMap cl d dstrict of
+    case parseDynamicMap cl d dynamic of
       Nothing -> throwError $ UnexpectedEndOfDynamicEntries
       Just m -> pure m
 
@@ -594,7 +776,7 @@ dynamicEntries d cl virtMap dynamic = elfClassInstances cl $
 
   -- Size of each symbol table entry.
   syment <- mandatoryDynamicEntry DT_SYMENT m
-  when (syment /= fromIntegral (symbolTableEntrySize cl)) $ do
+  when (syment /= fromIntegral (symtabEntrySize cl)) $ do
     throwError BadSymbolTableEntrySize
 
   -- Get buffer that points to beginnig of symbol table
@@ -630,7 +812,7 @@ getDynamicSectionFromSegments :: ElfHeader w
                                  -- ^ The header of the Elf file.
                               -> [Phdr w]
                                  -- ^ The list of parsed program headers.
-                              -> L.ByteString
+                              -> B.ByteString
                               -- ^ Contents of Elf file as a byte string
                               -> VirtAddrMap w
                               -- ^ Maps start of memory offsets in Elf file to contents.
@@ -640,188 +822,10 @@ getDynamicSectionFromSegments hdr ph contents virtMap = elfClassInstances (heade
     [] -> Nothing
     dynPhdr:dynRest | null dynRest -> do
       let (i,c) = phdrFileRange dynPhdr
-      if toInteger i + toInteger c <= toInteger (L.length contents) then do
-        let dynContents = sliceL (phdrFileRange dynPhdr) contents
+      if toInteger i + toInteger c <= toInteger (B.length contents) then do
+        let dynContents = slice (phdrFileRange dynPhdr) contents
         Just $ dynamicEntries (headerData hdr) (headerClass hdr) virtMap dynContents
        else
         Just $ Left InvalidDynamicSegmentFileRange
     _ -> do
       Just $ Left MultipleDynamicSegments
-
-------------------------------------------------------------------------
--- Symbol version information
-
--- | Identifies a version in an Elf file
-data VersionId
-   = VersionId { verFile :: !B.ByteString
-                 -- ^ Name of file symbol is expected in
-               , verName :: !B.ByteString
-                 -- ^ Name of version this belongs to.
-               } deriving (Show)
-
-data VersionTableValue
-   = VersionLocal
-     -- ^ Symbol is local and not available outside object
-   | VersionGlobal
-     -- ^ Symbol is defined in object and globally available
-   | VersionSpecific !VersionId
-     -- ^ Symbol version information
-
--- | Identifies a symbol entry along with a possible version constraint for the symbol.
-type VersionedSymbol w = (ElfSymbolTableEntry B.ByteString w, VersionTableValue)
-
--- | Maps the version requirement index to the appropriate version.
-type VersionReqMap = Map.Map Word16 VersionId
-
-insVersionReq :: VersionReqMap -> VersionReq -> Either DynamicError VersionReqMap
-insVersionReq m0 r = foldlM ins m0 (vn_aux r)
-  where file = vn_file r
-        ins m a =
-          case Map.lookup (vna_other a) m of
-            Nothing -> do
-              let vid = VersionId { verFile = file
-                                  , verName = vna_name a
-                                  }
-              Right $! Map.insert (vna_other a) vid m
-            Just{}  -> Left $! DupVersionReqAuxIndex (vna_other a)
-
-versionReqMap :: [VersionReq] -> Either DynamicError VersionReqMap
-versionReqMap = foldlM insVersionReq Map.empty
-
--- | Return the symbol with the given index.
-dynSymEntry :: forall w
-            .  DynamicSection w -- ^ Dynamic section information
-            -> Word32 -- ^ Index of symbol table entry.
-            -> Either DynamicError (VersionedSymbol (ElfWordType w))
-dynSymEntry ds i = runParser ds $ elfClassInstances (dynClass ds) $ do
-  -- Parse symbol table entry
-  sym <-
-    case parseSymbolTableEntry (dynClass ds) (dynData ds) (dynStrTab ds) (dynSymtab ds) i of
-      Left e -> throwError (ErrorParsingSymTabEntry e)
-      Right sym -> pure sym
-  -- Parse version information if present.
-  case dynVerSym ds of
-    Nothing -> do
-      return $! (sym, VersionGlobal)
-    Just verBuffer -> do
-      -- Parse the version index
-      let verOffset :: Int64
-          verOffset = 2 * fromIntegral i
-      -- Check the version offset is larger enough
-      when (verOffset + 2 > L.length verBuffer) $ throwError VerSymTooSmall
-      let verIdx =
-            let g :: Int64 -> Word16
-                g j = fromIntegral (L.index verBuffer (verOffset + j))
-             in case dynData ds of
-                  ELFDATA2LSB -> (g 1 `shiftL` 8) .|. g 0
-                  ELFDATA2MSB -> (g 0 `shiftL` 8) .|. g 1
-      case verIdx of
-        0 -> pure (sym, VersionLocal)
-        1 -> pure (sym, VersionGlobal)
-        _ ->
-          case Map.lookup verIdx (dynVersionReqs ds) of
-            Just verId -> pure (sym, VersionSpecific verId)
-            Nothing -> do
-              throwError $ UnresolvedVersionReqAuxIndex (steName sym) verIdx
-
-------------------------------------------------------------------------
--- Relocations
-
-runParser :: DynamicSection w
-          -> DynamicParser w a
-          -> Either DynamicError a
-runParser ds m = runDynamicParser (dynData ds) (dynClass ds) (dynAddrMap ds) m
-
--- | Parse the relocation entries using the dynamic tags for start and size.
-getRelaRange :: ElfDynamicTag -- ^ Tag for reading start of entries
-             -> ElfDynamicTag -- ^ Tag for reading size of entries
-             -> DynamicMap w
-             -> DynamicParser w (Maybe L.ByteString)
-getRelaRange startTag sizeTag dm = do
-  mrela_offset <- optionalDynamicEntry startTag dm
-  case mrela_offset of
-    Nothing -> return Nothing
-    Just rela_offset -> do
-      sz  <- mandatoryDynamicEntry sizeTag dm
-      Just <$> addressRangeToFile (startTag, sizeTag) (rela_offset,sz)
-
--- | Return the buffer containing rel entries from the dynamic section if any.
-dynRelBuffer :: DynamicSection w
-              -> Either DynamicError (Maybe L.ByteString)
-dynRelBuffer ds = do
-  runParser ds $ do
-    mr <- getRelaRange DT_REL DT_RELSZ (dynMap ds)
-    -- Check entry size
-    case mr of
-      Nothing -> pure ()
-      Just{} -> do
-        ent <- mandatoryDynamicEntry DT_RELENT (dynMap ds)
-        let w = dynClass ds
-        when (elfClassInstances (dynClass ds) $ ent /= relEntSize w) $
-          throwError IncorrectRelSize
-    pure mr
-
--- | Return the buffer containing rela entries from the dynamic section if any.
-dynRelaBuffer :: DynamicSection w
-              -> Either DynamicError (Maybe L.ByteString)
-dynRelaBuffer ds = do
-  runParser ds $ do
-    mr <- getRelaRange DT_RELA DT_RELASZ (dynMap ds)
-    -- Check entry size
-    case mr of
-      Nothing -> pure ()
-      Just{} -> do
-        ent <- mandatoryDynamicEntry DT_RELAENT (dynMap ds)
-        let w = dynClass ds
-        when (elfClassInstances (dynClass ds) $ ent /= relaEntSize w) $
-          throwError IncorrectRelaSize
-    pure mr
-
--- | Return the runtime relocation entries
-dynRelaEntries :: forall tp
-               .  IsRelocationType tp
-               => DynamicSection (RelocationWidth tp)
-               -> Either DynamicError [RelaEntry tp]
-dynRelaEntries ds = do
-  dynRelaBuf <- dynRelaBuffer ds
-  let cl :: ElfClass (RelocationWidth tp)
-      cl = relaWidth (undefined :: tp)
-  case dynRelaBuf of
-    Nothing -> pure []
-    Just buf ->
-      case L.length buf `quotRem` relaEntSize cl of
-        (n, 0) ->
-          Right $ relaEntry (dynData ds) (L.toStrict buf) <$> [0..fromIntegral n-1]
-        _ -> Left ErrorRelaBufferNotMultiple
-
--- | Information about the PLT relocations in a dynamic section.
-data PLTEntries tp
-  = PLTRel [RelEntry tp]
-  | PLTRela [RelaEntry tp]
-  | PLTEmpty
-
--- | Parse the PLT location and relocation entries.
---
--- These may be applied immediately upon load, or done later if lazy binding is
--- enabled.  They may be either all `DT_REL` entries or `DT_RELA` entries
-dynPLTRel :: IsRelocationType tp
-          => DynamicSection (RelocationWidth tp)
-          -> Either DynamicError (PLTEntries tp)
-dynPLTRel ds = do
-  runParser ds $ elfClassInstances (dynClass ds) $ do
-    mr <- getRelaRange DT_JMPREL DT_PLTRELSZ (dynMap ds)
-    case mr of
-      Nothing -> pure PLTEmpty
-      Just contents -> do
-        w <- mandatoryDynamicEntry DT_PLTREL (dynMap ds)
-        case () of
-          _ | w == fromIntegral (fromElfDynamicTag DT_RELA) ->
-              case elfRelaEntries (dynData ds) contents of
-                Left err -> throwError $ ErrorParsingPLTEntries err
-                Right l -> pure $ PLTRela l
-            | w == fromIntegral (fromElfDynamicTag DT_REL) ->
-              case elfRelEntries (dynData ds) contents of
-                Left err -> throwError $ ErrorParsingPLTEntries err
-                Right l -> pure $ PLTRel l
-            | otherwise ->
-              throwError $ BadValuePltRel (toInteger w)

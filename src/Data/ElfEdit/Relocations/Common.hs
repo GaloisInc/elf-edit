@@ -1,10 +1,5 @@
 {-|
-Module      : Data.ElfEdit.Relocations
-Copyright   : (c) Galois Inc, 2016
-License     : BSD
-Maintainer  : jhendrix@galois.com
-
-This contains definitions and utilities used for relocations.
+Common types for relocations.
 -}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
@@ -17,84 +12,39 @@ This contains definitions and utilities used for relocations.
 #if __GLASGOW_HASKELL >= 800
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
 #endif
-module Data.ElfEdit.Relocations
-  ( -- * Relocation types
+module Data.ElfEdit.Relocations.Common
+  ( -- ** Class
     IsRelocationType(..)
   , RelocationWord
+  , RelocationInt
+    -- ** Rel entries
   , RelEntry(..)
-  , RelaEntry(..)
-  , relOffset
-  , relaOffset
-  , relaToRel
-  , relocationSymIndex
-  , relocationTypeVal
-  , isRelativeRelaEntry
-  , ppRelaEntries
-  , elfRelEntries
-  , elfRelaEntries
-  , relEntry
-  , relaEntry
-    -- ** Relocation width
+  , decodeRelEntries
+  , decodeRelEntry
   , relEntSize
+    -- ** Rela entries
+  , RelaEntry(..)
+  , mkRelaEntry
+  , ppRelaEntries
+  , decodeRelaEntries
+  , decodeRelaEntry
+  , relaToRel
   , relaEntSize
-  , getRelaWord
-    -- * Utilities
-    -- ** ElfWordType
-  , ElfWordType
-    -- ** ElfIntType
-  , ElfIntType
-  , showElfInt
-    -- ** Binary
-  , runGetMany
-    -- ** Table alignment
-  , ColumnAlignmentFn
-  , alignLeft
-  , alignRight
-  , fix_table_columns
   ) where
 
-import           Data.Binary.Get
 import           Data.Bits
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as L
-import           Data.Int
-import           Data.List (transpose)
+import qualified Data.ByteString as B
 import           Data.Word
 import           GHC.TypeLits (Nat)
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
 
-import           Data.ElfEdit.ByteString
-import           Data.ElfEdit.Get (getWord32, getWord64, runGetMany)
-import           Data.ElfEdit.Types (ElfData(..), ppHex, ElfClass(..), ElfWordType)
+import           Data.ElfEdit.Prim.Ehdr
+import           Data.ElfEdit.Utils
 
--------------------------------------------------------------------------
--- ColumnAlignmentFn
-
-type ColumnAlignmentFn = [String] -> [String]
-
-alignLeft :: Int -> ColumnAlignmentFn
-alignLeft minw l = ar <$> l
-  where w = maximum $ minw : (length <$> l)
-        ar s = s ++ replicate (w-n) ' '
-          where n = length s
-
-alignRight :: Int -> ColumnAlignmentFn
-alignRight minw l = ar <$> l
-  where w = maximum $ minw : (length <$> l)
-        ar s = replicate (w-n) ' ' ++ s
-          where n = length s
-
--- | Function for pretty printing a row of tables according to
--- rules for each column.
-fix_table_columns :: [ColumnAlignmentFn]
-                     -- ^ Functions for modifying each column
-                  -> [[String]]
-                  -> Doc
-fix_table_columns colFns rows = vcat (hsep . fmap text <$> fixed_rows)
-  where cols = transpose rows
-        fixed_cols = zipWith ($) colFns cols
-        fixed_rows = transpose fixed_cols
-
+-- | Provide a show intance for the ElfIntType
+showElfInt :: ElfClass w -> (Show (ElfIntType w) => a) -> a
+showElfInt ELFCLASS32 a = a
+showElfInt ELFCLASS64 a = a
 
 -------------------------------------------------------------------------
 -- ElfWordType
@@ -121,28 +71,11 @@ relocationSymIndex :: ElfClass w -> ElfWordType w -> Word32
 relocationSymIndex ELFCLASS32 info = info `shiftR` 8
 relocationSymIndex ELFCLASS64 info = fromIntegral (info `shiftR` 32)
 
-getRelaWord :: ElfClass w -> ElfData -> Get (ElfWordType w)
-getRelaWord ELFCLASS32 = getWord32
-getRelaWord ELFCLASS64 = getWord64
-
--------------------------------------------------------------------------
--- ElfIntType
-
--- | A signed value of a given width
-type family ElfIntType (w::Nat) :: *
-type instance ElfIntType 32 = Int32
-type instance ElfIntType 64 = Int64
-
--- | Provide a show intance for the ElfIntType
-showElfInt :: ElfClass w -> (Show (ElfIntType w) => a) -> a
-showElfInt ELFCLASS32 a = a
-showElfInt ELFCLASS64 a = a
-
 -------------------------------------------------------------------------
 -- IsRelocationType
 
--- | 'IsRelocationType tp' provide methods associated with
--- relocations on a particular architecture identified by 'tp'.
+-- | @IsRelocationType tp@ provides methods associated with
+-- relocations on a particular architecture identified by @tp@.
 --
 -- Each architecture uses either a 32 or 64-bit Elf encoding, and
 -- this is associated via a type family 'RelocationWidth'
@@ -170,7 +103,11 @@ class (Show tp, Show (RelocationWord tp)) => IsRelocationType tp where
   -- | Return true if this is a relative relocation type.
   isRelative :: tp -> Bool
 
+-- | Synonym for Elf word with width determined by relocation type.
 type RelocationWord tp = ElfWordType (RelocationWidth tp)
+
+-- | Synonym for Elf int with width determined by relocation type.
+type RelocationInt tp = ElfIntType (RelocationWidth tp)
 
 -------------------------------------------------------------------------
 -- RelaEntry
@@ -186,11 +123,6 @@ data RelEntry tp
            -- ^ The type of relocation entry
          }
 
--- | Address at link time of location where relocation should be applied.
-relOffset :: RelEntry tp -> RelocationWord tp
-relOffset = relAddr
-{-# DEPRECATED relOffset "Use relAddr" #-}
-
 -- | A relocation entry with an explicit addend
 data RelaEntry tp
    = Rela { relaAddr :: !(RelocationWord tp)
@@ -199,14 +131,23 @@ data RelaEntry tp
             -- ^ Index in symbol table this relocation refers to.
           , relaType   :: !tp
             -- ^ The type of relocation entry
-          , relaAddend :: !(ElfIntType (RelocationWidth tp))
+          , relaAddend :: !(RelocationInt tp)
             -- ^ The constant addend to apply.
           }
 
--- | Address at link time of location where relocation should be applied.
-relaOffset :: RelaEntry tp -> RelocationWord tp
-relaOffset = relaAddr
-{-# DEPRECATED relaOffset "Use relaAddr" #-}
+-- | Make a relocation entry with addend from address, 32-bit info and addend.
+mkRelaEntry :: IsRelocationType tp
+            => ElfClass (RelocationWidth tp)
+            -> RelocationWord tp
+            -> RelocationWord tp
+            -> RelocationInt tp
+            -> RelaEntry tp
+mkRelaEntry cl addr info addend =
+  Rela { relaAddr = addr
+       , relaSym  = relocationSymIndex cl info
+       , relaType = toRelocType (relocationTypeVal cl info)
+       , relaAddend = addend
+       }
 
 relaToRel :: RelaEntry tp -> RelEntry tp
 relaToRel r = Rel { relAddr  = relaAddr r
@@ -216,60 +157,48 @@ relaToRel r = Rel { relAddr  = relaAddr r
 
 instance IsRelocationType tp => Show (RelaEntry tp) where
   show r =  s ""
-    where w :: ElfClass (RelocationWidth tp)
-          w = relaWidth (relaType r)
+    where cl :: ElfClass (RelocationWidth tp)
+          cl = relaWidth (relaType r)
           s = showString "Rela "
-            . showString (ppElfWordHex w (relaAddr r))
+            . showString (ppElfWordHex cl (relaAddr r))
             . showChar ' '
             . showsPrec 10 (relaSym r)
             . showChar ' '
             . showsPrec 10 (relaType r)
             . showChar ' '
-            . showElfInt w (showsPrec 10 (relaAddend r))
-
--- | Return true if this is a relative relocation entry.
-isRelativeRelaEntry :: IsRelocationType tp => RelaEntry tp -> Bool
-isRelativeRelaEntry r = isRelative (relaType r)
+            . showElfInt cl (showsPrec 10 (relaAddend r))
 
 -- | Convert info parameter to relocation sym.
 relocationTypeVal :: ElfClass w -> ElfWordType w -> Word32
 relocationTypeVal ELFCLASS32 info = info .&. 0xff
 relocationTypeVal ELFCLASS64 info = fromIntegral (info .&. 0xffffffff)
 
-bsRelWord32 :: ElfData -> BS.ByteString -> Word32
-bsRelWord32 ELFDATA2LSB = bsWord32le
-bsRelWord32 ELFDATA2MSB = bsWord32be
-
-bsRelWord64 :: ElfData -> BS.ByteString -> Word64
-bsRelWord64 ELFDATA2LSB = bsWord64le
-bsRelWord64 ELFDATA2MSB = bsWord64be
-
 -- | Get a word at a particular offset in a bytestring
 relWord :: ElfClass w -- ^ 32/64bit flag
         -> ElfData    -- ^ Endianness
-        -> BS.ByteString -- ^ Bytestring
+        -> B.ByteString -- ^ Bytestring
         -> Int        -- ^ Offset in bytes of word.
         -> ElfWordType w
-relWord ELFCLASS32 dta bs i = bsRelWord32 dta (BS.take 4 (BS.drop i bs))
-relWord ELFCLASS64 dta bs i = bsRelWord64 dta (BS.take 8 (BS.drop i bs))
+relWord ELFCLASS32 d bs i = decodeWord32 d (B.take 4 (B.drop i bs))
+relWord ELFCLASS64 d bs i = decodeWord64 d (B.take 8 (B.drop i bs))
 
 -- | Get a word at a particular offset in a bytestring
 relInt :: ElfClass w -- ^ 32/64bit flag
-        -> ElfData    -- ^ Endianness
-        -> BS.ByteString -- ^ Bytestring
-        -> Int        -- ^ Offset in bytes of word.
-        -> ElfIntType w
-relInt ELFCLASS32 dta bs i = fromIntegral $ bsRelWord32 dta (BS.take 4 (BS.drop i bs))
-relInt ELFCLASS64 dta bs i = fromIntegral $ bsRelWord64 dta (BS.take 8 (BS.drop i bs))
+       -> ElfData    -- ^ Endianness
+       -> B.ByteString -- ^ Bytestring
+       -> Int        -- ^ Offset in bytes of word.
+       -> ElfIntType w
+relInt ELFCLASS32 d bs i = fromIntegral $ decodeWord32 d (B.take 4 (B.drop i bs))
+relInt ELFCLASS64 d bs i = fromIntegral $ decodeWord64 d (B.take 8 (B.drop i bs))
 
 -- | Return the relocation entry at the given index.
-relEntry :: forall tp
-         .  IsRelocationType tp
-         => ElfData
-         -> BS.ByteString
-         -> Int -- ^ Index of rel entry
-         -> RelEntry tp
-relEntry dta bs idx =
+decodeRelEntry :: forall tp
+               .  IsRelocationType tp
+               => ElfData
+               -> B.ByteString
+               -> Int -- ^ Index of rel entry
+               -> RelEntry tp
+decodeRelEntry dta bs idx =
   let cl :: ElfClass (RelocationWidth tp)
       cl = relaWidth (undefined :: tp)
       sz = relValueSize cl
@@ -282,26 +211,26 @@ relEntry dta bs idx =
           }
 
 -- | Return relocation entries from byte string.
-elfRelEntries :: forall tp
-              .  IsRelocationType tp
-              => ElfData -- ^ Endianess of encodings
-              -> L.ByteString -- ^ Relocation entries
-              -> Either String [RelEntry tp]
-elfRelEntries d bs = do
+decodeRelEntries :: forall tp
+                 .  IsRelocationType tp
+                 => ElfData -- ^ Endianess of encodings
+                 -> B.ByteString -- ^ Relocation entries
+                 -> Either String [RelEntry tp]
+decodeRelEntries d bs = do
   let cl :: ElfClass (RelocationWidth tp)
       cl = relaWidth (undefined :: tp)
-  case L.length bs `quotRem` relEntSize cl of
-    (n, 0) -> Right $ relEntry d (L.toStrict bs) <$> [0..fromIntegral n-1]
+  case B.length bs `quotRem` relEntSize cl of
+    (n, 0) -> Right $ decodeRelEntry d bs <$> [0..fromIntegral n-1]
     _      -> Left $ "Rel buffer must be a multiple of rel entry size."
 
 -- | Return the rela entr at the given index.
-relaEntry :: forall tp
+decodeRelaEntry :: forall tp
              .  IsRelocationType tp
              => ElfData
-             -> BS.ByteString
+             -> B.ByteString
              -> Int -- ^ Index of rela entry.
              -> RelaEntry tp
-relaEntry dta bs idx =
+decodeRelaEntry dta bs idx =
   let cl :: ElfClass (RelocationWidth tp)
       cl = relaWidth (undefined :: tp)
       sz = relValueSize cl
@@ -316,21 +245,21 @@ relaEntry dta bs idx =
            }
 
 -- | Return relocation entries from byte string.
-elfRelaEntries :: forall tp
-              .  IsRelocationType tp
-              => ElfData -- ^ Endianess of encodings
-              -> L.ByteString -- ^ Relocation entries
-              -> Either String [RelaEntry tp]
-elfRelaEntries d bs = do
+decodeRelaEntries :: forall tp
+                  .  IsRelocationType tp
+                  => ElfData -- ^ Endianess of encodings
+                  -> B.ByteString -- ^ Relocation entries
+                  -> Either String [RelaEntry tp]
+decodeRelaEntries d bs = do
   let cl :: ElfClass (RelocationWidth tp)
       cl = relaWidth (undefined :: tp)
-  case L.length bs `quotRem` relaEntSize cl of
-    (n, 0) -> Right $ relaEntry d (L.toStrict bs) <$> [0..fromIntegral n-1]
+  case B.length bs `quotRem` relaEntSize cl of
+    (n, 0) -> Right $ decodeRelaEntry d bs <$> [0..fromIntegral n-1]
     _      -> Left $ "Rela buffer must be a multiple of rela entry size."
 
 -- | Pretty-print a table of relocation entries.
 ppRelaEntries :: IsRelocationType tp => [RelaEntry tp] -> Doc
-ppRelaEntries l = fix_table_columns (snd <$> cols) (fmap fst cols : entries)
+ppRelaEntries l = fixTableColumns (snd <$> cols) (fmap fst cols : entries)
   where entries = zipWith ppRelaEntry [0..] l
         cols = [ ("Num",    alignRight 0)
                , ("Offset", alignLeft  0)

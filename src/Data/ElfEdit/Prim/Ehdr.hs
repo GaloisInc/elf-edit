@@ -1,20 +1,51 @@
-{-
-Module           : Data.ElfEdit.Enums
-Copyright        : (c) Galois, Inc 2016-2018
-Maintainer       : Joe Hendrix <jhendrix@galois.com>
-
-Defines a large collection of constants used in defining elf values.
+{-|
+Header for start of elf file and utilities functions
 -}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
-#if __GLASGOW_HASKELL__ >= 800
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
-#endif
-module Data.ElfEdit.Enums
-  (  -- ** ElfOSABI
-    ElfOSABI(..)
+module Data.ElfEdit.Prim.Ehdr
+  ( -- * EHdr
+    Ehdr(..)
+  , decodeEhdr
+  , encodeEhdr
+    -- ** Core header
+  , ElfHeader(..)
+    -- ** Class
+  , ElfClass(..)
+  , SomeElf(..)
+  , elfClassInstances
+  , elfClassByteWidth
+  , elfClassBitWidth
+  , ElfWordType
+  , ElfIntType
+  , ElfWidthConstraints
+    -- ** Sizes
+  , ehdrSize
+  , phdrEntrySize
+  , shdrEntrySize
+    -- ** Data
+  , ElfData(..)
+  , decodeWord32
+  , decodeWord64
+  , getWord16
+  , getWord32
+  , getWord64
+  , putWord16
+  , putWord32
+  , putWord64
+    -- ** Elf Constants
+  , elfMagic
+  , expectedElfVersion
+    -- ** ElfOSABI
+  , ElfOSABI(..)
   , pattern ELFOSABI_SYSV
   , pattern ELFOSABI_HPUX
   , pattern ELFOSABI_NETBSD
@@ -144,8 +175,146 @@ module Data.ElfEdit.Enums
   , pattern EM_RISCV
   ) where
 
+import           Control.Monad
+import           Data.Binary.Get (Get)
+import qualified Data.Binary.Get as Get
+import           Data.Bits
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Builder as Bld
 import qualified Data.Map.Strict as Map
+import           Data.Int
 import           Data.Word
+import           GHC.Stack
+import           GHC.TypeLits
+
+import           Data.ElfEdit.ByteString
+import           Data.ElfEdit.Prim.File
+import           Data.ElfEdit.Utils
+
+-- | The version of elf files supported by this parser
+expectedElfVersion :: Word8
+expectedElfVersion = 1
+
+------------------------------------------------------------------------
+-- ElfClass
+
+-- | A flag indicating whether Elf is 32 or 64-bit.
+data ElfClass (w :: Nat) where
+  ELFCLASS32 :: ElfClass 32
+  ELFCLASS64 :: ElfClass 64
+
+instance Show (ElfClass w) where
+  show ELFCLASS32 = "ELFCLASS32"
+  show ELFCLASS64 = "ELFCLASS64"
+
+-- | Return the number of bytes in an address with this elf class.
+elfClassByteWidth :: ElfClass w -> Int
+elfClassByteWidth ELFCLASS32 = 4
+elfClassByteWidth ELFCLASS64 = 8
+
+-- | Return the number of bits in an address with this elf class.
+elfClassBitWidth :: ElfClass w -> Int
+elfClassBitWidth ELFCLASS32 = 32
+elfClassBitWidth ELFCLASS64 = 64
+
+-- | Wraps a either a 32-bit or 64-bit typed value.
+data SomeElf f = forall (w::Nat) . SomeElf (f w)
+
+fromElfClass :: ElfClass w -> Word8
+fromElfClass ELFCLASS32 = 1
+fromElfClass ELFCLASS64 = 2
+
+-- | An unsigned value of a given width
+type family ElfWordType (w::Nat) :: * where
+  ElfWordType 32 = Word32
+  ElfWordType 64 = Word64
+
+-- | A signed value of a given width
+type family ElfIntType (w::Nat) :: * where
+  ElfIntType 32 = Int32
+  ElfIntType 64 = Int64
+
+type ElfWidthConstraints w
+   = (Bits (ElfWordType w), Integral (ElfWordType w), Show (ElfWordType w), Bounded (ElfWordType w))
+
+-- | Given a provides a way to access 'Bits', 'Integral' and 'Show' instances
+-- of underlying word types associated with an 'ElfClass'.
+elfClassInstances :: ElfClass w
+                  -> (ElfWidthConstraints w => a)
+                  -> a
+elfClassInstances ELFCLASS32 a = a
+elfClassInstances ELFCLASS64 a = a
+
+------------------------------------------------------------------------
+-- Sizes
+
+-- | Size of the main elf header table for given width.
+ehdrSize :: ElfClass w -> Word16
+ehdrSize ELFCLASS32 = 52
+ehdrSize ELFCLASS64 = 64
+
+-- | Size of entry in Elf program header table for given width.
+phdrEntrySize :: ElfClass w -> Word16
+phdrEntrySize ELFCLASS32 = 32
+phdrEntrySize ELFCLASS64 = 56
+
+-- | Size of entry in Elf section header table for given width.
+shdrEntrySize :: ElfClass w -> Word16
+shdrEntrySize ELFCLASS32 = 40
+shdrEntrySize ELFCLASS64 = 64
+
+------------------------------------------------------------------------
+-- ElfData
+
+-- | A flag indicating byte order used to encode data.
+data ElfData = ELFDATA2LSB -- ^ Least significant byte first
+             | ELFDATA2MSB -- ^ Most significant byte first.
+  deriving (Eq, Ord, Show)
+
+fromElfData :: ElfData -> Word8
+fromElfData ELFDATA2LSB = 1
+fromElfData ELFDATA2MSB = 2
+
+-- | Decode a 32-bit word using elf data for endianess.
+--
+-- Argument must contain at least 4 bytes.
+decodeWord32 :: HasCallStack => ElfData -> B.ByteString -> Word32
+decodeWord32 ELFDATA2LSB = bsWord32le
+decodeWord32 ELFDATA2MSB = bsWord32be
+
+-- | Decode a 64-bit word using elf data for endianess.
+--
+-- Argument must contain at least 8 bytes.
+decodeWord64 :: HasCallStack => ElfData -> B.ByteString -> Word64
+decodeWord64 ELFDATA2LSB = bsWord64le
+decodeWord64 ELFDATA2MSB = bsWord64be
+
+getWord16 :: ElfData -> Get.Get Word16
+getWord16 ELFDATA2LSB = Get.getWord16le
+getWord16 ELFDATA2MSB = Get.getWord16be
+
+getWord32 :: ElfData -> Get.Get Word32
+getWord32 ELFDATA2LSB = Get.getWord32le
+getWord32 ELFDATA2MSB = Get.getWord32be
+
+getWord64 :: ElfData -> Get.Get Word64
+getWord64 ELFDATA2LSB = Get.getWord64le
+getWord64 ELFDATA2MSB = Get.getWord64be
+
+-- | Convert 'Word16' to data using appropriate endianess.
+putWord16 :: ElfData -> Word16 -> Bld.Builder
+putWord16 ELFDATA2LSB = Bld.word16LE
+putWord16 ELFDATA2MSB = Bld.word16BE
+
+-- | Convert 'Word32' to data using appropriate endianess.
+putWord32 :: ElfData -> Word32 -> Bld.Builder
+putWord32 ELFDATA2LSB = Bld.word32LE
+putWord32 ELFDATA2MSB = Bld.word32BE
+
+-- | Convert 'Word64' to data using appropriate endianess.
+putWord64 :: ElfData -> Word64 -> Bld.Builder
+putWord64 ELFDATA2LSB = Bld.word64LE
+putWord64 ELFDATA2MSB = Bld.word64BE
 
 ------------------------------------------------------------------------
 -- ElfOSABI
@@ -578,3 +747,252 @@ elfMachineNameMap = Map.fromList
   , (,) EM_STM8    "EM_STM8"
   , (,) EM_RISCV "EM_RISCV"
   ]
+
+------------------------------------------------------------------------
+-- ElfHeader
+
+-- | Core information in the header of an elf file.
+--
+-- This is reused in high-level implementation.
+data ElfHeader w = ElfHeader { headerData       :: !ElfData
+                             , headerClass      :: !(ElfClass w)
+                             , headerOSABI      :: !ElfOSABI
+                             , headerABIVersion :: !Word8
+                             , headerType       :: !ElfType
+                             , headerMachine    :: !ElfMachine
+                             , headerEntry      :: !(ElfWordType w)
+                             , headerFlags      :: !Word32
+                             }
+
+------------------------------------------------------------------------
+-- Ehdr
+
+-- | Information to be rendered into Elf header record at start of file.
+data Ehdr w = Ehdr { ehdrHeader :: !(ElfHeader w)
+                   , ehdrPhoff :: !(FileOffset (ElfWordType w))
+                   , ehdrShoff :: !(FileOffset (ElfWordType w))
+                   , ehdrPhnum :: !Word16
+                   , ehdrShnum :: !Word16
+                   , ehdrShstrndx :: !Word16
+                   }
+
+------------------------------------------------------------------------
+-- Encoding
+
+-- | The 4-byte strict expected at the start of an Elf file @"(0x7f)ELF"@
+elfMagic :: B.ByteString
+elfMagic = "\DELELF"
+
+-- | Create the 16-byte header that sits at the start of an elf file.
+elfIdentBuilder :: ElfHeader w -> Bld.Builder
+elfIdentBuilder e =
+  mconcat [ Bld.byteString elfMagic
+          , Bld.word8 (fromElfClass (headerClass e))
+          , Bld.word8 (fromElfData  (headerData e))
+          , Bld.word8 expectedElfVersion
+          , Bld.word8 (fromElfOSABI (headerOSABI e))
+          , Bld.word8 (fromIntegral (headerABIVersion e))
+          , mconcat (replicate 7 (Bld.word8 0))
+          ]
+
+-- | Encode 32-bit ELF header in a builder
+encodeEhdr32 :: Ehdr 32 -> Bld.Builder
+encodeEhdr32 e = do
+  let hdr = ehdrHeader e
+  let d = headerData hdr
+  elfIdentBuilder hdr
+    <> putWord16 d (fromElfType (headerType hdr))
+    <> putWord16 d (fromElfMachine (headerMachine hdr))
+
+    <> putWord32 d (fromIntegral expectedElfVersion)
+    <> putWord32 d (headerEntry hdr)
+    <> putWord32 d (fromFileOffset (ehdrPhoff e))
+    <> putWord32 d (fromFileOffset (ehdrShoff e))
+    <> putWord32 d (headerFlags hdr)
+
+    <> putWord16 d (ehdrSize      ELFCLASS32)
+    <> putWord16 d (phdrEntrySize ELFCLASS32)
+    <> putWord16 d (ehdrPhnum e)
+    <> putWord16 d (shdrEntrySize ELFCLASS32)
+    <> putWord16 d (ehdrShnum e)
+    <> putWord16 d (ehdrShstrndx e)
+
+-- | Encode 64-bit ELF header in a builder
+encodeEhdr64 :: Ehdr 64 -> Bld.Builder
+encodeEhdr64 e = do
+  let hdr = ehdrHeader e
+  let d = headerData hdr
+  elfIdentBuilder hdr
+    <> putWord16 d (fromElfType (headerType hdr))
+    <> putWord16 d (fromElfMachine (headerMachine hdr))
+    <> putWord32 d (fromIntegral expectedElfVersion)
+    <> putWord64 d (headerEntry hdr)
+    <> putWord64 d (fromFileOffset (ehdrPhoff e))
+    <> putWord64 d (fromFileOffset (ehdrShoff e))
+    <> putWord32 d (headerFlags hdr)
+    <> putWord16 d (ehdrSize ELFCLASS64)
+    <> putWord16 d (phdrEntrySize ELFCLASS64)
+    <> putWord16 d (ehdrPhnum e)
+    <> putWord16 d (shdrEntrySize ELFCLASS64)
+    <> putWord16 d (ehdrShnum e)
+    <> putWord16 d (ehdrShstrndx e)
+
+-- | Encode the main ELF header in a builder
+encodeEhdr :: Ehdr w -> Bld.Builder
+encodeEhdr e =
+  case headerClass (ehdrHeader e) of
+    ELFCLASS32 -> encodeEhdr32 e
+    ELFCLASS64 -> encodeEhdr64 e
+
+------------------------------------------------------------------------
+-- Decoding
+
+-- | Parse a 32-bit elf.
+decodeEhdr32 :: ElfData
+             -> ElfOSABI
+             -> Word8 -- ^ ABI Version
+             -> B.ByteString -- ^ Full Elf contents
+             -> Get (Ehdr 32)
+decodeEhdr32 d ei_osabi ei_abiver b = do
+  e_type      <- ElfType      <$> getWord16 d
+  e_machine   <- ElfMachine   <$> getWord16 d
+  e_version   <- getWord32 d
+  when (fromIntegral expectedElfVersion /= e_version) $
+    fail "ELF Version mismatch"
+  e_entry     <- getWord32 d
+  e_phoff     <- FileOffset <$> getWord32 d
+  e_shoff     <- FileOffset <$> getWord32 d
+  e_flags     <- getWord32 d
+  e_ehsize    <- getWord16 d
+  e_phentsize <- getWord16 d
+  e_phnum     <- getWord16 d
+  e_shentsize <- getWord16 d
+  e_shnum     <- getWord16 d
+  e_shstrndx  <- getWord16 d
+  when (e_ehsize /= ehdrSize ELFCLASS32) $ do
+    fail $ "Unexpected ehdr size."
+  let expected_phdr_entry_size = phdrEntrySize ELFCLASS32
+  let expected_shdr_entry_size = shdrEntrySize ELFCLASS32
+  when (e_phnum /= 0 && e_phentsize /= expected_phdr_entry_size) $ do
+    fail $ "Expected segment entry size of " ++ show expected_phdr_entry_size
+      ++ " and found size of " ++ show e_phentsize ++ " instead."
+  when (e_shnum /= 0 && e_shentsize /= expected_shdr_entry_size) $ do
+    fail $ "Invalid section entry size"
+  -- Check end of program header table is in file bounds.
+  let phdrEnd = toInteger e_phoff + toInteger expected_phdr_entry_size * toInteger e_phnum
+  when (e_phnum /= 0 && phdrEnd > toInteger (B.length b)) $ do
+    fail $ "Program header table out of bounds."
+  -- Check end of section header table is in file bounds.
+  let shdrEnd = toInteger e_shoff + toInteger expected_shdr_entry_size * toInteger e_shnum
+  when (e_shnum /= 0 && shdrEnd > toInteger (B.length b)) $ do
+    fail $ "Section header table out of bounds."
+  -- Check string table index
+  when (e_shnum /= 0 && e_shstrndx >= e_shnum) $ do
+    fail $ "Section name index exceeds section count."
+  let hdr = ElfHeader { headerData       = d
+                      , headerClass      = ELFCLASS32
+                      , headerOSABI      = ei_osabi
+                      , headerABIVersion = ei_abiver
+                      , headerType       = e_type
+                      , headerMachine    = e_machine
+                      , headerFlags      = e_flags
+                      , headerEntry      = e_entry
+                      }
+  return $! Ehdr { ehdrHeader = hdr
+                 , ehdrPhoff = e_phoff
+                 , ehdrShoff = e_shoff
+                 , ehdrPhnum = e_phnum
+                 , ehdrShnum = e_shnum
+                 , ehdrShstrndx = e_shstrndx
+                 }
+
+-- | Parse a 64-bit elf header.
+decodeEhdr64 :: ElfData
+             -> ElfOSABI
+             -> Word8 -- ^ ABI Version
+             -> B.ByteString -- ^ Full Elf contents
+             -> Get (Ehdr 64)
+decodeEhdr64 d ei_osabi ei_abiver b = do
+  e_type      <- ElfType    <$> getWord16 d
+  e_machine   <- ElfMachine <$> getWord16 d
+  e_version   <- getWord32 d
+  when (fromIntegral expectedElfVersion /= e_version) $
+    fail "ELF Version mismatch"
+  e_entry     <- getWord64 d
+  e_phoff     <- FileOffset <$> getWord64 d
+  e_shoff     <- FileOffset <$> getWord64 d
+  e_flags     <- getWord32 d
+  e_ehsize    <- getWord16 d
+  e_phentsize <- getWord16 d
+  e_phnum     <- getWord16 d
+  e_shentsize <- getWord16 d
+  e_shnum     <- getWord16 d
+  e_shstrndx  <- getWord16 d
+  let expected_phdr_entry_size = phdrEntrySize ELFCLASS64
+  let expected_shdr_entry_size = shdrEntrySize ELFCLASS64
+
+  when (e_ehsize /= ehdrSize ELFCLASS64) $ do
+    fail $ "Unexpected ehdr size."
+  when (e_phnum /= 0 && e_phentsize /= expected_phdr_entry_size) $ do
+    fail $ "Invalid segment entry size"
+  when (e_shnum /= 0 && e_shentsize /= expected_shdr_entry_size) $ do
+    fail $ "Invalid section entry size"
+  -- Check end of program header table is in file bounds.
+  let phdrEnd = toInteger e_phoff + toInteger expected_phdr_entry_size * toInteger e_phnum
+  when (e_phnum /= 0 && phdrEnd > toInteger (B.length b)) $ do
+    fail $ "Program header table out of bounds."
+  -- Check end of section header table is in file bounds.
+  let shdrEnd = toInteger e_shoff + toInteger expected_shdr_entry_size * toInteger e_shnum
+  when (e_shnum /= 0 && shdrEnd > toInteger (B.length b)) $ do
+    fail $ "Section header table out of bounds."
+  -- Check string table index
+  when (e_shnum /= 0 && e_shstrndx >= e_shnum) $ do
+    fail $ "Section name index exceeds section count."
+  let hdr = ElfHeader { headerData       = d
+                      , headerClass      = ELFCLASS64
+                      , headerOSABI      = ei_osabi
+                      , headerABIVersion = ei_abiver
+                      , headerType       = e_type
+                      , headerMachine    = e_machine
+                      , headerFlags      = e_flags
+                      , headerEntry      = e_entry
+                      }
+  return $! Ehdr { ehdrHeader = hdr
+                 , ehdrPhoff = e_phoff
+                 , ehdrShoff = e_shoff
+                 , ehdrPhnum = e_phnum
+                 , ehdrShnum = e_shnum
+                 , ehdrShstrndx = e_shstrndx
+                 }
+
+-- | Creates a `ElfHeaderInfo` from a bytestring with data in the Elf format.
+-- their fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
+decodeEhdr :: B.ByteString -> Either (Get.ByteOffset, String) (SomeElf Ehdr)
+decodeEhdr b = do
+  when (B.length b <= 16) $ do
+    Left (0, "Buffer too short.")
+  let ei_magic = B.take 4 b
+  unless (ei_magic == elfMagic) $
+    Left (0, "Invalid magic number for ELF: " ++ show (ei_magic, elfMagic))
+  cl <- case B.index b 4 of
+          1 -> Right (SomeElf ELFCLASS32)
+          2 -> Right (SomeElf ELFCLASS64)
+          clb -> Left (4, "Invalid class: " <> show clb)
+  d <- case B.index b 5 of
+         1 -> Right ELFDATA2LSB
+         2 -> Right ELFDATA2MSB
+         db -> Left (5, "Invalid ata: " <> show db)
+  let version = B.index b 6
+  unless (version == expectedElfVersion) $
+     Left (6, "Invalid version number for ELF")
+  let osabi = ElfOSABI (B.index b 7)
+  let abiver = B.index b 8
+  let m =
+        case cl of
+          SomeElf ELFCLASS32 -> do
+            SomeElf <$> decodeEhdr32 d osabi abiver b
+          SomeElf ELFCLASS64 -> do
+            SomeElf <$> decodeEhdr64 d osabi abiver b
+  case strictRunGetOrFail m (B.drop 16 b) of
+    Left (_, o, e) -> Left (o, e)
+    Right (_,_, r) -> Right r
