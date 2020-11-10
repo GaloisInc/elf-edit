@@ -368,8 +368,14 @@ mkSequence' contents sr endOff (p:rest) =
     AtomicRegion nm o e reg -> do
       let sz = fromFileOffset (e-o)
       let padded = addPadding contents endOff o sr
-      when (sizedLength padded > fromIntegral o && e > o) $ do
-        warn $ OverlapMovedLater (BSC.unpack nm) (sizedLength padded) (toInteger o)
+      -- Get computed offset from length of data added so far.
+      let actualOff = sizedLength padded
+      -- Check region is non-empty
+      let isNonEmpty = e > 0
+      -- Warn when actual offset is later and region is non-empty
+      when (actualOff > fromIntegral o && isNonEmpty) $ do
+        warn $ OverlapMovedLater (BSC.unpack nm) actualOff (toInteger o)
+      -- Append data to region and continue
       let cur = appendSizedRegion padded reg (fromIntegral sz)
       mkSequence' contents cur (max endOff (fromIntegral e)) rest
     SegmentRegion phdr inner -> do

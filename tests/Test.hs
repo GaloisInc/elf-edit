@@ -22,7 +22,7 @@ import qualified Test.Tasty.QuickCheck as T
 
 import           Prelude
 
-import           Data.ElfEdit
+import qualified Data.ElfEdit as Elf
 
 ------------------------------------------------------------------------
 -- Newtype for generating alphabetic strings.
@@ -42,86 +42,86 @@ genAsciiChar = T.elements (['a'..'z'] ++ ['A'..'Z'])
 ------------------------------------------------------------------------
 -- Test cases
 
+withElf :: B.ByteString -> (forall w . Elf.Elf w -> T.Assertion) -> T.Assertion
+withElf bs f =
+  case Elf.decodeElf bs of
+    Elf.Elf32Res err e32
+      | null err  -> f e32
+      | otherwise -> T.assertFailure ("Failed to parse elf file: " ++ show err)
+    Elf.Elf64Res err e64
+      | null err  -> f e64
+      | otherwise -> T.assertFailure ("Failed to parse elf file: " ++ show err)
+    Elf.ElfHeaderError _ e -> T.assertFailure $ "Failed to parse elf file: " ++ show e
 
+withElfHeader :: B.ByteString -> (forall w . Elf.ElfHeaderInfo w -> T.Assertion) -> T.Assertion
+withElfHeader bs f =
+  case Elf.decodeElfHeaderInfo bs of
+    Left (_,err) -> T.assertFailure ("Failed to parse elf file: " ++ show err)
+    Right (Elf.SomeElf e) -> f e
 
 testEmptyElf :: T.Assertion
 testEmptyElf = IO.withBinaryFile "./tests/empty.elf" IO.ReadMode $ \h -> do
   fil <- B.hGetContents h
-  case parseElf fil of
-    ElfHeaderError{} -> return ()
+  case Elf.decodeElf fil of
+    Elf.ElfHeaderError{} -> return ()
     _ -> T.assertFailure "Empty ELF did not cause an exception."
 
 testIdentityTransform :: FilePath -> T.Assertion
 testIdentityTransform fp = do
   bs <- B.readFile fp
   withElf bs $ \e -> do
-    int0 <- elfInterpreter e
-    withElf (L.toStrict (renderElf e)) $ \e' -> do
-      T.assertEqual "Segment Count" (length (elfSegments e)) (length (elfSegments e'))
+    int0 <- Elf.elfInterpreter e
+    withElf (L.toStrict (Elf.encodeElf e)) $ \e' -> do
+      T.assertEqual "Segment Count" (length (Elf.elfSegments e)) (length (Elf.elfSegments e'))
       withElf bs $ \ehi -> do
-        withElf (L.toStrict (renderElf e)) $ \ehi' -> do
-          let [st1] = elfSymtab ehi
-              [st2] = elfSymtab ehi'
-          let cnt1 = V.length (elfSymbolTableEntries st1)
-          let cnt2 = V.length (elfSymbolTableEntries st2)
+        withElf (L.toStrict (Elf.encodeElf e)) $ \ehi' -> do
+          let [st1] = Elf.elfSymtab ehi
+              [st2] = Elf.elfSymtab ehi'
+          let cnt1 = V.length (Elf.symtabEntries st1)
+          let cnt2 = V.length (Elf.symtabEntries st2)
           T.assertEqual "Symbol table sizes" cnt1 cnt2
-      int1 <- elfInterpreter e'
+      int1 <- Elf.elfInterpreter e'
       T.assertEqual "Interpreter" int0 int1
 
 stringTableConsistencyProp :: [AsciiString] -> Bool
 stringTableConsistencyProp strings =
   all (checkStringTableEntry bytes) (Map.toList tab)
   where
-    (bytes, tab) = stringTable (map unwrapAsciiString strings)
+    (bytes, tab) = Elf.encodeStringTable (map unwrapAsciiString strings)
 
 checkStringTableEntry :: C8.ByteString -> (B.ByteString, Word32) -> Bool
 checkStringTableEntry bytes (str, off) = str == bstr
   where
     bstr = C8.take (B.length str) $ C8.drop (fromIntegral off) bytes
 
-withElf :: B.ByteString -> (forall w . Elf w -> T.Assertion) -> T.Assertion
-withElf bs f =
-  case parseElf bs of
-    Elf32Res err e32
-      | null err  -> f e32
-      | otherwise -> T.assertFailure ("Failed to parse elf file: " ++ show err)
-    Elf64Res err e64
-      | null err  -> f e64
-      | otherwise -> T.assertFailure ("Failed to parse elf file: " ++ show err)
-    ElfHeaderError _ e -> T.assertFailure $ "Failed to parse elf file: " ++ show e
-
--- | Return a subbrange of a bytestring.
-sliceL :: Integral w => Range w -> L.ByteString -> L.ByteString
-sliceL (i,c) = L.take (fromIntegral c) . L.drop (fromIntegral i)
-
 testDynSymTable :: T.Assertion
 testDynSymTable = do
   bs <- B.readFile "./tests/simple.elf"
-  withElf bs $ \e -> do
-    let l  = elfLayout e
-    let ph = allPhdrs l
+  withElfHeader bs $ \e -> do
+    let ph = Elf.headerPhdrs e
     dynPhdr <-
-      case filter (\p -> phdrSegmentType p == PT_DYNAMIC) ph of
+      case filter (\p -> Elf.phdrSegmentType p == Elf.PT_DYNAMIC) ph of
         [r] -> pure r
         _ -> T.assertFailure "Could not find DYNAMIC section"
-    let d  = elfLayoutData l
-    let cl = elfClass e
-    ELFCLASS64 <- pure cl
-    let mach = elfMachine e
-    EM_X86_64 <- pure mach
-    let contents = elfLayoutBytes l
+    let hdr = Elf.header e
+    let d  = Elf.headerData hdr
+    let cl = Elf.headerClass hdr
+    Elf.ELFCLASS64 <- pure cl
+    let mach = Elf.headerMachine hdr
+    Elf.EM_X86_64 <- pure mach
+    let contents = Elf.headerFileContents e
     virtMap <- maybe (T.assertFailure "Overlapping loaded segments") pure $
-                 virtAddrMap contents ph
-    let dynContents = sliceL (phdrFileRange dynPhdr) contents
+                 Elf.virtAddrMap contents ph
+    let dynContents = Elf.slice (Elf.phdrFileRange dynPhdr) contents
     dynSection <- either (T.assertFailure . show) pure $
-        dynamicEntries d cl virtMap dynContents
+        Elf.dynamicEntries d cl virtMap dynContents
 
-    syms <- either (T.assertFailure . show) pure $ traverse (dynSymEntry dynSection) [0..2]
-    let isVer VersionSpecific{} = True
-        isVer VersionLocal  = False
-        isVer VersionGlobal = False
-    let symInfo :: (ElfSymbolTableEntry B.ByteString u, VersionTableValue) -> (C8.ByteString, Bool)
-        symInfo (s,v) = (steName s, isVer v)
+    syms <- either (T.assertFailure . show) pure $ traverse (Elf.dynSymEntry dynSection) [0..2]
+    let isVer Elf.VersionSpecific{} = True
+        isVer Elf.VersionLocal  = False
+        isVer Elf.VersionGlobal = False
+    let symInfo :: (Elf.SymtabEntry B.ByteString u, Elf.VersionTableValue) -> (C8.ByteString, Bool)
+        symInfo (s,v) = (Elf.steName s, isVer v)
     -- Statically define expected symbol information.
     let expectedSymInfo = [("",False), ("__libc_start_main",True), ("__gmon_start__", False)]
     T.assertEqual "Testing relocations" (symInfo <$> syms) expectedSymInfo

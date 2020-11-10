@@ -149,7 +149,7 @@ phdrCount = entryNum . phdrTable
 
 -- | Get range of bytes in file for program header table
 phdrTableRange :: ElfHeaderInfo w -> FileRange (ElfWordType w)
-phdrTableRange e = elfClassInstances (headerClass (header e)) $ tableRange (shdrTable e)
+phdrTableRange e = elfClassInstances (headerClass (header e)) $ tableRange (phdrTable e)
 
 -- | Parse program header at given index
 phdrByIndex :: ElfHeaderInfo w -- ^ Information for parsing
