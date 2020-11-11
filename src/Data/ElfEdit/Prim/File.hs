@@ -12,6 +12,7 @@ module Data.ElfEdit.Prim.File
     -- * FileRange
   , FileRange
   , inFileRange
+  , isValidFileRange
   , slice
   ) where
 
@@ -64,3 +65,8 @@ inFileRange w (FileOffset s,c) = s <= w && (w-s) < c
 
 slice :: Integral w => FileRange w -> B.ByteString -> B.ByteString
 slice (i,c) = B.take (fromIntegral c) . B.drop (fromIntegral (fromFileOffset i))
+
+-- | Return true if file range is a region of the file.
+isValidFileRange :: Integral w => FileRange w -> B.ByteString -> Bool
+isValidFileRange (FileOffset i, c) b =
+  c == 0 || (toInteger i + toInteger c <= toInteger (B.length b))

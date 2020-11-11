@@ -1,6 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Data.ElfEdit.Prim.HeaderInfo
   ( -- * EhfHeaderInfo
     ElfHeaderInfo
@@ -19,11 +21,17 @@ module Data.ElfEdit.Prim.HeaderInfo
   , phdrByIndex
     -- ** Section headers
   , headerShdrs
+  , headerNamedShdrs
   , shdrCount
   , shdrTableRange
   , shdrByIndex
+    -- ** Symbol table
+  , Symtab(..)
+  , symtabSize
+  , decodeHeaderSymtab
   ) where
 
+import Control.Monad
 import           Data.Binary
 import           Data.Binary.Get
 import qualified Data.ByteString as B
@@ -34,6 +42,8 @@ import           Data.ElfEdit.Prim.Ehdr
 import           Data.ElfEdit.Prim.File
 import           Data.ElfEdit.Prim.Phdr
 import           Data.ElfEdit.Prim.Shdr
+import           Data.ElfEdit.Prim.StringTable
+import           Data.ElfEdit.Prim.SymbolTable
 import           Data.ElfEdit.Utils (enumCnt, strictRunGetOrFail)
 
 ------------------------------------------------------------------------
@@ -201,12 +211,25 @@ shdrByIndex ehi i = do
       b = elfClassInstances cl $ tableEntry (shdrTable ehi) i (headerFileContents ehi)
    in decodeShdr d cl b
 
--- | Get list of sections from Elf parse info.
--- This includes the initial section
+-- | Get section headers with names as indices into @".shstrtab"@.
 headerShdrs :: ElfHeaderInfo w
             -> V.Vector (Shdr Word32 (ElfWordType w))
 headerShdrs ehi = V.generate cnt (shdrByIndex ehi . fromIntegral)
   where cnt = fromIntegral (shdrCount ehi)
+
+-- | Get section headers with names as bytestrings.
+--
+-- This returns the error and index of the section if any name lookup fails.
+headerNamedShdrs :: ElfHeaderInfo w
+                 -> Either (Word16, LookupStringError) (V.Vector (Shdr B.ByteString (ElfWordType w)))
+headerNamedShdrs ehi = V.generateM cnt go
+  where cnt = fromIntegral (shdrCount ehi)
+        (_, shstrtabBuf) = shstrtabRangeAndData ehi
+        go idx =
+          let shdr = shdrByIndex ehi (fromIntegral idx)
+           in case lookupString (shdrName shdr) shstrtabBuf of
+                Left e -> Left (fromIntegral idx, e)
+                Right nm -> Right (shdr { shdrName = nm })
 
 --------------------------------------------------------------------------------
 -- decodeElfHeaderInfo
@@ -227,3 +250,51 @@ decodeElfHeaderInfo :: B.ByteString -> Either (ByteOffset,String) (SomeElf ElfHe
 decodeElfHeaderInfo b = do
   SomeElf e <- decodeEhdr b
   pure $ SomeElf (mkElfHeader e b)
+
+--------------------------------------------------------------------------------
+-- decodeElfHeaderInfo
+
+data Symtab w =
+     Symtab { symtabLocalCount :: !Word32
+            , symtabEntries :: !(V.Vector (SymtabEntry B.ByteString (ElfWordType w)))
+            }
+
+deriving instance Show (ElfWordType w) => Show (Symtab w)
+
+-- | Decodes the static symbol table using elf header info
+--
+-- If no symbol table is present then @Nothing@ is returned.
+decodeHeaderSymtab :: ElfHeaderInfo w -> Maybe (Either SymtabError (Symtab w))
+decodeHeaderSymtab elf = elfClassInstances (headerClass (header elf)) $ do
+  let hdr = header elf
+  let contents = headerFileContents elf
+  let cl = headerClass hdr
+  let dta = headerData hdr
+  let shdrs = headerShdrs elf
+  let symtabs = V.filter (\s -> shdrType s == SHT_SYMTAB) shdrs
+  when (V.length symtabs == 0) $ Nothing
+  Just $ do
+    when (V.length symtabs > 1) $ Left MultipleSymtabs
+    let symtabShdr = symtabs V.! 0
+    unless (isValidFileRange (shdrFileRange symtabShdr) contents) $ do
+      Left InvalidSymtabFileRange
+    let symtabBuffer = slice (shdrFileRange symtabShdr) contents
+    when (shdrLink symtabShdr >= fromIntegral (shdrCount elf)) $ do
+      Left InvalidSymtabLink
+    let strtabShdr = shdrs V.! fromIntegral (shdrLink symtabShdr)
+    unless (isValidFileRange (shdrFileRange strtabShdr) contents) $ do
+      Left InvalidSymtabFileRange
+    let strtabBuffer = slice (shdrFileRange strtabShdr) contents
+    -- Decode the symbol table
+    v <- decodeSymtab cl dta strtabBuffer symtabBuffer
+    unless (toInteger (shdrInfo symtabShdr) <= toInteger (V.length v)) $ do
+      Left InvalidSymtabLocalCount
+    pure $! Symtab { symtabLocalCount = fromIntegral (shdrInfo symtabShdr)
+                   , symtabEntries = v
+                   }
+
+-- | Get size of symbol table
+symtabSize :: ElfClass w -> Symtab w -> ElfWordType w
+symtabSize c symtab = elfClassInstances c $
+  let cnt = fromIntegral $ V.length $ symtabEntries symtab
+   in fromIntegral (symtabEntrySize c) * cnt

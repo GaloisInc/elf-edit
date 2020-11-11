@@ -21,7 +21,6 @@ module Data.ElfEdit.HighLevel.Types
   , hasSegmentType
   , ElfMemSize(..)
     -- * Symbol tab
-  , Symtab(..)
   , symtabSize
     -- * GNU sections
   , GnuRelroRegion(..)
@@ -35,7 +34,6 @@ import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
-import qualified Data.Vector as V
 import           Data.Word
 import           GHC.TypeLits
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
@@ -62,6 +60,7 @@ data ElfMemSize w
      -- ^ The given offset should be added to the computed size.
   deriving (Show)
 
+{-
 ------------------------------------------------------------------------
 -- Symtab
 
@@ -85,6 +84,7 @@ symtabSize :: ElfClass w -> Symtab nm (ElfWordType w) -> ElfWordType w
 symtabSize c symtab = elfClassInstances c $
   let cnt = fromIntegral $ V.length $ symtabEntries symtab
    in fromIntegral (symtabEntrySize c) * cnt
+-}
 
 $(pure [])
 
@@ -175,8 +175,8 @@ data ElfDataRegion w
      -- ^ A global offset table.
    | ElfDataStrtab !Word16
      -- ^ Elf strtab section (with index)
-   | ElfDataSymtab !(Symtab B.ByteString (ElfWordType w))
-     -- ^ Elf symtab section
+   | ElfDataSymtab !Word16 !(Symtab w)
+     -- ^ Elf symtab section with index and symbol table values.
    | ElfDataSection !(ElfSection (ElfWordType w))
      -- ^ A section that has no special interpretation.
    | ElfDataRaw B.ByteString
@@ -210,7 +210,7 @@ ppRegion r = case r of
   ElfDataSectionNameTable w -> text "section name table" <+> parens (text "section number" <+> ppShow w)
   ElfDataGOT got -> text "global offset table:" <+> ppShow got
   ElfDataStrtab w -> text "strtab section" <+> parens (text "section number" <+> ppShow w)
-  ElfDataSymtab symtab -> text "symtab section:" <+> ppShow symtab
+  ElfDataSymtab _idx symtab -> text "symtab section:" <+> ppShow symtab
   ElfDataSection sec -> text "other section:" <+> ppShow sec
   ElfDataRaw bs -> text "raw bytes:" <+> ppShow bs
 

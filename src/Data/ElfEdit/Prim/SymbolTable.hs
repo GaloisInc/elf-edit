@@ -39,7 +39,7 @@ module Data.ElfEdit.Prim.SymbolTable
   , ppSymbolTableEntries
     -- ** Encoding
   , symtabAlign
-  , symtabShdr
+  , mkSymtabShdr
   , encodeSymtabEntry
   , decodeSymtab
   , decodeSymtabEntry
@@ -298,11 +298,36 @@ data SymtabError
    | InvalidLink !Word32
      -- ^ The link attribute of the section did not refer to a valid
      -- symbol table.
+   | MultipleSymtabs
+     -- ^ Multiple symbol tables in binary.
+     --
+     -- Raised in `decodeHeaderSymtab`
+   | InvalidSymtabFileRange
+     -- ^ Invalid symbol table link
+     --
+     -- Raised in `decodeHeaderSymtab`
+   | InvalidSymtabLink
+     -- ^ Invalid string table file range
+     --
+     -- Raised in `decodeHeaderSymtab`
+   | InvalidSymtabLocalCount
+     -- ^ Invalid symbol table local count.
+     --
+     -- Raised in `decodeHeaderSymtab`
+   | InvalidStrtabFileRange
+     -- ^ Invalid string table file range
+     --
+     -- Raised in `decodeHeaderSymtab`
 
 instance Show SymtabError where
   show (InvalidName idx msg) = "Error parsing symbol " ++ show idx ++ " name: " ++ show msg
   show (IllegalSymbolIndex idx) = "Index " ++ show idx ++ " exceeds number of entries."
   show (InvalidLink lnk) = "The link index " ++ show lnk ++ " was invalid."
+  show MultipleSymtabs = "Multiple symbol tables defined."
+  show InvalidSymtabFileRange = "Symbol table header file offset and size is out of range."
+  show InvalidSymtabLink = "Symbol table header had invalid link to string table."
+  show InvalidSymtabLocalCount = "Symbol table header had invalid number of local symbols."
+  show InvalidStrtabFileRange = "String table file offset and size is out of range."
 
 ------------------------------------------------------------------------
 -- Reading
@@ -437,18 +462,18 @@ symtabAlign ELFCLASS64 = 8
 --
 -- Callers should check @shdrOff@ of the result to add padding
 -- before the symbol table itself.
-symtabShdr :: ElfClass w
-           -> nm -- ^ Name of symtab (typically ".symtab")
-           -> Word16 -- ^ Index of string table for symbol names
-           -> Word32 -- ^ Number of entries that are local
-           -> FileOffset (ElfWordType w)
-           -- ^ Offset of file that section must be after.
-           --
-           -- We align section so the actual location may be larger.
-           -> ElfWordType w
-           -- ^ Size of section
-           -> Shdr nm (ElfWordType w)
-symtabShdr cl nm strtabIdx localCnt o sz = elfClassInstances cl $
+mkSymtabShdr :: ElfClass w
+              -> nm -- ^ Name of symtab (typically ".symtab")
+              -> Word16 -- ^ Index of string table for symbol names
+              -> Word32 -- ^ Number of entries that are local
+              -> FileOffset (ElfWordType w)
+              -- ^ Offset of file that section must be after.
+              --
+              -- We align section so the actual location may be larger.
+              -> ElfWordType w
+              -- ^ Size of section
+              -> Shdr nm (ElfWordType w)
+mkSymtabShdr cl nm strtabIdx localCnt o sz = elfClassInstances cl $
   let o' = alignFileOffset (symtabAlign cl) o
    in Shdr { shdrName = nm
                 , shdrType  = SHT_SYMTAB

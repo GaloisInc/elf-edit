@@ -9,7 +9,7 @@
 module Data.ElfEdit.HighLevel.Get
   ( -- Elf parsing
     getElf
-  , decodeElf
+  , parseElf
   , ElfGetResult(..)
   , ElfParseError(..)
     -- * Section translation
@@ -520,11 +520,10 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
                       pure (ElfDataSection s)
                     Right entries -> do
                       let symtab =
-                            Symtab { symtabIndex = elfSectionIndex s
-                                   , symtabEntries = entries
-                                   , symtabLocalEntries = elfSectionInfo s
+                            Symtab { symtabEntries = entries
+                                   , symtabLocalCount = elfSectionInfo s
                                    }
-                      pure $ ElfDataSymtab symtab
+                      pure $ ElfDataSymtab (elfSectionIndex s) symtab
           | otherwise =
               pure $ ElfDataSection s
     let insertSection :: CollectedRegionList w
@@ -604,8 +603,8 @@ data ElfGetResult
 
 -- | Parses a ByteString into an Elf record. Parse failures call error. 32-bit ELF objects hav
 -- their fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
-decodeElf :: B.ByteString -> ElfGetResult
-decodeElf b =
+parseElf :: B.ByteString -> ElfGetResult
+parseElf b =
   case decodeElfHeaderInfo b of
     Left (o, m) -> ElfHeaderError o m
     Right (SomeElf hdr) ->

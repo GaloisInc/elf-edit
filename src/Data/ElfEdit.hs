@@ -53,7 +53,6 @@ module Data.ElfEdit
   , Data.ElfEdit.HighLevel.Get.headerSections
     -- ** Symbol table
   , Data.ElfEdit.elfSymtab
-  , Data.ElfEdit.HighLevel.Types.Symtab(..)
     -- ** Interpreter
   , Data.ElfEdit.elfInterpreter
     -- ** Global offset table
@@ -64,9 +63,9 @@ module Data.ElfEdit
     -- ** Encoding/decoding
   , Data.ElfEdit.HighLevel.Get.ElfGetResult(..)
   , Data.ElfEdit.HighLevel.Get.ElfParseError(..)
-  , Data.ElfEdit.HighLevel.Get.decodeElf
+  , Data.ElfEdit.HighLevel.Get.parseElf
   , Data.ElfEdit.HighLevel.Get.getElf
-  , Data.ElfEdit.HighLevel.Layout.encodeElf
+  , Data.ElfEdit.HighLevel.Layout.renderElf
     -- * Primitive Interface
   , module Data.ElfEdit.Prim
     -- * Deprecated
@@ -148,9 +147,9 @@ elfSegmentCount e
 -- These are sections labeled, ".symtab" with type SHT_SYMTAB.
 -- There should be at most one symbol table, but we return a list in case the
 -- elf file happens to contain multiple symbol tables.
-elfSymtab :: Elf w -> [Symtab B.ByteString (ElfWordType w)]
+elfSymtab :: Elf w -> [Symtab w]
 elfSymtab = asumDataRegions f
-  where f (ElfDataSymtab s) = [s]
+  where f (ElfDataSymtab _ s) = [s]
         f _ = []
 
 ------------------------------------------------------------------------

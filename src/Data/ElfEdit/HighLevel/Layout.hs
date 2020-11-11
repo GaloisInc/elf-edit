@@ -6,7 +6,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wwarn #-}
 module Data.ElfEdit.HighLevel.Layout
-  ( encodeElf
+  ( renderElf
   , elfSections
   , updateSections
   , traverseElfDataRegions
@@ -97,7 +97,7 @@ elfSectionNames e = concatMap regionNames (toList (e^.elfFileData))
         regionNames (ElfDataSectionNameTable _) = [".shstrtab"]
         regionNames (ElfDataGOT g)              = [elfGotName g]
         regionNames (ElfDataStrtab _)           = [".strtab"]
-        regionNames (ElfDataSymtab _)           = [".symtab"]
+        regionNames (ElfDataSymtab _ _)         = [".symtab"]
         regionNames (ElfDataSection s)          = [elfSectionName s]
         regionNames _                           = []
 
@@ -105,8 +105,6 @@ $(pure [])
 
 ------------------------------------------------------------------------
 -- elfSectionAsGOT
-
-$(pure [])
 
 -- | Create a section for a string table.
 strtabSection :: Num w
@@ -233,9 +231,10 @@ symtabSection :: ElfClass w
               -> ElfData
               -> Map B.ByteString Word32
               -> Word16 -- ^ Index of string table for symbol names
-              -> Symtab B.ByteString (ElfWordType w) -- ^ The symbol table
+              -> Word16 -- ^ Index of symbol table section header
+              -> Symtab w -- ^ The symbol table
               -> ElfSection (ElfWordType w)
-symtabSection cl d nameMap thisStrtabIdx symtab = sec
+symtabSection cl d nameMap thisStrtabIdx symtabShdrIndex symtab = sec
   where nameFn nm =
           case Map.lookup nm nameMap of
             Just nameIdx -> nameIdx
@@ -244,14 +243,14 @@ symtabSection cl d nameMap thisStrtabIdx symtab = sec
         bld = mconcat $ V.toList $ encodeSym <$> symtabEntries symtab
         dta = L.toStrict $ Bld.toLazyByteString bld
         sec = elfClassInstances cl $
-            ElfSection { elfSectionIndex = symtabIndex symtab
+            ElfSection { elfSectionIndex = symtabShdrIndex
                        , elfSectionName  = ".symtab"
                        , elfSectionType  = SHT_SYMTAB
                        , elfSectionFlags = shf_none
                        , elfSectionAddr  = 0
                        , elfSectionSize  = fromIntegral (B.length dta)
                        , elfSectionLink  = fromIntegral thisStrtabIdx
-                       , elfSectionInfo  = symtabLocalEntries symtab
+                       , elfSectionInfo  = symtabLocalCount symtab
                        , elfSectionAddrAlign = symtabAlign cl
                        , elfSectionEntSize = fromIntegral (symtabEntrySize cl)
                        , elfSectionData = dta
@@ -450,7 +449,7 @@ regionOffsetIgnorable reg =
     ElfDataSectionNameTable _ -> False
     ElfDataGOT g              -> B.null (elfGotData g)
     ElfDataStrtab _           -> False
-    ElfDataSymtab _           -> False
+    ElfDataSymtab _ _         -> False
     ElfDataSection s          -> B.null (elfSectionData s)
     ElfDataRaw b              -> B.null b
 
@@ -504,8 +503,8 @@ buildRegions l o ((reg,inLoad):rest) = do
       let s = strtabSection ".strtab" idx (strtab_data l)
           (dta, sz) = sectionContents o s inLoad
        in dta <> doRest sz
-    ElfDataSymtab symtab ->
-      let s = symtabSection cl d (strtab_map l) (strtab_idx l) symtab
+    ElfDataSymtab idx symtab ->
+      let s = symtabSection cl d (strtab_map l) (strtab_idx l) idx symtab
           (dta, sz) = sectionContents o s inLoad
        in dta <> doRest sz
     ElfDataSection s ->
@@ -536,7 +535,7 @@ elfRegionFileSize l reg =
           ElfDataSectionNameTable _ -> fromIntegral $ B.length $ elfLayoutSectionNameData l
           ElfDataGOT g              -> elfGotSize g
           ElfDataStrtab _           -> fromIntegral $ B.length $ strtab_data l
-          ElfDataSymtab symtab      -> symtabSize c symtab
+          ElfDataSymtab _ symtab    -> symtabSize c symtab
           ElfDataSection s          -> elfSectionFileSize s
           ElfDataRaw b              -> fromIntegral (B.length b)
 
@@ -552,7 +551,7 @@ elfStrtabSectionIndex e = fromMaybe 0 $ asumDataRegions f e
 -- | Return symbol table names in elf.
 elfSymtabNames :: Elf w -> [B.ByteString]
 elfSymtabNames = asumDataRegions f
-  where f (ElfDataSymtab symtab) = V.toList $ steName <$> symtabEntries symtab
+  where f (ElfDataSymtab _ symtab) = V.toList $ steName <$> symtabEntries symtab
         f _ = []
 
 elfSegmentCount :: Elf w -> Int
@@ -639,8 +638,8 @@ layoutRegion inLoad l reg = do
     ElfDataStrtab idx ->
       let s = strtabSection ".strtab" idx (strtab_data l)
        in addSectionToLayout l s inLoad
-    ElfDataSymtab symtab ->
-      let s = symtabSection cl d (strtab_map l) (strtab_idx l) symtab
+    ElfDataSymtab idx symtab ->
+      let s = symtabSection cl d (strtab_map l) (strtab_idx l) idx symtab
        in addSectionToLayout l s inLoad
     ElfDataSection s ->
       addSectionToLayout l s inLoad
@@ -687,5 +686,5 @@ elfLayout :: Elf w -> ElfLayout w
 elfLayout e = elfClassInstances  (elfClass e) $ elfLayout' e
 
 -- | Write elf file out to bytestring.
-encodeElf :: Elf w -> L.ByteString
-encodeElf = elfLayoutBytes . elfLayout
+renderElf :: Elf w -> L.ByteString
+renderElf = elfLayoutBytes . elfLayout
