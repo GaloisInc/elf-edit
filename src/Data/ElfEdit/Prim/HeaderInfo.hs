@@ -281,10 +281,10 @@ decodeHeaderSymtab elf = elfClassInstances (headerClass (header elf)) $ do
     let symtabBuffer = slice (shdrFileRange symtabShdr) contents
     when (shdrLink symtabShdr >= fromIntegral (shdrCount elf)) $ do
       Left InvalidSymtabLink
-    let strtabShdr = shdrs V.! fromIntegral (shdrLink symtabShdr)
-    unless (isValidFileRange (shdrFileRange strtabShdr) contents) $ do
+    let strtab = shdrs V.! fromIntegral (shdrLink symtabShdr)
+    unless (isValidFileRange (shdrFileRange strtab) contents) $ do
       Left InvalidSymtabFileRange
-    let strtabBuffer = slice (shdrFileRange strtabShdr) contents
+    let strtabBuffer = slice (shdrFileRange strtab) contents
     -- Decode the symbol table
     v <- decodeSymtab cl dta strtabBuffer symtabBuffer
     unless (toInteger (shdrInfo symtabShdr) <= toInteger (V.length v)) $ do
