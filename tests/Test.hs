@@ -44,7 +44,7 @@ genAsciiChar = T.elements (['a'..'z'] ++ ['A'..'Z'])
 
 withElf :: B.ByteString -> (forall w . Elf.Elf w -> T.Assertion) -> T.Assertion
 withElf bs f =
-  case Elf.decodeElf bs of
+  case Elf.parseElf bs of
     Elf.Elf32Res err e32
       | null err  -> f e32
       | otherwise -> T.assertFailure ("Failed to parse elf file: " ++ show err)
@@ -62,7 +62,7 @@ withElfHeader bs f =
 testEmptyElf :: T.Assertion
 testEmptyElf = IO.withBinaryFile "./tests/empty.elf" IO.ReadMode $ \h -> do
   fil <- B.hGetContents h
-  case Elf.decodeElf fil of
+  case Elf.parseElf fil of
     Elf.ElfHeaderError{} -> return ()
     _ -> T.assertFailure "Empty ELF did not cause an exception."
 
@@ -71,10 +71,10 @@ testIdentityTransform fp = do
   bs <- B.readFile fp
   withElf bs $ \e -> do
     int0 <- Elf.elfInterpreter e
-    withElf (L.toStrict (Elf.encodeElf e)) $ \e' -> do
+    withElf (L.toStrict (Elf.renderElf e)) $ \e' -> do
       T.assertEqual "Segment Count" (length (Elf.elfSegments e)) (length (Elf.elfSegments e'))
       withElf bs $ \ehi -> do
-        withElf (L.toStrict (Elf.encodeElf e)) $ \ehi' -> do
+        withElf (L.toStrict (Elf.renderElf e)) $ \ehi' -> do
           let [st1] = Elf.elfSymtab ehi
               [st2] = Elf.elfSymtab ehi'
           let cnt1 = V.length (Elf.symtabEntries st1)
