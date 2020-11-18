@@ -52,8 +52,8 @@ import qualified Data.Map.Strict as Map
 import           Data.Word (Word32)
 import           Numeric (showHex)
 
-import           Data.ElfEdit.Relocations
-import           Data.ElfEdit.Types (ElfClass(..))
+import           Data.ElfEdit.Prim.Ehdr
+import           Data.ElfEdit.Relocations.Common
 
 ------------------------------------------------------------------------
 -- X86_64_RelocationType

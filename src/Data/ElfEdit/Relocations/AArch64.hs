@@ -18,8 +18,9 @@ module Data.ElfEdit.Relocations.AArch64
 import qualified Data.Map.Strict          as Map
 import           Data.Word
 
-import           Data.ElfEdit.Relocations
-import           Data.ElfEdit.Types       (ElfClass (..), ppHex)
+import           Data.ElfEdit.Prim.Ehdr (ElfClass(..))
+import           Data.ElfEdit.Relocations.Common
+import           Data.ElfEdit.Utils (ppHex)
 
 ------------------------------------------------------------------------
 -- ARM_RelocationType

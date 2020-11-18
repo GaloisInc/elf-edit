@@ -24,12 +24,8 @@ import qualified Data.Vector.Mutable as MV
 import           Data.Word
 import           Numeric.Natural
 
-import Data.ElfEdit.Relocations
-       ( ElfWordType, ElfIntType
-       , RelocationWidth(..), RelaEntry(..)
-       , relocationSymIndex, relocationTypeVal
-       )
-import Data.ElfEdit.Types (ElfClass)
+import           Data.ElfEdit.Prim.Ehdr
+import           Data.ElfEdit.Relocations.Common
 
 -- | Decoding errors for relocations
 data AndroidDecodeError
@@ -138,11 +134,7 @@ readGroup cl mv groupEndCount groupFlags groupOffsetDelta gr
           (grAddend gr +) <$> readBounded
          else
           pure 0
-      let rela = Rela { relaAddr = offset
-                      , relaSym  = relocationSymIndex cl info
-                      , relaType = toRelocType (relocationTypeVal cl info)
-                      , relaAddend = addend
-                      }
+      let rela = mkRelaEntry cl offset info addend
       liftST $ MV.write mv (grCount gr) rela
       let gr2 = RS { grCount = grCount gr + 1
                    , grOffset = offset

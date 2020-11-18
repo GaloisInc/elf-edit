@@ -1,5 +1,5 @@
 Name:          elf-edit
-Version:       0.35
+Version:       0.39
 License:       BSD3
 License-file:  LICENSE
 Category:      Data
@@ -34,21 +34,29 @@ library
   hs-source-dirs:  src
   exposed-modules:
     Data.ElfEdit
+    Data.ElfEdit.ByteString
+    Data.ElfEdit.Prim
   other-modules:
     Data.ElfEdit.Dynamic
     Data.ElfEdit.Dynamic.Tag
-    Data.ElfEdit.Enums
-    Data.ElfEdit.Get
-    Data.ElfEdit.Layout
-    Data.ElfEdit.Relocations
+    Data.ElfEdit.HighLevel.Get
+    Data.ElfEdit.HighLevel.GOT
+    Data.ElfEdit.HighLevel.Layout
+    Data.ElfEdit.HighLevel.Sections
+    Data.ElfEdit.HighLevel.Types
+    Data.ElfEdit.Relocations.Common
     Data.ElfEdit.Relocations.Android
     Data.ElfEdit.Relocations.ARM32
     Data.ElfEdit.Relocations.AArch64
     Data.ElfEdit.Relocations.I386
     Data.ElfEdit.Relocations.X86_64
-    Data.ElfEdit.Sections
-    Data.ElfEdit.SymbolEnums
-    Data.ElfEdit.Types
+    Data.ElfEdit.Prim.Ehdr
+    Data.ElfEdit.Prim.File
+    Data.ElfEdit.Prim.HeaderInfo
+    Data.ElfEdit.Prim.Phdr
+    Data.ElfEdit.Prim.Shdr
+    Data.ElfEdit.Prim.StringTable
+    Data.ElfEdit.Prim.SymbolTable
     Data.ElfEdit.Utils
 
 test-suite test-elf

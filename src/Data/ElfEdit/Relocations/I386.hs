@@ -24,8 +24,8 @@ import qualified Data.Map.Strict as Map
 import           Data.Word (Word8)
 import           Numeric (showHex)
 
-import           Data.ElfEdit.Relocations
-import           Data.ElfEdit.Types (ElfClass(..))
+import           Data.ElfEdit.Prim.Ehdr
+import           Data.ElfEdit.Relocations.Common
 
 -- | Relocation types for 64-bit x86 code.
 newtype I386_RelocationType = I386_RelocationType { fromI386_RelocationType :: Word8 }
