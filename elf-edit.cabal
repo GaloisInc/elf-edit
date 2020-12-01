@@ -22,12 +22,12 @@ source-repository head
 library
   build-depends:
     base >= 4.11 && < 5,
-    ansi-wl-pprint,
     binary,
     bytestring,
     containers,
     lens,
     mtl,
+    prettyprinter >= 1.7.0,
     utf8-string,
     vector
   ghc-options : -Wall
