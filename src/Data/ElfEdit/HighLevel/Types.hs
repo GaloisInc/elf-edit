@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -36,15 +37,15 @@ import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
 import           Data.Word
 import           GHC.TypeLits
-import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
+import           Prettyprinter
 
 import           Data.ElfEdit.Prim
 import           Data.ElfEdit.HighLevel.GOT
 import           Data.ElfEdit.HighLevel.Sections
 import           Data.ElfEdit.Utils (ppHex)
 
-ppShow :: Show v => v -> Doc
-ppShow = text . show
+ppShow :: Show v => v -> Doc ann
+ppShow = viaShow
 
 ------------------------------------------------------------------------
 -- ElfMemSize
@@ -186,33 +187,35 @@ deriving instance ElfWidthConstraints w => Show (ElfDataRegion w)
 
 $(pure [])
 
-ppSegment :: ElfWidthConstraints w => ElfSegment w -> Doc
+ppSegment :: ElfWidthConstraints w => ElfSegment w -> Doc ann
 ppSegment s =
-  text "type: " <+> ppShow (elfSegmentType s) <$$>
-  text "flags:" <+> ppShow (elfSegmentFlags s) <$$>
-  text "index:" <+> ppShow (elfSegmentIndex s) <$$>
-  text "vaddr:" <+> text (ppHex (elfSegmentVirtAddr s)) <$$>
-  text "paddr:" <+> text (ppHex (elfSegmentPhysAddr s)) <$$>
-  text "align:" <+> ppShow (elfSegmentAlign s) <$$>
-  text "msize:" <+> ppShow (elfSegmentMemSize s) <$$>
-  text "data:"  <$$>
-  indent 2 (vcat . map ppRegion . F.toList $ elfSegmentData s)
+  vcat
+  [ "type: " <+> ppShow (elfSegmentType s)
+  , "flags:" <+> ppShow (elfSegmentFlags s)
+  , "index:" <+> ppShow (elfSegmentIndex s)
+  , "vaddr:" <+> pretty (ppHex (elfSegmentVirtAddr s))
+  , "paddr:" <+> pretty (ppHex (elfSegmentPhysAddr s))
+  , "align:" <+> ppShow (elfSegmentAlign s)
+  , "msize:" <+> ppShow (elfSegmentMemSize s)
+  , "data:"
+  , indent 2 (vcat . map ppRegion . F.toList $ elfSegmentData s)
+  ]
 
 instance ElfWidthConstraints w => Show (ElfSegment w) where
   show s = show (ppSegment s)
 
-ppRegion :: ElfWidthConstraints w => ElfDataRegion w -> Doc
+ppRegion :: ElfWidthConstraints w => ElfDataRegion w -> Doc ann
 ppRegion r = case r of
-  ElfDataElfHeader -> text "ELF header"
-  ElfDataSegmentHeaders -> text "segment header table"
-  ElfDataSegment s -> hang 2 (text "contained segment" <$$> ppSegment s)
-  ElfDataSectionHeaders -> text "section header table"
-  ElfDataSectionNameTable w -> text "section name table" <+> parens (text "section number" <+> ppShow w)
-  ElfDataGOT got -> text "global offset table:" <+> ppShow got
-  ElfDataStrtab w -> text "strtab section" <+> parens (text "section number" <+> ppShow w)
-  ElfDataSymtab _idx symtab -> text "symtab section:" <+> ppShow symtab
-  ElfDataSection sec -> text "other section:" <+> ppShow sec
-  ElfDataRaw bs -> text "raw bytes:" <+> ppShow bs
+  ElfDataElfHeader -> "ELF header"
+  ElfDataSegmentHeaders -> "segment header table"
+  ElfDataSegment s -> hang 2 $ vcat ["contained segment", ppSegment s]
+  ElfDataSectionHeaders -> "section header table"
+  ElfDataSectionNameTable w -> "section name table" <+> parens ("section number" <+> ppShow w)
+  ElfDataGOT got -> "global offset table:" <+> ppShow got
+  ElfDataStrtab w -> "strtab section" <+> parens ("section number" <+> ppShow w)
+  ElfDataSymtab _idx symtab -> "symtab section:" <+> ppShow symtab
+  ElfDataSection sec -> "other section:" <+> ppShow sec
+  ElfDataRaw bs -> "raw bytes:" <+> ppShow bs
 
 $(pure [])
 

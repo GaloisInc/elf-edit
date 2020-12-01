@@ -18,7 +18,7 @@ import qualified Data.ByteString as B
 import           Data.List (intercalate, transpose)
 import qualified Data.Vector as V
 import           Numeric (showHex)
-import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
+import           Prettyprinter
 
 -- | @enumCnt b c@ returns a list with @c@ enum values starting from @b@.
 enumCnt :: (Enum e, Real r) => e -> r -> [e]
@@ -70,8 +70,8 @@ alignRight minw l = ar <$> l
 fixTableColumns :: [ColumnAlignmentFn]
                      -- ^ Functions for modifying each column
                 -> [[String]]
-                -> Doc
-fixTableColumns colFns rows = vcat (hsep . fmap text <$> fixed_rows)
+                -> Doc ann
+fixTableColumns colFns rows = vcat (hsep . fmap pretty <$> fixed_rows)
   where cols = transpose rows
         fixed_cols = zipWith ($) colFns cols
         fixed_rows = transpose fixed_cols

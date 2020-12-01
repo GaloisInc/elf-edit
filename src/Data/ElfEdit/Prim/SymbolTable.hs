@@ -56,7 +56,7 @@ import qualified Data.ByteString.Char8 as BSC
 import           Data.ElfEdit.Prim.Shdr
 import qualified Data.Vector as V
 import           Data.Word
-import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
+import           Prettyprinter
 
 import           Data.ElfEdit.Prim.Ehdr
 import           Data.ElfEdit.Prim.File
@@ -273,7 +273,7 @@ ppSymbolTableEntry i e =
   ]
 
 -- | Pretty print symbol table entries in format used by readelf.
-ppSymbolTableEntries :: (Integral w, Bits w, Show w) => [SymtabEntry B.ByteString w] -> Doc
+ppSymbolTableEntries :: (Integral w, Bits w, Show w) => [SymtabEntry B.ByteString w] -> Doc ann
 ppSymbolTableEntries l = fixTableColumns (snd <$> cols) (fmap fst cols : entries)
   where entries = zipWith ppSymbolTableEntry [0..] l
         cols = [ ("Num:",     alignRight 6)

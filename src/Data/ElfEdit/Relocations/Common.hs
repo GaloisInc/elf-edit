@@ -36,7 +36,7 @@ import           Data.Bits
 import qualified Data.ByteString as B
 import           Data.Word
 import           GHC.TypeLits (Nat)
-import           Text.PrettyPrint.ANSI.Leijen hiding ((<>), (<$>))
+import           Prettyprinter
 
 import           Data.ElfEdit.Prim.Ehdr
 import           Data.ElfEdit.Utils
@@ -258,7 +258,7 @@ decodeRelaEntries d bs = do
     _      -> Left $ "Rela buffer must be a multiple of rela entry size."
 
 -- | Pretty-print a table of relocation entries.
-ppRelaEntries :: IsRelocationType tp => [RelaEntry tp] -> Doc
+ppRelaEntries :: IsRelocationType tp => [RelaEntry tp] -> Doc ann
 ppRelaEntries l = fixTableColumns (snd <$> cols) (fmap fst cols : entries)
   where entries = zipWith ppRelaEntry [0..] l
         cols = [ ("Num",    alignRight 0)
