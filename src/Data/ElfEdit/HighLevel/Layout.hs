@@ -12,6 +12,8 @@ module Data.ElfEdit.HighLevel.Layout
   , traverseElfDataRegions
   , traverseElfSegments
   , elfRegionFileSize
+  , elfLayout
+  , allPhdrs
   ) where
 
 import           Control.Lens hiding (enum)

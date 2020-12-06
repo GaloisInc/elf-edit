@@ -43,6 +43,9 @@ module Data.ElfEdit
   , Data.ElfEdit.elfSegmentCount
   , Data.ElfEdit.elfSegments
   , Data.ElfEdit.HighLevel.Layout.traverseElfSegments
+  , Data.ElfEdit.HighLevel.Layout.elfRegionFileSize
+  , Data.ElfEdit.HighLevel.Layout.elfLayout
+  , Data.ElfEdit.HighLevel.Layout.allPhdrs
     -- ** Sections
   , Data.ElfEdit.HighLevel.Sections.ElfSection(..)
   , Data.ElfEdit.HighLevel.Sections.elfSectionFileSize
