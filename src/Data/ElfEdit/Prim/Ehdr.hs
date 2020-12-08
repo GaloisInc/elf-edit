@@ -183,6 +183,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as Bld
 import qualified Data.Map.Strict as Map
 import           Data.Int
+import qualified Data.Type.Equality as TE
 import           Data.Word
 import           GHC.Stack
 import           GHC.TypeLits
@@ -206,6 +207,11 @@ data ElfClass (w :: Nat) where
 instance Show (ElfClass w) where
   show ELFCLASS32 = "ELFCLASS32"
   show ELFCLASS64 = "ELFCLASS64"
+
+instance TE.TestEquality ElfClass where
+  testEquality ELFCLASS32 ELFCLASS32 = Just TE.Refl
+  testEquality ELFCLASS64 ELFCLASS64 = Just TE.Refl
+  testEquality _ _ = Nothing
 
 -- | Return the number of bytes in an address with this elf class.
 elfClassByteWidth :: ElfClass w -> Int
