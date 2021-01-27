@@ -1,7 +1,6 @@
-dist/*
-*~
-cabal.sandbox.config
-.stack-work
-TAGS
-stack.yaml
-dist-newstyle
+/.stack-work
+/TAGS
+/stack.yaml
+/dist-newstyle
+/cabal.project.freeze
+/cabal.project.local

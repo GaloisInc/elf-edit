@@ -1,0 +1,2 @@
+package elf-edit
+  ghc-options: -Werror -Wall
