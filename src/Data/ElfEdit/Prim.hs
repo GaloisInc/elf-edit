@@ -26,7 +26,6 @@ module Data.ElfEdit.Prim
   , module Data.ElfEdit.Relocations.AArch64
     -- ** Android-specific
   , module Data.ElfEdit.Relocations.Android
-
   ) where
 
 import Data.ElfEdit.Dynamic

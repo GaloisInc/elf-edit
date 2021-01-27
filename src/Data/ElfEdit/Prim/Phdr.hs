@@ -39,6 +39,7 @@ module Data.ElfEdit.Prim.Phdr
   , hasPermissions
     -- ** Encoding
   , phdrTableAlign
+  , encodePhdr
   , encodePhdrTable
   ) where
 
