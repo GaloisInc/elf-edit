@@ -330,21 +330,27 @@ newtype ElfOSABI = ElfOSABI { fromElfOSABI :: Word8 }
   deriving (Eq, Ord)
 
 -- | No extensions or unspecified
+pattern ELFOSABI_SYSV :: ElfOSABI
 pattern ELFOSABI_SYSV = ElfOSABI 0
 
 -- | Hewlett-Packard HP-UX
+pattern ELFOSABI_HPUX :: ElfOSABI
 pattern ELFOSABI_HPUX = ElfOSABI 1
 
 -- | NetBSD
+pattern ELFOSABI_NETBSD :: ElfOSABI
 pattern ELFOSABI_NETBSD = ElfOSABI 2
 
 -- | Linux
+pattern ELFOSABI_LINUX :: ElfOSABI
 pattern ELFOSABI_LINUX = ElfOSABI 3
 
 -- | Sun Solaris
+pattern ELFOSABI_SOLARIS :: ElfOSABI
 pattern ELFOSABI_SOLARIS = ElfOSABI 6
 
 -- | AIX
+pattern ELFOSABI_AIX :: ElfOSABI
 pattern ELFOSABI_AIX = ElfOSABI 7
 
 -- | IRIX
@@ -354,6 +360,7 @@ pattern ELFOSABI_IRIS = ElfOSABI 8
 pattern ELFOSABI_FREEBSD = ElfOSABI 9
 
 -- | Compat TRU64 Unix
+pattern ELFOSABI_TRU64 :: ElfOSABI
 pattern ELFOSABI_TRU64 = ElfOSABI 10
 
 -- | Novell Modesto

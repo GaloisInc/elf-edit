@@ -28,6 +28,7 @@ module Data.ElfEdit.Prim.Phdr
   , pattern PT_GNU_EH_FRAME
   , pattern PT_GNU_STACK
   , pattern PT_GNU_RELRO
+  , pattern PT_GNU_PROPERTY
   , pattern PT_PAX_FLAGS
   , pattern PT_HIOS
   , pattern PT_LOPROC
@@ -75,57 +76,51 @@ pattern PT_INTERP :: PhdrType
 pattern PT_INTERP  = PhdrType 3
 -- | Note sections
 pattern PT_NOTE :: PhdrType
-pattern PT_NOTE    = PhdrType 4
+pattern PT_NOTE = PhdrType 4
 -- | Reserved
 pattern PT_SHLIB :: PhdrType
-pattern PT_SHLIB   = PhdrType 5
+pattern PT_SHLIB = PhdrType 5
 -- | Program header table
 pattern PT_PHDR :: PhdrType
-pattern PT_PHDR    = PhdrType 6
+pattern PT_PHDR = PhdrType 6
 -- | A thread local storage segment
 --
 -- See 'https://www.akkadia.org/drepper/tls.pdf'
 pattern PT_TLS :: PhdrType
-pattern PT_TLS     = PhdrType 7
+pattern PT_TLS = PhdrType 7
 -- | A number of defined types.
 pattern PT_NUM :: PhdrType
-pattern PT_NUM     = PhdrType 8
-
+pattern PT_NUM = PhdrType 8
 -- | Start of OS-specific
 pattern PT_LOOS :: PhdrType
-pattern PT_LOOS    = PhdrType 0x60000000
-
+pattern PT_LOOS = PhdrType 0x60000000
 -- | The GCC '.eh_frame_hdr' segment
 pattern PT_GNU_EH_FRAME :: PhdrType
 pattern PT_GNU_EH_FRAME = PhdrType 0x6474e550
-
 -- | Indicates if stack should be executable.
 pattern PT_GNU_STACK :: PhdrType
 pattern PT_GNU_STACK = PhdrType 0x6474e551
-
 -- | GNU-specific segment type used to indicate that a loadable
 -- segment is initially writable, but can be made read-only after
 -- relocations have been applied.
 pattern PT_GNU_RELRO :: PhdrType
 pattern PT_GNU_RELRO = PhdrType 0x6474e552
-
+-- | Used for '.note.gnu.property' data
+pattern PT_GNU_PROPERTY :: PhdrType
+pattern PT_GNU_PROPERTY = PhdrType 0x6474e553
 -- | Indicates this binary uses PAX.
 pattern PT_PAX_FLAGS :: PhdrType
 pattern PT_PAX_FLAGS = PhdrType 0x65041580
-
 -- | End of OS-specific
 pattern PT_HIOS :: PhdrType
 pattern PT_HIOS    = PhdrType 0x6fffffff
-
--- | Start of OS-specific
+-- | Start of processor specific
 pattern PT_LOPROC :: PhdrType
 pattern PT_LOPROC  = PhdrType 0x70000000
-
 -- | Exception unwinding tables
 pattern PT_ARM_EXIDX :: PhdrType
 pattern PT_ARM_EXIDX  = PhdrType 0x70000001
-
--- | End of OS-specific
+-- | End of processor specific
 pattern PT_HIPROC :: PhdrType
 pattern PT_HIPROC  = PhdrType 0x7fffffff
 
