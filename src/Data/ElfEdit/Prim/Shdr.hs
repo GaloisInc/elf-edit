@@ -47,6 +47,26 @@ module Data.ElfEdit.Prim.Shdr
   , pattern SHT_REL
   , pattern SHT_SHLIB
   , pattern SHT_DYNSYM
+  , pattern SHT_INIT_ARRAY
+  , pattern SHT_FINI_ARRAY
+  , pattern SHT_PREINIT_ARRAY
+  , pattern SHT_GROUP
+  , pattern SHT_SYMTAB_SHNDX
+  , pattern SHT_LOOS
+  , pattern SHT_ANDROID_REL
+  , pattern SHT_ANDROID_RELA
+  , pattern SHT_GNU_ATTRIBUTES
+  , pattern SHT_GNU_HASH
+  , pattern SHT_GNU_verdef
+  , pattern SHT_GNU_verneed
+  , pattern SHT_GNU_versym
+  , pattern SHT_HIOS
+  , pattern SHT_LOPROC
+  , pattern SHT_ARM_EXIDX
+  , pattern SHT_ARM_PREEMPTMAP
+  , pattern SHT_ARM_ATTRIBUTES
+  , pattern SHT_ARM_DEBUGOVERLAY
+  , pattern SHT_ARM_OVERLAYSECTION
     -- ** Elf section flags
   , ElfSectionFlags(..)
   , shf_none
