@@ -62,6 +62,7 @@ module Data.ElfEdit.Prim.Shdr
   , pattern SHT_GNU_versym
   , pattern SHT_HIOS
   , pattern SHT_LOPROC
+  , pattern SHT_X86_64_UNWIND
   , pattern SHT_ARM_EXIDX
   , pattern SHT_ARM_PREEMPTMAP
   , pattern SHT_ARM_ATTRIBUTES
@@ -230,11 +231,9 @@ pattern SHT_SHLIB = ElfSectionType 10
 -- | Contains a dynamic loader symbol table
 pattern SHT_DYNSYM :: ElfSectionType
 pattern SHT_DYNSYM   = ElfSectionType 11
-
 -- | Pointers to initialization  functions.
 pattern SHT_INIT_ARRAY :: ElfSectionType
 pattern SHT_INIT_ARRAY = ElfSectionType 14
-
 -- | Pointers to termination functions.
 pattern SHT_FINI_ARRAY :: ElfSectionType
 pattern SHT_FINI_ARRAY = ElfSectionType 15
@@ -285,6 +284,11 @@ pattern SHT_HIOS = ElfSectionType 0x6fffffff
 -- | Lowest processor arch-specific type.
 pattern SHT_LOPROC :: ElfSectionType
 pattern SHT_LOPROC = ElfSectionType 0x70000000
+
+-- Unwind information.
+pattern SHT_X86_64_UNWIND :: ElfSectionType
+pattern SHT_X86_64_UNWIND = ElfSectionType 0x70000001
+
 -- |  Exception Index table
 pattern SHT_ARM_EXIDX :: ElfSectionType
 pattern SHT_ARM_EXIDX = ElfSectionType 0x70000001
