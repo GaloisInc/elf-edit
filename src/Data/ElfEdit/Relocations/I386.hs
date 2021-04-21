@@ -1,10 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE CPP #-}
-#if __GLASGOW_HASKELL__ >= 800
-{-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
-#endif
 module Data.ElfEdit.Relocations.I386
   ( I386_RelocationType(..)
   , pattern R_386_NONE
@@ -31,16 +27,27 @@ import           Data.ElfEdit.Relocations.Common
 newtype I386_RelocationType = I386_RelocationType { fromI386_RelocationType :: Word8 }
   deriving (Eq,Ord)
 
+pattern R_386_NONE :: I386_RelocationType
 pattern R_386_NONE     = I386_RelocationType  0
+pattern R_386_32 :: I386_RelocationType
 pattern R_386_32       = I386_RelocationType  1
+pattern R_386_PC32 :: I386_RelocationType
 pattern R_386_PC32     = I386_RelocationType  2
+pattern R_386_GOT32 :: I386_RelocationType
 pattern R_386_GOT32    = I386_RelocationType  3
+pattern R_386_PLT32 :: I386_RelocationType
 pattern R_386_PLT32    = I386_RelocationType  4
+pattern R_386_COPY :: I386_RelocationType
 pattern R_386_COPY     = I386_RelocationType  5
+pattern R_386_GLOB_DAT :: I386_RelocationType
 pattern R_386_GLOB_DAT = I386_RelocationType  6
+pattern R_386_JMP_SLOT :: I386_RelocationType
 pattern R_386_JMP_SLOT = I386_RelocationType  7
+pattern R_386_RELATIVE :: I386_RelocationType
 pattern R_386_RELATIVE = I386_RelocationType  8
+pattern R_386_GOTOFF :: I386_RelocationType
 pattern R_386_GOTOFF   = I386_RelocationType  9
+pattern R_386_GOTPC :: I386_RelocationType
 pattern R_386_GOTPC    = I386_RelocationType 10
 
 i386_RelocationTypes :: Map.Map I386_RelocationType String

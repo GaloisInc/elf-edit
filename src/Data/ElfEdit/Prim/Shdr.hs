@@ -47,6 +47,27 @@ module Data.ElfEdit.Prim.Shdr
   , pattern SHT_REL
   , pattern SHT_SHLIB
   , pattern SHT_DYNSYM
+  , pattern SHT_INIT_ARRAY
+  , pattern SHT_FINI_ARRAY
+  , pattern SHT_PREINIT_ARRAY
+  , pattern SHT_GROUP
+  , pattern SHT_SYMTAB_SHNDX
+  , pattern SHT_LOOS
+  , pattern SHT_ANDROID_REL
+  , pattern SHT_ANDROID_RELA
+  , pattern SHT_GNU_ATTRIBUTES
+  , pattern SHT_GNU_HASH
+  , pattern SHT_GNU_verdef
+  , pattern SHT_GNU_verneed
+  , pattern SHT_GNU_versym
+  , pattern SHT_HIOS
+  , pattern SHT_LOPROC
+  , pattern SHT_X86_64_UNWIND
+  , pattern SHT_ARM_EXIDX
+  , pattern SHT_ARM_PREEMPTMAP
+  , pattern SHT_ARM_ATTRIBUTES
+  , pattern SHT_ARM_DEBUGOVERLAY
+  , pattern SHT_ARM_OVERLAYSECTION
     -- ** Elf section flags
   , ElfSectionFlags(..)
   , shf_none
@@ -210,11 +231,9 @@ pattern SHT_SHLIB = ElfSectionType 10
 -- | Contains a dynamic loader symbol table
 pattern SHT_DYNSYM :: ElfSectionType
 pattern SHT_DYNSYM   = ElfSectionType 11
-
 -- | Pointers to initialization  functions.
 pattern SHT_INIT_ARRAY :: ElfSectionType
 pattern SHT_INIT_ARRAY = ElfSectionType 14
-
 -- | Pointers to termination functions.
 pattern SHT_FINI_ARRAY :: ElfSectionType
 pattern SHT_FINI_ARRAY = ElfSectionType 15
@@ -265,6 +284,11 @@ pattern SHT_HIOS = ElfSectionType 0x6fffffff
 -- | Lowest processor arch-specific type.
 pattern SHT_LOPROC :: ElfSectionType
 pattern SHT_LOPROC = ElfSectionType 0x70000000
+
+-- Unwind information.
+pattern SHT_X86_64_UNWIND :: ElfSectionType
+pattern SHT_X86_64_UNWIND = ElfSectionType 0x70000001
+
 -- |  Exception Index table
 pattern SHT_ARM_EXIDX :: ElfSectionType
 pattern SHT_ARM_EXIDX = ElfSectionType 0x70000001

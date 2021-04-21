@@ -4,10 +4,8 @@ Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
 Defines the tags used in the dynamic section.
 -}
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
 module Data.ElfEdit.Dynamic.Tag
   ( module Data.ElfEdit.Dynamic.Tag
   ) where
@@ -21,42 +19,75 @@ import           Numeric (showHex)
 newtype ElfDynamicTag = ElfDynamicTag { fromElfDynamicTag :: Word32 }
   deriving (Eq, Ord, Num)
 
+pattern DT_NULL :: ElfDynamicTag
 pattern DT_NULL            = ElfDynamicTag 0
+pattern DT_NEEDED :: ElfDynamicTag
 pattern DT_NEEDED          = ElfDynamicTag 1
+pattern DT_PLTRELSZ :: ElfDynamicTag
 pattern DT_PLTRELSZ        = ElfDynamicTag 2
+pattern DT_PLTGOT :: ElfDynamicTag
 pattern DT_PLTGOT          = ElfDynamicTag 3
+pattern DT_HASH :: ElfDynamicTag
 pattern DT_HASH            = ElfDynamicTag 4
+pattern DT_STRTAB :: ElfDynamicTag
 pattern DT_STRTAB          = ElfDynamicTag 5
+pattern DT_SYMTAB :: ElfDynamicTag
 pattern DT_SYMTAB          = ElfDynamicTag 6
+pattern DT_RELA :: ElfDynamicTag
 pattern DT_RELA            = ElfDynamicTag 7
+pattern DT_RELASZ :: ElfDynamicTag
 pattern DT_RELASZ          = ElfDynamicTag 8
+pattern DT_RELAENT :: ElfDynamicTag
 pattern DT_RELAENT         = ElfDynamicTag 9
+pattern DT_STRSZ :: ElfDynamicTag
 pattern DT_STRSZ           = ElfDynamicTag 10
+pattern DT_SYMENT :: ElfDynamicTag
 pattern DT_SYMENT          = ElfDynamicTag 11
+pattern DT_INIT :: ElfDynamicTag
 pattern DT_INIT            = ElfDynamicTag 12
+pattern DT_FINI :: ElfDynamicTag
 pattern DT_FINI            = ElfDynamicTag 13
+pattern DT_SONAME :: ElfDynamicTag
 pattern DT_SONAME          = ElfDynamicTag 14
+pattern DT_RPATH :: ElfDynamicTag
 pattern DT_RPATH           = ElfDynamicTag 15
+pattern DT_SYMBOLIC :: ElfDynamicTag
 pattern DT_SYMBOLIC        = ElfDynamicTag 16
+pattern DT_REL :: ElfDynamicTag
 pattern DT_REL             = ElfDynamicTag 17
+pattern DT_RELSZ :: ElfDynamicTag
 pattern DT_RELSZ           = ElfDynamicTag 18
+pattern DT_RELENT :: ElfDynamicTag
 pattern DT_RELENT          = ElfDynamicTag 19
+pattern DT_PLTREL :: ElfDynamicTag
 pattern DT_PLTREL          = ElfDynamicTag 20
+pattern DT_DEBUG :: ElfDynamicTag
 pattern DT_DEBUG           = ElfDynamicTag 21
+pattern DT_TEXTREL :: ElfDynamicTag
 pattern DT_TEXTREL         = ElfDynamicTag 22
+pattern DT_JMPREL :: ElfDynamicTag
 pattern DT_JMPREL          = ElfDynamicTag 23
+pattern DT_BIND_NOW :: ElfDynamicTag
 pattern DT_BIND_NOW        = ElfDynamicTag 24
+pattern DT_INIT_ARRAY :: ElfDynamicTag
 pattern DT_INIT_ARRAY      = ElfDynamicTag 25
+pattern DT_FINI_ARRAY :: ElfDynamicTag
 pattern DT_FINI_ARRAY      = ElfDynamicTag 26
+pattern DT_INIT_ARRAYSZ :: ElfDynamicTag
 pattern DT_INIT_ARRAYSZ    = ElfDynamicTag 27
+pattern DT_FINI_ARRAYSZ :: ElfDynamicTag
 pattern DT_FINI_ARRAYSZ    = ElfDynamicTag 28
 -- | Library search path
+pattern DT_RUNPATH :: ElfDynamicTag
 pattern DT_RUNPATH         = ElfDynamicTag 29
 -- | Flags for the object being loaded
+pattern DT_FLAGS :: ElfDynamicTag
 pattern DT_FLAGS           = ElfDynamicTag 30
 -- | Start of encoded range (also DT_PREINIT_ARRAY)
+pattern DT_PREINIT_ARRAY :: ElfDynamicTag
 pattern DT_PREINIT_ARRAY   = ElfDynamicTag 32
 -- | Size in bytes of DT_PREINIT_ARRAY
+pattern DT_PREINIT_ARRAYSZ :: ElfDynamicTag
 pattern DT_PREINIT_ARRAYSZ = ElfDynamicTag 33
 
 
@@ -88,63 +119,97 @@ pattern DT_ANDROID_RELASZ = ElfDynamicTag 0x60000012
 pattern DT_HIOS :: ElfDynamicTag
 pattern DT_HIOS = ElfDynamicTag 0x6ffff000
 
+pattern DT_VALRNGLO :: ElfDynamicTag
 pattern DT_VALRNGLO        = ElfDynamicTag 0x6ffffd00
 -- | Prelinking timestamp
+pattern DT_GNU_PRELINKED :: ElfDynamicTag
 pattern DT_GNU_PRELINKED   = ElfDynamicTag 0x6ffffdf5
 -- | Size of conflict section.
+pattern DT_GNU_CONFLICTSZ :: ElfDynamicTag
 pattern DT_GNU_CONFLICTSZ  = ElfDynamicTag 0x6ffffdf6
 -- | Size of lbirary list
+pattern DT_GNU_LIBLISTSZ :: ElfDynamicTag
 pattern DT_GNU_LIBLISTSZ   = ElfDynamicTag 0x6ffffdf7
+pattern DT_CHECKSUM :: ElfDynamicTag
 pattern DT_CHECKSUM        = ElfDynamicTag 0x6ffffdf8
+pattern DT_PLTPADSZ :: ElfDynamicTag
 pattern DT_PLTPADSZ        = ElfDynamicTag 0x6ffffdf9
+pattern DT_MOVEENT :: ElfDynamicTag
 pattern DT_MOVEENT         = ElfDynamicTag 0x6ffffdfa
+pattern DT_MOVESZ :: ElfDynamicTag
 pattern DT_MOVESZ          = ElfDynamicTag 0x6ffffdfb
 -- | Feature selection (DTF_*).
+pattern DT_FEATURE_1 :: ElfDynamicTag
 pattern DT_FEATURE_1       = ElfDynamicTag 0x6ffffdfc
 -- | Flags for DT_* entries, effecting the following DT_* entry.
+pattern DT_POSFLAG_1 :: ElfDynamicTag
 pattern DT_POSFLAG_1       = ElfDynamicTag 0x6ffffdfd
 -- | Size of syminfo table (in bytes)
+pattern DT_SYMINSZ :: ElfDynamicTag
 pattern DT_SYMINSZ         = ElfDynamicTag 0x6ffffdfe
 -- | Entry size of syminfo
+pattern DT_SYMINENT :: ElfDynamicTag
 pattern DT_SYMINENT        = ElfDynamicTag 0x6ffffdff
+pattern DT_VALRNGHI :: ElfDynamicTag
 pattern DT_VALRNGHI        = ElfDynamicTag 0x6ffffdff
 
 -- DT_* entries between DT_ADDRRNGHI & DT_ADDRRNGLO use the
 -- d_ptr field
+pattern DT_ADDRRNGLO :: ElfDynamicTag
 pattern DT_ADDRRNGLO       = ElfDynamicTag 0x6ffffe00
+pattern DT_ADDRRNGHI :: ElfDynamicTag
 pattern DT_ADDRRNGHI       = ElfDynamicTag 0x6ffffeff
 
 -- | GNU-style hash table.
+pattern DT_GNU_HASH :: ElfDynamicTag
 pattern DT_GNU_HASH        = ElfDynamicTag 0x6ffffef5
+pattern DT_TLSDESC_PLT :: ElfDynamicTag
 pattern DT_TLSDESC_PLT     = ElfDynamicTag 0x6ffffef6
+pattern DT_TLSDESC_GOT :: ElfDynamicTag
 pattern DT_TLSDESC_GOT     = ElfDynamicTag 0x6ffffef7
 -- | Start of conflict section
+pattern DT_GNU_CONFLICT :: ElfDynamicTag
 pattern DT_GNU_CONFLICT    = ElfDynamicTag 0x6ffffef8
 -- | Library list
+pattern DT_GNU_LIBLIST :: ElfDynamicTag
 pattern DT_GNU_LIBLIST     = ElfDynamicTag 0x6ffffef9
 -- | Configuration information
+pattern DT_CONFIG :: ElfDynamicTag
 pattern DT_CONFIG          = ElfDynamicTag 0x6ffffefa
 -- | Dependency auditing
+pattern DT_DEPAUDIT :: ElfDynamicTag
 pattern DT_DEPAUDIT        = ElfDynamicTag 0x6ffffefb
 -- | Object auditing
+pattern DT_AUDIT :: ElfDynamicTag
 pattern DT_AUDIT           = ElfDynamicTag 0x6ffffefc
 -- | PLT padding
+pattern DT_PLTPAD :: ElfDynamicTag
 pattern DT_PLTPAD          = ElfDynamicTag 0x6ffffefd
 -- | Move table
+pattern DT_MOVETAB :: ElfDynamicTag
 pattern DT_MOVETAB         = ElfDynamicTag 0x6ffffefe
 -- | Syminfo table
+pattern DT_SYMINFO :: ElfDynamicTag
 pattern DT_SYMINFO         = ElfDynamicTag 0x6ffffeff
 
+pattern DT_VERSYM :: ElfDynamicTag
 pattern DT_VERSYM          = ElfDynamicTag 0x6ffffff0
+pattern DT_RELACOUNT :: ElfDynamicTag
 pattern DT_RELACOUNT       = ElfDynamicTag 0x6ffffff9
+pattern DT_RELCOUNT :: ElfDynamicTag
 pattern DT_RELCOUNT        = ElfDynamicTag 0x6ffffffa
 -- | State flags
+pattern DT_FLAGS_1 :: ElfDynamicTag
 pattern DT_FLAGS_1         = ElfDynamicTag 0x6ffffffb
 -- | Address of version definition.
+pattern DT_VERDEF :: ElfDynamicTag
 pattern DT_VERDEF          = ElfDynamicTag 0x6ffffffc
+pattern DT_VERDEFNUM :: ElfDynamicTag
 pattern DT_VERDEFNUM       = ElfDynamicTag 0x6ffffffd
+pattern DT_VERNEED :: ElfDynamicTag
 pattern DT_VERNEED         = ElfDynamicTag 0x6ffffffe
 -- | Number of needed versions.
+pattern DT_VERNEEDNUM :: ElfDynamicTag
 pattern DT_VERNEEDNUM = ElfDynamicTag 0x6fffffff
 
 pattern OLD_DT_HIOS :: ElfDynamicTag
