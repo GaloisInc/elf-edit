@@ -114,9 +114,10 @@ testDynSymTable = do
                  Elf.virtAddrMap contents ph
     let dynContents = Elf.slice (Elf.phdrFileRange dynPhdr) contents
     dynSection <- either (T.assertFailure . show) pure $
-        Elf.dynamicEntries d cl virtMap dynContents
+        Elf.dynamicEntries d cl dynContents
 
-    syms <- either (T.assertFailure . show) pure $ traverse (Elf.dynSymEntry dynSection) [0..2]
+    versionReqs <- either (T.assertFailure . show) pure $ Elf.dynVersionReqMap dynSection virtMap
+    syms <- either (T.assertFailure . show) pure $ traverse (Elf.dynSymEntry dynSection virtMap versionReqs) [0..2]
     let isVer Elf.VersionSpecific{} = True
         isVer Elf.VersionLocal  = False
         isVer Elf.VersionGlobal = False
