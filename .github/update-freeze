@@ -1,0 +1,14 @@
+#!/bin/sh
+# Updates cabal.project freeze files
+set -e
+
+cabal update
+ghcup set ghc 8.8.4
+cabal freeze
+mv cabal.project.freeze cabal.project.freeze.ghc-8.8.4
+ghcup set ghc 8.10.4
+cabal freeze
+mv cabal.project.freeze cabal.project.freeze.ghc-8.10.4
+ghcup set ghc 9.0.1
+cabal freeze
+mv cabal.project.freeze cabal.project.freeze.ghc-9.0.1

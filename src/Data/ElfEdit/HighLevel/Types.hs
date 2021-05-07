@@ -183,8 +183,6 @@ data ElfDataRegion w
    | ElfDataRaw B.ByteString
      -- ^ Identifies an uninterpreted array of bytes.
 
-deriving instance ElfWidthConstraints w => Show (ElfDataRegion w)
-
 $(pure [])
 
 ppSegment :: ElfWidthConstraints w => ElfSegment w -> Doc ann
@@ -203,6 +201,8 @@ ppSegment s =
 
 instance ElfWidthConstraints w => Show (ElfSegment w) where
   show s = show (ppSegment s)
+
+deriving instance ElfWidthConstraints w => Show (ElfDataRegion w)
 
 ppRegion :: ElfWidthConstraints w => ElfDataRegion w -> Doc ann
 ppRegion r = case r of
