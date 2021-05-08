@@ -180,6 +180,7 @@ import qualified Data.Binary.Get as Get
 import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as Bld
+import           Data.Kind (Type)
 import qualified Data.Map.Strict as Map
 import           Data.Int
 import qualified Data.Type.Equality as TE
@@ -230,12 +231,12 @@ fromElfClass ELFCLASS32 = 1
 fromElfClass ELFCLASS64 = 2
 
 -- | An unsigned value of a given width
-type family ElfWordType (w::Nat) :: * where
+type family ElfWordType (w::Nat) :: Type where
   ElfWordType 32 = Word32
   ElfWordType 64 = Word64
 
 -- | A signed value of a given width
-type family ElfIntType (w::Nat) :: * where
+type family ElfIntType (w::Nat) :: Type where
   ElfIntType 32 = Int32
   ElfIntType 64 = Int64
 
