@@ -27,6 +27,7 @@ module Data.ElfEdit.Prim.HeaderInfo
   , shdrCount
   , shdrTableRange
   , shdrByIndex
+  , shdrData
     -- ** Symbol table
   , Symtab(..)
   , symtabSize
@@ -213,6 +214,11 @@ headerNamedShdrs ehi = V.generateM cnt go
            in case lookupString (shdrName shdr) shstrtabBuf of
                 Left e -> Left (fromIntegral idx, e)
                 Right nm -> Right (shdr { shdrName = nm })
+
+-- | Return contents associated with header in elf file.
+shdrData :: ElfHeaderInfo w ->  Shdr nm (ElfWordType w) -> B.ByteString
+shdrData e shdr = elfClassInstances (headerClass (header e)) $
+  slice (shdrFileRange shdr) (headerFileContents e)
 
 --------------------------------------------------------------------------------
 -- decodeElfHeaderInfo
