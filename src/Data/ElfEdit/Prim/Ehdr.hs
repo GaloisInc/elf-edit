@@ -1095,8 +1095,9 @@ decodeEhdr64 d ei_osabi ei_abiver b = do
                  , ehdrShstrndx = e_shstrndx
                  }
 
--- | Creates a `ElfHeaderInfo` from a bytestring with data in the Elf format.
--- their fields promoted to 64-bit so that the 32- and 64-bit ELF records can be the same.
+-- | Creates a `Ehdr` from a bytestring with data in the Elf format.
+--
+-- If parsing fails this returns offset within Elf of error and a message.
 decodeEhdr :: B.ByteString -> Either (Get.ByteOffset, String) (SomeElf Ehdr)
 decodeEhdr b = do
   when (B.length b <= 16) $ do
