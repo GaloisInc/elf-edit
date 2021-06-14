@@ -685,6 +685,6 @@ elfLayout' e = initl & flip (foldl' (layoutRegion False)) (e^.elfFileData)
 elfLayout :: Elf w -> ElfLayout w
 elfLayout e = elfClassInstances  (elfClass e) $ elfLayout' e
 
--- | Write elf file out to bytestring.
+-- | Generate bytestring from elf file.
 renderElf :: Elf w -> L.ByteString
 renderElf = elfLayoutBytes . elfLayout

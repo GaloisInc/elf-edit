@@ -12,9 +12,9 @@ many parts of the file use the low level interface.  In particular if
 you want to analyze the dynamic section and relocations, you should
 get comfortable with the low-level interface for those parts.
 
-To read an existing ELF file, see the documentation for 'decodeElf'
-and the operations on the 'Elf' datatype.  To write an existing file,
-see the documentation for 'encodeElf'.
+To read an existing ELF file, see the documentation for 'parseElf'
+and the operations on the 'Elf' datatype.  To generate an Elf file from
+`Elf` datatype, see the documentation for 'renderElf'.
 
 The low level interface is described in 'Data.ElfEdit.Prim'.
 -}
