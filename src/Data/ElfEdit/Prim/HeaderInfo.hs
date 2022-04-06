@@ -32,6 +32,7 @@ module Data.ElfEdit.Prim.HeaderInfo
   , Symtab(..)
   , symtabSize
   , decodeHeaderSymtab
+  , decodeHeaderDynsym
   ) where
 
 import Control.Monad
@@ -251,37 +252,67 @@ data Symtab w =
 
 deriving instance Show (ElfWordType w) => Show (Symtab w)
 
--- | Decodes the static symbol table using elf header info
+-- | Decodes the static symbol table using elf header info.
 --
 -- If no symbol table is present then @Nothing@ is returned.
 decodeHeaderSymtab :: ElfHeaderInfo w -> Maybe (Either SymtabError (Symtab w))
 decodeHeaderSymtab elf = elfClassInstances (headerClass (header elf)) $ do
+  let shdrs = headerShdrs elf
+  let symtabs = V.filter (\s -> shdrType s == SHT_SYMTAB) shdrs
+  when (V.length symtabs == 0) $ Nothing
+  Just $ decodeSymbolTable elf symtabs
+
+-- | Decodes the dynamic symbol table using ELF header info.
+--
+-- If no dynamic symbol table is present then @Nothing@ is returned.
+--
+-- The functionality of 'decodeHeaderDynsym' largely overlaps with what the
+-- @dynamicEntries@ and @dynSymEntry@ functions provide, but with some minor
+-- differences:
+--
+-- * The API for 'decodeHeaderDynsym' is much more direct, as it only requires
+--   an 'ElfHeaderInfo'.
+--
+-- * Unlike @dynSymEntry@, 'decodeHeaderDynsym' does not compute symbol version
+--   information.
+decodeHeaderDynsym :: ElfHeaderInfo w -> Maybe (Either SymtabError (Symtab w))
+decodeHeaderDynsym elf = elfClassInstances (headerClass (header elf)) $ do
+  let shdrs = headerShdrs elf
+  let dynSymtabs = V.filter (\s -> shdrType s == SHT_DYNSYM) shdrs
+  when (V.length dynSymtabs == 0) $ Nothing
+  Just $ decodeSymbolTable elf dynSymtabs
+
+-- | Decodes the symbol table from the section headers using the given ELF
+-- header info. This assumes the invariant that there is at least one section
+-- header of the appropriate type.
+decodeSymbolTable :: Integral (ElfWordType w)
+                  => ElfHeaderInfo w
+                  -> V.Vector (Shdr Word32 (ElfWordType w))
+                  -> Either SymtabError (Symtab w)
+decodeSymbolTable elf symtabs = do
   let hdr = header elf
   let contents = headerFileContents elf
   let cl = headerClass hdr
   let dta = headerData hdr
   let shdrs = headerShdrs elf
-  let symtabs = V.filter (\s -> shdrType s == SHT_SYMTAB) shdrs
-  when (V.length symtabs == 0) $ Nothing
-  Just $ do
-    when (V.length symtabs > 1) $ Left MultipleSymtabs
-    let symtabShdr = symtabs V.! 0
-    unless (isValidFileRange (shdrFileRange symtabShdr) contents) $ do
-      Left InvalidSymtabFileRange
-    let symtabBuffer = slice (shdrFileRange symtabShdr) contents
-    when (shdrLink symtabShdr >= fromIntegral (shdrCount elf)) $ do
-      Left InvalidSymtabLink
-    let strtab = shdrs V.! fromIntegral (shdrLink symtabShdr)
-    unless (isValidFileRange (shdrFileRange strtab) contents) $ do
-      Left InvalidSymtabFileRange
-    let strtabBuffer = slice (shdrFileRange strtab) contents
-    -- Decode the symbol table
-    v <- decodeSymtab cl dta strtabBuffer symtabBuffer
-    unless (toInteger (shdrInfo symtabShdr) <= toInteger (V.length v)) $ do
-      Left InvalidSymtabLocalCount
-    pure $! Symtab { symtabLocalCount = fromIntegral (shdrInfo symtabShdr)
-                   , symtabEntries = v
-                   }
+  when (V.length symtabs > 1) $ Left MultipleSymtabs
+  let symtabShdr = symtabs V.! 0
+  unless (isValidFileRange (shdrFileRange symtabShdr) contents) $ do
+    Left InvalidSymtabFileRange
+  let symtabBuffer = slice (shdrFileRange symtabShdr) contents
+  when (shdrLink symtabShdr >= fromIntegral (shdrCount elf)) $ do
+    Left InvalidSymtabLink
+  let strtab = shdrs V.! fromIntegral (shdrLink symtabShdr)
+  unless (isValidFileRange (shdrFileRange strtab) contents) $ do
+    Left InvalidSymtabFileRange
+  let strtabBuffer = slice (shdrFileRange strtab) contents
+  -- Decode the symbol table
+  v <- decodeSymtab cl dta strtabBuffer symtabBuffer
+  unless (toInteger (shdrInfo symtabShdr) <= toInteger (V.length v)) $ do
+    Left InvalidSymtabLocalCount
+  pure $! Symtab { symtabLocalCount = fromIntegral (shdrInfo symtabShdr)
+                 , symtabEntries = v
+                 }
 
 -- | Get size of symbol table
 symtabSize :: ElfClass w -> Symtab w -> ElfWordType w

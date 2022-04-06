@@ -7,6 +7,9 @@
     (i.e., in a `.gnu.version_d` section) rather than a version requirement
     (i.e., in a `.gnu.version_r` section). The new `dynVersionDefMap` function
     can be used to construct the `VersionDefMap`.
+  * Add a `decodeHeaderDynsym` function that computes the dynamic symbol table
+    directly from an `ElfHeaderInfo`, much like `decodeHeaderSymtab` computes
+    the static symbol table.
 
 ## 0.32 -- *2018 Sep 17*
 

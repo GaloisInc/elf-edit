@@ -301,23 +301,31 @@ data SymtabError
    | MultipleSymtabs
      -- ^ Multiple symbol tables in binary.
      --
-     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab`
+     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab` and
+     -- `Data.ElfEdit.Prim.decodeHeaderDynsym`
    | InvalidSymtabFileRange
      -- ^ Invalid symbol table link
      --
-     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab`
+     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab` and
+     -- `Data.ElfEdit.Prim.decodeHeaderDynsym`
+
    | InvalidSymtabLink
      -- ^ Invalid string table file range
      --
-     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab`
+     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab` and
+     -- `Data.ElfEdit.Prim.decodeHeaderDynsym`
+
    | InvalidSymtabLocalCount
      -- ^ Invalid symbol table local count.
      --
-     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab`
+     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab` and
+     -- `Data.ElfEdit.Prim.decodeHeaderDynsym`
+
    | InvalidStrtabFileRange
      -- ^ Invalid string table file range
      --
-     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab`
+     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab` and
+     -- `Data.ElfEdit.Prim.decodeHeaderDynsym`
 
 instance Show SymtabError where
   show (InvalidName idx msg) = "Error parsing symbol " ++ show idx ++ " name: " ++ show msg

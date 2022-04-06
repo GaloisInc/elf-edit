@@ -100,6 +100,15 @@ checkStringTableEntry bytes (str, off) = str == bstr
   where
     bstr = C8.take (B.length str) $ C8.drop (fromIntegral off) bytes
 
+-- | Test that the dynamic symbol table in an ELF binary match the expected
+-- results. The @elf-edit@ library provides two different ways to compute the
+-- dynamic function symbols, both of which are tested here:
+--
+-- * The 'Elf.decodeHeaderDynsym' function, which omits symbol version
+--   information.
+--
+-- * The 'Elf.dynamicEntries' and 'Elf.dynSymEntry' functions, which return each
+--   dynamic function symbol alongside their version information.
 testDynSymTable :: FilePath
                 -- ^ The path of the ELF file to load.
                 -> [(B.ByteString, Bool)]
@@ -121,6 +130,17 @@ testDynSymTable fp expectedSymInfo = do
     Elf.ELFCLASS64 <- pure cl
     let mach = Elf.headerMachine hdr
     Elf.EM_X86_64 <- pure mach
+
+    -- Test decodeHeaderDynsym
+    dynSymtab <- maybe (T.assertFailure "No dynamic symbol table found") pure $
+                 Elf.decodeHeaderDynsym e
+    syms1 <- either (T.assertFailure . show) (pure . V.toList . Elf.symtabEntries)
+             dynSymtab
+    T.assertEqual "Testing decodeHeaderDynsym"
+                  (Elf.steName <$> syms1)
+                  (fst <$> expectedSymInfo)
+
+    -- Test dynamicEntries/dynSymEntry
     let contents = Elf.headerFileContents e
     virtMap <- maybe (T.assertFailure "Overlapping loaded segments") pure $
                  Elf.virtAddrMap contents ph
@@ -130,7 +150,7 @@ testDynSymTable fp expectedSymInfo = do
 
     versionDefs <- either (T.assertFailure . show) pure $ Elf.dynVersionDefMap dynSection virtMap
     versionReqs <- either (T.assertFailure . show) pure $ Elf.dynVersionReqMap dynSection virtMap
-    syms <- either (T.assertFailure . show) pure $
+    syms2 <- either (T.assertFailure . show) pure $
               traverse (Elf.dynSymEntry dynSection virtMap versionDefs versionReqs)
                        [0 .. fromIntegral (length expectedSymInfo - 1)]
     let isVer Elf.VersionSpecific{} = True
@@ -138,7 +158,7 @@ testDynSymTable fp expectedSymInfo = do
         isVer Elf.VersionGlobal = False
     let symInfo :: (Elf.SymtabEntry B.ByteString u, Elf.VersionTableValue) -> (C8.ByteString, Bool)
         symInfo (s,v) = (Elf.steName s, isVer v)
-    T.assertEqual "Testing relocations" (symInfo <$> syms) expectedSymInfo
+    T.assertEqual "Testing dynSymEntry" (symInfo <$> syms2) expectedSymInfo
 
 testDynNeeded :: FilePath
                 -- ^ The path of the ELF file to load.
