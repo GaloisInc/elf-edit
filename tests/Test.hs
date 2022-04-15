@@ -122,9 +122,10 @@ testDynSymTable fp expectedSymInfo = do
     dynSection <- either (T.assertFailure . show) pure $
         Elf.dynamicEntries d cl dynContents
 
+    versionDefs <- either (T.assertFailure . show) pure $ Elf.dynVersionDefMap dynSection virtMap
     versionReqs <- either (T.assertFailure . show) pure $ Elf.dynVersionReqMap dynSection virtMap
     syms <- either (T.assertFailure . show) pure $
-              traverse (Elf.dynSymEntry dynSection virtMap versionReqs)
+              traverse (Elf.dynSymEntry dynSection virtMap versionDefs versionReqs)
                        [0 .. fromIntegral (length expectedSymInfo - 1)]
     let isVer Elf.VersionSpecific{} = True
         isVer Elf.VersionLocal  = False
@@ -141,11 +142,27 @@ tests = T.testGroup "ELF Tests"
 -- Remove this test case since the Elf file has a segment outside the file range.
     , T.testCase "Zero-sized BSS" (testIdentityTransform "./tests/zero-physical-bss.elf")
     , T.testProperty "stringTable consistency" stringTableConsistencyProp
-    , T.testCase "dynSymTable" (testDynSymTable "./tests/simple.elf"
-                                  [ ("", False)
-                                  , ("__libc_start_main", True)
-                                  , ("__gmon_start__", False)
-                                  ])
+
+    , T.testGroup "dynSymTable"
+      [ T.testCase "simple binary" $
+          testDynSymTable "./tests/simple.elf"
+                          [ ("", False)
+                          , ("__libc_start_main", True)
+                          , ("__gmon_start__", False)
+                          ]
+      , T.testCase "version definitions" $
+          testDynSymTable "./tests/libsymbol_versions.2.so"
+                          [ ("", False)
+                          , ("__cxa_finalize", False)
+                          , ("_ITM_registerTMCloneTable", False)
+                          , ("_ITM_deregisterTMCloneTable", False)
+                          , ("__gmon_start__", False)
+                          , ("foo", True) -- foo@MYSTUFF_1.1
+                          , ("foo", True) -- foo@@MYSTUFF_1.2
+                          , ("MYSTUFF_1.1", True)
+                          , ("MYSTUFF_1.2", True)
+                          ]
+      ]
     ]
 
 main :: IO ()

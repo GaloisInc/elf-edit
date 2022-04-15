@@ -1,0 +1,9 @@
+MYSTUFF_1.2 {
+          global:
+foo;
+};
+MYSTUFF_1.1 {
+          global:
+foo;
+          local: *;
+};

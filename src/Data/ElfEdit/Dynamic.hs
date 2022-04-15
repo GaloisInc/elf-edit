@@ -35,6 +35,8 @@ module Data.ElfEdit.Dynamic
     -- ** Version information
   , VersionReqMap
   , dynVersionReqMap
+  , VersionDefMap
+  , dynVersionDefMap
   , VersionedSymbol
   , dynSymEntry
   , VersionId(..)
@@ -59,6 +61,7 @@ import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BSC
 import           Data.Foldable
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import           Data.Word
 import           Numeric (showHex)
@@ -145,6 +148,9 @@ data DynamicError
    | EntryAddressNotFound     !ElfDynamicTag
    | EntrySizeTooSmall        !ElfDynamicTag
      -- ^ We could not parse the given symbol table entry.
+   | BaseVersionDefNotFound
+     -- ^ The base version definition could not be found, despite there being
+     -- other version definitions present.
 
 instance Show DynamicError where
   show UnexpectedEndOfDynamicEntries =
@@ -174,6 +180,7 @@ instance Show DynamicError where
   show InvalidDynamicSegmentFileRange = "Dynamic segment file range is out of range of file."
   show MultipleDynamicSegments = "File contained multiple dynamic segments."
   show (BadValuePltRel v) = "DT_PLTREL entry contained an unexpected value " ++ show v ++ "."
+  show BaseVersionDefNotFound = "Could not find the base version definition."
 
 ------------------------------------------------------------------------
 -- DynamicMap
@@ -485,6 +492,41 @@ insVersionReq m0 r = foldlM ins m0 (vn_aux r)
 versionReqMap :: [VersionReq] -> Either DynamicError VersionReqMap
 versionReqMap = foldlM insVersionReq Map.empty
 
+-- | Maps the version definition index to the appropriate version.
+type VersionDefMap = Map.Map Word16 VersionId
+
+insVersionDefs :: Map.Map Word16 VersionDef
+               -> [VersionDef]
+               -> Either DynamicError (Map.Map Word16 VersionDef)
+insVersionDefs = foldlM ins
+  where ins m def =
+          let ndx = vd_ndx def in
+          case Map.lookup ndx m of
+            Nothing -> Right $! Map.insert ndx def m
+            Just{}  -> Left $! DupVersionReqAuxIndex ndx
+
+versionDefMap :: [VersionDef] -> Either DynamicError VersionDefMap
+-- If there are no version definitions, return early. Without this special
+-- case, this function would fail when it tries to find the base definition.
+versionDefMap []   = Right Map.empty
+versionDefMap defs = do
+  m <- insVersionDefs Map.empty defs
+  -- Per https://docs.oracle.com/cd/E19120-01/open.solaris/819-0690/chapter6-80869/index.html,
+  -- there is always a base version definition when at least one version is present.
+  -- The base version provides the file name for all other version definitions.
+  base_def <-
+    case List.find (\def -> vd_flags def == ver_flg_base) defs of
+      Just def -> Right def
+      Nothing  -> Left BaseVersionDefNotFound
+  file <-
+    case Map.lookup (vd_ndx base_def) m of
+      Just def -> Right $ vd_string def
+      Nothing  -> error "versionDefMap internal error: base version definition lookup failed"
+  Right $ fmap (\def -> VersionId { verFile = file
+                                  , verName = vd_string def
+                                  })
+               m
+
 ------------------------------------------------------------------------
 -- DynamicSection
 
@@ -567,6 +609,11 @@ dynVersionReqMap ds virtMap = do
   strtab <- dynStrtabContents ds virtMap
   runParser ds $ either throwError pure . versionReqMap =<< gnuVersionReqs virtMap strtab (dynMap ds)
 
+-- | Version definition map
+dynVersionDefMap :: DynamicSection w -> VirtAddrMap w -> Either DynamicError VersionDefMap
+dynVersionDefMap ds virtMap =
+  versionDefMap =<< dynVersionDefs ds virtMap
+
 
 deriving instance Show (ElfWordType w)
   => Show (DynamicSection w)
@@ -608,10 +655,11 @@ dynUnparsed = Map.filterWithKey isUnparsed . dynMap
 dynSymEntry :: forall w
             .  DynamicSection w -- ^ Dynamic section information
             -> VirtAddrMap w -- ^ Virtual address map
+            -> VersionDefMap -- ^ GNU verison definitions
             -> VersionReqMap -- ^ GNU verison requirements
             -> Word32 -- ^ Index of symbol table entry.
             -> Either DynamicError (VersionedSymbol (ElfWordType w))
-dynSymEntry ds virtMap verMap i = do
+dynSymEntry ds virtMap verDefMap verReqMap i = do
   strtab <- dynStrtabContents ds virtMap
   symtabAddr <- dynSymtabAddr ds
   runParser ds $ elfClassInstances (dynClass ds) $ do
@@ -634,18 +682,32 @@ dynSymEntry ds virtMap verMap i = do
         when (verOffset + 2 > B.length verBuffer) $ throwError VerSymTooSmall
         let verIdx =
               let g :: Int -> Word16
-                  g j = fromIntegral (B.index verBuffer (verOffset + j))
-               in case dynData ds of
+                  g j = fromIntegral (B.index verBuffer (verOffset + j)) in
+              let rawVerIdx = case dynData ds of
                     ELFDATA2LSB -> (g 1 `shiftL` 8) .|. g 0
                     ELFDATA2MSB -> (g 0 `shiftL` 8) .|. g 1
+               in rawVerIdx .&. vERSYM_VERSION
         case verIdx of
           0 -> pure (sym, VersionLocal)
           1 -> pure (sym, VersionGlobal)
           _ ->
-            case Map.lookup verIdx verMap of
-              Just verId -> pure (sym, VersionSpecific verId)
-              Nothing -> do
+            case (Map.lookup verIdx verDefMap, Map.lookup verIdx verReqMap) of
+              -- readelf consults the version definitions before looking at
+              -- the version requirements, a behavior which we mimic below.
+              (Just verId, _) -> pure (sym, VersionSpecific verId)
+              (_, Just verId) -> pure (sym, VersionSpecific verId)
+              (Nothing, Nothing) -> do
                 throwError $ UnresolvedVersionReqAuxIndex (steName sym) verIdx
+
+-- | This is the mask for the rest of the Versym information. Due to a GNU
+-- extension, some symbols can be marked as hidden by bitwise-ORing them with
+-- @VERSYM_HIDDEN@, so 'vERSYM_VERSION' is needed to obtain the \"actual\"
+-- version index.
+--
+-- The value was taken from
+-- @<https://github.com/bminor/binutils-gdb/blob/64bc82adf32f74d2d11aff6c8bf8690775491e91/include/elf/common.h#L1287 here>@.
+vERSYM_VERSION :: Word16
+vERSYM_VERSION = 0x7fff
 
 ------------------------------------------------------------------------
 -- Relocations
