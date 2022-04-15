@@ -1,5 +1,13 @@
 # Changelog for the `elf-edit` package
 
+## next -- *TBA*
+
+  * The type of `dynSymEntry` has gained an additional `VersionDefMap` argument
+    in case the symbol's version information is located in a version definition
+    (i.e., in a `.gnu.version_d` section) rather than a version requirement
+    (i.e., in a `.gnu.version_r` section). The new `dynVersionDefMap` function
+    can be used to construct the `VersionDefMap`.
+
 ## 0.32 -- *2018 Sep 17*
 
   * Added support for `DT_REL` PLT relocations.  This includes 3 new
