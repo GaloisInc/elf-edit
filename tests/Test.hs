@@ -94,9 +94,15 @@ checkStringTableEntry bytes (str, off) = str == bstr
   where
     bstr = C8.take (B.length str) $ C8.drop (fromIntegral off) bytes
 
-testDynSymTable :: T.Assertion
-testDynSymTable = do
-  bs <- B.readFile "./tests/simple.elf"
+testDynSymTable :: FilePath
+                -- ^ The path of the ELF file to load.
+                -> [(B.ByteString, Bool)]
+                -- ^ The name of each symbol that is expected to be in the
+                -- dynamic symbol table, paired with 'True' if the symbol is
+                -- versioned and 'False' otherwise.
+                -> T.Assertion
+testDynSymTable fp expectedSymInfo = do
+  bs <- B.readFile fp
   withElfHeader bs $ \e -> do
     let ph = Elf.headerPhdrs e
     dynPhdr <-
@@ -117,14 +123,14 @@ testDynSymTable = do
         Elf.dynamicEntries d cl dynContents
 
     versionReqs <- either (T.assertFailure . show) pure $ Elf.dynVersionReqMap dynSection virtMap
-    syms <- either (T.assertFailure . show) pure $ traverse (Elf.dynSymEntry dynSection virtMap versionReqs) [0..2]
+    syms <- either (T.assertFailure . show) pure $
+              traverse (Elf.dynSymEntry dynSection virtMap versionReqs)
+                       [0 .. fromIntegral (length expectedSymInfo - 1)]
     let isVer Elf.VersionSpecific{} = True
         isVer Elf.VersionLocal  = False
         isVer Elf.VersionGlobal = False
     let symInfo :: (Elf.SymtabEntry B.ByteString u, Elf.VersionTableValue) -> (C8.ByteString, Bool)
         symInfo (s,v) = (Elf.steName s, isVer v)
-    -- Statically define expected symbol information.
-    let expectedSymInfo = [("",False), ("__libc_start_main",True), ("__gmon_start__", False)]
     T.assertEqual "Testing relocations" (symInfo <$> syms) expectedSymInfo
 
 tests :: T.TestTree
@@ -135,7 +141,11 @@ tests = T.testGroup "ELF Tests"
 -- Remove this test case since the Elf file has a segment outside the file range.
     , T.testCase "Zero-sized BSS" (testIdentityTransform "./tests/zero-physical-bss.elf")
     , T.testProperty "stringTable consistency" stringTableConsistencyProp
-    , T.testCase "dynSymTable" testDynSymTable
+    , T.testCase "dynSymTable" (testDynSymTable "./tests/simple.elf"
+                                  [ ("", False)
+                                  , ("__libc_start_main", True)
+                                  , ("__gmon_start__", False)
+                                  ])
     ]
 
 main :: IO ()
