@@ -1,4 +1,4 @@
-all: simple.elf simple.static.elf libsymbol_versions.2.so
+all: simple.elf simple.static.elf libsymbol_versions.2.so fmax.elf
 
 simple.elf: Makefile simple.c
 	gcc simple.c -o simple.elf
@@ -8,3 +8,6 @@ simple.static.elf: Makefile simple.c
 
 libsymbol_versions.2.so: symbol_versions.c
 	gcc $< -Wl,--version-script=symbol_versions.map -fpic -o $@ -Wl,-soname,libsymbol_versions.so -shared
+
+fmax.elf: fmax.c
+	gcc $< -o $@ -lm
