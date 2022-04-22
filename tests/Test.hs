@@ -134,6 +134,35 @@ testDynSymTable fp expectedSymInfo = do
         symInfo (s,v) = (Elf.steName s, isVer v)
     T.assertEqual "Testing relocations" (symInfo <$> syms) expectedSymInfo
 
+testDynNeeded :: FilePath
+                -- ^ The path of the ELF file to load.
+                -> [B.ByteString]
+                -- ^ The name of each dynamic dependency that is expected to be
+                -- in the @DT_NEEDED@ entries.
+                -> T.Assertion
+testDynNeeded fp expectedDtNeeded = do
+  bs <- B.readFile fp
+  withElfHeader bs $ \e -> do
+    let ph = Elf.headerPhdrs e
+    dynPhdr <-
+      case filter (\p -> Elf.phdrSegmentType p == Elf.PT_DYNAMIC) ph of
+        [r] -> pure r
+        _ -> T.assertFailure "Could not find DYNAMIC section"
+    let hdr = Elf.header e
+    let d  = Elf.headerData hdr
+    let cl = Elf.headerClass hdr
+    Elf.elfClassInstances cl $ do
+      let contents = Elf.headerFileContents e
+      virtMap <- maybe (T.assertFailure "Overlapping loaded segments") pure $
+                   Elf.virtAddrMap contents ph
+      let dynContents = Elf.slice (Elf.phdrFileRange dynPhdr) contents
+      dynSection <- either (T.assertFailure . show) pure $
+          Elf.dynamicEntries d cl dynContents
+      actualDtNeeded <- case Elf.dynNeeded dynSection virtMap of
+        Left errMsg -> T.assertFailure errMsg
+        Right deps  -> pure deps
+      T.assertEqual "Testing DT_NEEDED entries" actualDtNeeded expectedDtNeeded
+
 tests :: T.TestTree
 tests = T.testGroup "ELF Tests"
     [ T.testCase "Empty ELF" testEmptyElf
@@ -142,6 +171,8 @@ tests = T.testGroup "ELF Tests"
 -- Remove this test case since the Elf file has a segment outside the file range.
     , T.testCase "Zero-sized BSS" (testIdentityTransform "./tests/zero-physical-bss.elf")
     , T.testProperty "stringTable consistency" stringTableConsistencyProp
+    , T.testCase "dynNeeded" $
+        testDynNeeded "./tests/fmax.elf" ["libm.so.6", "libc.so.6"]
 
     , T.testGroup "dynSymTable"
       [ T.testCase "simple binary" $

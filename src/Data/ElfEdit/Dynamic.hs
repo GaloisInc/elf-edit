@@ -195,9 +195,6 @@ data Dynamic w
 -- | Map tags to the values associated with that tag.
 type DynamicMap w = Map.Map ElfDynamicTag [ElfWordType w]
 
-insertDynamic :: Dynamic v ->  Map.Map ElfDynamicTag [v] -> Map.Map ElfDynamicTag [v]
-insertDynamic (Dynamic tag v) = Map.insertWith (++) tag [v]
-
 -- | Return entries in the dynamic map.
 dynamicEntry :: ElfDynamicTag -> Map.Map ElfDynamicTag [v] -> [v]
 dynamicEntry = Map.findWithDefault []
@@ -283,13 +280,14 @@ relaWordSize :: ElfClass w -> Int
 relaWordSize ELFCLASS32 = 4
 relaWordSize ELFCLASS64 = 8
 
-buildDynamicMap :: ElfClass w
+buildDynamicMap :: forall w
+                .  ElfClass w
                 -> ElfData
                 -> DynamicMap w
                 -> B.ByteString
                 -> Maybe (DynamicMap w)
 buildDynamicMap cl d m bs
-    | B.length bs == 0 = Just m
+    | B.length bs == 0 = finish m
     | B.length bs < 2*sz = Nothing
     | otherwise =
       let tag = elfClassInstances cl $ ElfDynamicTag (fromIntegral (relaWord cl d bs))
@@ -297,9 +295,22 @@ buildDynamicMap cl d m bs
           m' = insertDynamic (Dynamic tag v) m
           bs' = B.drop (2*sz) bs
        in case tag of
-            DT_NULL -> Just m'
+            DT_NULL -> finish m'
             _ -> seq m' $ seq bs' $ buildDynamicMap cl d m' bs'
   where sz = relaWordSize cl
+
+        -- Insert a tag-value pair into a DynamicMap. For efficiency purposes,
+        -- this prepends the inserted value to the front of the list. After all
+        -- the tag-value pairs have been inserted, we put the values into the
+        -- intended order in the `finish` function, which reverses the order in
+        -- which the values appear in the list.
+        insertDynamic :: Dynamic (ElfWordType w) -> DynamicMap w -> DynamicMap w
+        insertDynamic (Dynamic tag v) = Map.insertWith (++) tag [v]
+
+        -- Put the values in each list in the correct order (see the comments
+        -- on `insertDynamic`).
+        finish :: DynamicMap w -> Maybe (DynamicMap w)
+        finish = Just . fmap reverse
 
 parseDynamicMap :: ElfClass w
                 -> ElfData
