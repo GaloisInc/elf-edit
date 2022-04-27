@@ -12,3 +12,6 @@ mv cabal.project.freeze cabal.project.freeze.ghc-8.10.7
 ghcup set ghc 9.0.2
 cabal freeze
 mv cabal.project.freeze cabal.project.freeze.ghc-9.0.2
+ghcup set ghc 9.2.2
+cabal freeze
+mv cabal.project.freeze cabal.project.freeze.ghc-9.2.2
