@@ -360,7 +360,7 @@ incOutputSize n l = l & elfOutputSize %~ (`incOffset` n)
 -- Adding to elf layout
 
 -- | Add section information to layout.
--- This may call an erorr if not defined.
+-- This may call an error if not defined.
 addSectionToLayout :: ElfWidthConstraints w
                    => ElfLayout w
                    -> ElfSection (ElfWordType w)
@@ -385,7 +385,9 @@ addSectionToLayout l s inLoad
     let alignedOff
           | inLoad || B.null (elfSectionData s) = fileOff
           | otherwise = alignFileOffset (elfSectionAddrAlign s) fileOff
-        Just no = Map.lookup (elfSectionName s) (elfLayoutSectionNameOffsets l)
+        no = case Map.lookup (elfSectionName s) (elfLayoutSectionNameOffsets l) of
+               Just no' -> no'
+               Nothing  -> error $ "Section " ++ show (elfSectionName s) ++ " not defined."
         fileOff =  l^.elfOutputSize
         idx = elfSectionIndex s
      in l & elfOutputSize .~ incOffset alignedOff (elfSectionFileSize s)

@@ -75,13 +75,19 @@ testIdentityTransform fp = do
       T.assertEqual "Segment Count" (length (Elf.elfSegments e)) (length (Elf.elfSegments e'))
       withElf bs $ \ehi -> do
         withElf (L.toStrict (Elf.renderElf e)) $ \ehi' -> do
-          let [st1] = Elf.elfSymtab ehi
-              [st2] = Elf.elfSymtab ehi'
+          st1 <- assertOneSymtab ehi
+          st2 <- assertOneSymtab ehi'
           let cnt1 = V.length (Elf.symtabEntries st1)
           let cnt2 = V.length (Elf.symtabEntries st2)
           T.assertEqual "Symbol table sizes" cnt1 cnt2
       int1 <- Elf.elfInterpreter e'
       T.assertEqual "Interpreter" int0 int1
+
+assertOneSymtab :: Elf.Elf w -> IO (Elf.Symtab w)
+assertOneSymtab elf =
+  case Elf.elfSymtab elf of
+    [st] -> pure st
+    sts  -> T.assertFailure $ "Expected one symbol table, found " ++ show (length sts)
 
 stringTableConsistencyProp :: [AsciiString] -> Bool
 stringTableConsistencyProp strings =
