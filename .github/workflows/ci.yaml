@@ -8,6 +8,7 @@ jobs:
     strategy:
       matrix:
         ghc-ver: ["8.8.4", "8.10.4", "9.0.1"]
+        cabal: ["3.4.0.0"]
       # complete all jobs
       fail-fast: false
     name: GHC v${{ matrix.ghc-ver }}
@@ -20,11 +21,12 @@ jobs:
       run: |
         cp cabal.project.werror cabal.project.local
         cp cabal.project.freeze.ghc-${{ matrix.ghc-ver }} cabal.project.freeze
-    - name: Get GHC
-      run: |
-        ghcup install ghc ${{ matrix.ghc-ver }}
-        ghcup install cabal 3.4.0.0
-        ghcup set ghc ${{ matrix.ghc-ver }}
+    - uses: haskell/actions/setup@v1
+      id: setup-haskell
+      name: Setup Haskell
+      with:
+        ghc-version: ${{ matrix.ghc-ver }}
+        cabal-version: ${{ matrix.cabal }}
     - name: Cache
       uses: actions/cache@v1
       with:
