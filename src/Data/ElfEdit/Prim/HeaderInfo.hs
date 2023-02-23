@@ -141,7 +141,7 @@ phdrByIndex :: ElfHeaderInfo w -- ^ Information for parsing
             -> Word16 -- ^ Index
             -> Phdr w
 phdrByIndex e i
-    | i >= phdrCount e = error $ "Program header out of range."
+    | i >= phdrCount e = error "Program header out of range."
     | otherwise =
         case strictRunGetOrFail (getPhdr hdr i) b of
           Left _ -> error "phdrByIndex failed."
@@ -259,7 +259,7 @@ decodeHeaderSymtab :: ElfHeaderInfo w -> Maybe (Either SymtabError (Symtab w))
 decodeHeaderSymtab elf = elfClassInstances (headerClass (header elf)) $ do
   let shdrs = headerShdrs elf
   let symtabs = V.filter (\s -> shdrType s == SHT_SYMTAB) shdrs
-  when (V.length symtabs == 0) $ Nothing
+  when (V.length symtabs == 0) Nothing
   Just $ decodeSymbolTable elf symtabs
 
 -- | Decodes the dynamic symbol table using ELF header info.
@@ -279,7 +279,7 @@ decodeHeaderDynsym :: ElfHeaderInfo w -> Maybe (Either SymtabError (Symtab w))
 decodeHeaderDynsym elf = elfClassInstances (headerClass (header elf)) $ do
   let shdrs = headerShdrs elf
   let dynSymtabs = V.filter (\s -> shdrType s == SHT_DYNSYM) shdrs
-  when (V.length dynSymtabs == 0) $ Nothing
+  when (V.length dynSymtabs == 0) Nothing
   Just $ decodeSymbolTable elf dynSymtabs
 
 -- | Decodes the symbol table from the section headers using the given ELF
