@@ -13,9 +13,11 @@ module Data.ElfEdit.Relocations.Android
  , AndroidDecodeError(..)
  ) where
 
-import           Control.Monad.Except
-import           Control.Monad.Reader
+import           Control.Monad (when)
+import           Control.Monad.Except (MonadError(..), ExceptT(..), runExceptT)
+import           Control.Monad.Reader (ReaderT(..))
 import           Control.Monad.ST
+import           Control.Monad.Trans (MonadTrans(..))
 import           Data.Bits
 import qualified Data.ByteString as BS
 import           Data.STRef
