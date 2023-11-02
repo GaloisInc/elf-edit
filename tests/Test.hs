@@ -1,7 +1,10 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 module Main
   ( main
   ) where
@@ -10,8 +13,11 @@ import           Control.Applicative
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as L
+import qualified Data.List as List
 import qualified Data.Map as Map
 import           Data.Maybe
+import           Data.Ord ( comparing )
+import           Data.Proxy
 import           Data.String
 import qualified Data.Vector as V
 import           Data.Word ( Word32 )
@@ -189,6 +195,61 @@ testDynNeeded fp expectedDtNeeded = do
         Right deps  -> pure deps
       T.assertEqual "Testing DT_NEEDED entries" actualDtNeeded expectedDtNeeded
 
+-- | Test that the list of RELA relocations in a dynamically linked ELF binary
+-- match the expected results.
+testRelocEntries ::
+     forall tp proxy
+   . (Eq tp, Ord (Elf.RelocationWord tp), Elf.IsRelocationType tp)
+  => proxy tp
+  -> FilePath
+  -- ^ The path of the ELF file to load.
+  -> [(Elf.RelocationWord tp, tp)]
+  -- ^ The address and type of each relocation entry that is expected to be in
+  -- the list of RELA relocations.
+  -> T.Assertion
+testRelocEntries _ fp expectedEntries = do
+  bs <- B.readFile fp
+  withElfHeader bs $ \e -> do
+    let ph = Elf.headerPhdrs e
+    dynPhdr <-
+      case filter (\p -> Elf.phdrSegmentType p == Elf.PT_DYNAMIC) ph of
+        [r] -> pure r
+        _ -> T.assertFailure "Could not find DYNAMIC section"
+    let hdr = Elf.header e
+    let d   = Elf.headerData hdr
+    let cl  = Elf.headerClass hdr
+    Elf.elfClassInstances cl $ do
+      let contents = Elf.headerFileContents e
+      virtMap <- maybe (T.assertFailure "Overlapping loaded segments") pure $
+                   Elf.virtAddrMap contents ph
+      let dynContents = Elf.slice (Elf.phdrFileRange dynPhdr) contents
+      dynSection <- either (T.assertFailure . show) pure $
+          Elf.dynamicEntries d cl dynContents
+      relaEntries <-
+        case Elf.dynRelaBuffer dynSection virtMap of
+          Left errMsg   -> T.assertFailure $ show errMsg
+          Right Nothing -> pure []
+          Right (Just relaBuffer) ->
+            case Elf.decodeRelaEntries @tp d relaBuffer of
+              Left errMsg       -> T.assertFailure errMsg
+              Right relaEntries -> pure relaEntries
+      relEntries <-
+        case Elf.dynRelBuffer dynSection virtMap of
+          Left errMsg   -> T.assertFailure $ show errMsg
+          Right Nothing -> pure []
+          Right (Just relBuffer) ->
+            case Elf.decodeRelEntries @tp d relBuffer of
+              Left errMsg      -> T.assertFailure errMsg
+              Right relEntries -> pure relEntries
+      let actualEntries =
+               List.sortBy (comparing fst)
+             $ map (\rela -> (Elf.relaAddr rela, Elf.relaType rela)) relaEntries
+            ++ map (\rel  -> (Elf.relAddr  rel,  Elf.relType  rel))  relEntries
+      T.assertEqual
+        "Testing relocation entries"
+        expectedEntries
+        actualEntries
+
 tests :: T.TestTree
 tests = T.testGroup "ELF Tests"
     [ T.testCase "Empty ELF" testEmptyElf
@@ -219,6 +280,57 @@ tests = T.testGroup "ELF Tests"
                           , ("MYSTUFF_1.1", True)
                           , ("MYSTUFF_1.2", True)
                           ]
+      ]
+
+    , T.testGroup "Relocation entries"
+      [ T.testCase "PPC32 relocations" $
+          testRelocEntries
+            (Proxy @Elf.PPC32_RelocationType)
+            "./tests/ppc32-relocs.elf"
+            [ (0x0001fecc, Elf.R_PPC_RELATIVE)
+            , (0x0001fed0, Elf.R_PPC_RELATIVE)
+            , (0x0001fed4, Elf.R_PPC_RELATIVE)
+            , (0x0001fed8, Elf.R_PPC_RELATIVE)
+            , (0x0001fedc, Elf.R_PPC_RELATIVE)
+            , (0x0001fee0, Elf.R_PPC_RELATIVE)
+            , (0x0001fee4, Elf.R_PPC_ADDR32)
+            , (0x0001fee8, Elf.R_PPC_RELATIVE)
+            , (0x0001feec, Elf.R_PPC_ADDR32)
+            , (0x0001fef0, Elf.R_PPC_RELATIVE)
+            , (0x0001fef4, Elf.R_PPC_ADDR32)
+            , (0x0001fef8, Elf.R_PPC_RELATIVE)
+            , (0x0001fefc, Elf.R_PPC_ADDR32)
+            , (0x0001ff00, Elf.R_PPC_RELATIVE)
+            , (0x0001ff04, Elf.R_PPC_ADDR32)
+            , (0x0001ff08, Elf.R_PPC_RELATIVE)
+            , (0x00020000, Elf.R_PPC_JMP_SLOT)
+            , (0x00020004, Elf.R_PPC_JMP_SLOT)
+            , (0x00020008, Elf.R_PPC_JMP_SLOT)
+            , (0x0002000c, Elf.R_PPC_JMP_SLOT)
+            , (0x00020010, Elf.R_PPC_RELATIVE)
+            ]
+      , T.testCase "PPC64 relocations" $
+          testRelocEntries
+            (Proxy @Elf.PPC64_RelocationType)
+            "./tests/ppc64-relocs.elf"
+            [ (0x000000000001fd10, Elf.R_PPC64_RELATIVE)
+            , (0x000000000001fd18, Elf.R_PPC64_RELATIVE)
+            , (0x000000000001ff08, Elf.R_PPC64_ADDR64)
+            , (0x000000000001ff10, Elf.R_PPC64_ADDR64)
+            , (0x000000000001ff18, Elf.R_PPC64_ADDR64)
+            , (0x000000000001ff20, Elf.R_PPC64_ADDR64)
+            , (0x000000000001ff28, Elf.R_PPC64_ADDR64)
+            {-
+            These relocations (which live in the binary's .rela.plt section)
+            are not discovered by elf-edit. See
+            https://github.com/GaloisInc/elf-edit/issues/40 for a diagnosis.
+            -}
+            -- , (0x0000000000020010, Elf.R_PPC64_JMP_SLOT)
+            -- , (0x0000000000020018, Elf.R_PPC64_JMP_SLOT)
+            -- , (0x0000000000020020, Elf.R_PPC64_JMP_SLOT)
+            -- , (0x0000000000020028, Elf.R_PPC64_JMP_SLOT)
+            , (0x0000000000020030, Elf.R_PPC64_RELATIVE)
+            ]
       ]
     ]
 
