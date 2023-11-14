@@ -24,6 +24,10 @@ module Data.ElfEdit.Prim
   , module Data.ElfEdit.Relocations.ARM32
     -- ** ARM64 relocations
   , module Data.ElfEdit.Relocations.AArch64
+    -- ** PPC32 relocations
+  , module Data.ElfEdit.Relocations.PPC32
+    -- ** PPC64 relocations
+  , module Data.ElfEdit.Relocations.PPC64
     -- ** Android-specific
   , module Data.ElfEdit.Relocations.Android
   ) where
@@ -41,4 +45,6 @@ import Data.ElfEdit.Relocations.ARM32
 import Data.ElfEdit.Relocations.Android
 import Data.ElfEdit.Relocations.Common
 import Data.ElfEdit.Relocations.I386
+import Data.ElfEdit.Relocations.PPC32
+import Data.ElfEdit.Relocations.PPC64
 import Data.ElfEdit.Relocations.X86_64
