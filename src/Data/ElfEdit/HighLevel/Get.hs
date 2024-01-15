@@ -4,8 +4,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
+
 module Data.ElfEdit.HighLevel.Get
   ( -- Elf parsing
     getElf
@@ -161,8 +161,6 @@ phdrSegment phdr regions =
              , elfSegmentData     = regions
              }
 
-$(pure [])
-
 ------------------------------------------------------------------------
 -- GetResult
 
@@ -179,8 +177,6 @@ errorPair c =
 -- | Add a warning to get result
 warn :: ElfParseError -> GetResult ()
 warn e = seq e $ GetResult $ MTL.modify' $ (e:)
-
-$(pure [])
 
 ------------------------------------------------------------------------
 -- CollectedRegion
@@ -274,8 +270,6 @@ insertSegment :: Integral (ElfWordType w)
               -> CollectedRegionList w -- ^ Remaining regions
               -> CollectedRegionList w
 insertSegment = insertSegment' []
-
-$(pure [])
 
 insertNewRegion' :: (Ord (ElfWordType w), Num (ElfWordType w))
                  => [CollectedRegion w] -- ^ Processed regions in reverse order
@@ -414,8 +408,6 @@ mkSequence contents (CRL l) = do
   let sr = SizedRegions Seq.empty 0
   sizedRegions <$> mkSequence' contents sr 0 l
 
-$(pure [])
-
 ------------------------------------------------------------------------
 -- Relro handling
 
@@ -434,8 +426,6 @@ asRelroRegion segMap phdr = do
                        , relroAddrStart       = phdrSegmentVirtAddr phdr
                        , relroSize            = phdrFileSize phdr
                        }
-
-$(pure [])
 
 --------------------------------------------------------------------------------
 -- getElf
@@ -587,8 +577,6 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
               , elfGnuStackSegment = anyGnuStack
               , elfGnuRelroRegions = relroRegions
               }
-
-$(pure [])
 
 --------------------------------------------------------------------------------
 -- parseElf

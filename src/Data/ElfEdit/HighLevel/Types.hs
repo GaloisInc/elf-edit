@@ -3,8 +3,8 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
+
 module Data.ElfEdit.HighLevel.Types
   ( -- * Top level declarations
     Elf(..)
@@ -86,8 +86,6 @@ symtabSize c symtab = elfClassInstances c $
   let cnt = fromIntegral $ V.length $ symtabEntries symtab
    in fromIntegral (symtabEntrySize c) * cnt
 -}
-
-$(pure [])
 
 ------------------------------------------------------------------------
 -- ElfSegment and ElfDataRegion
@@ -183,8 +181,6 @@ data ElfDataRegion w
    | ElfDataRaw B.ByteString
      -- ^ Identifies an uninterpreted array of bytes.
 
-$(pure [])
-
 ppSegment :: ElfWidthConstraints w => ElfSegment w -> Doc ann
 ppSegment s =
   vcat
@@ -216,8 +212,6 @@ ppRegion r = case r of
   ElfDataSymtab _idx symtab -> "symtab section:" <+> ppShow symtab
   ElfDataSection sec -> "other section:" <+> ppShow sec
   ElfDataRaw bs -> "raw bytes:" <+> ppShow bs
-
-$(pure [])
 
 -- | This applies a function to each data region in an elf file, returning
 -- the sum using 'Alternative' operations for combining results.
