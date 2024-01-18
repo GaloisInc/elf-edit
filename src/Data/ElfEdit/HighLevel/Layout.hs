@@ -55,7 +55,7 @@ updateSegments fn = elfFileData (updateSeq impl)
       let inner = updateSeq impl (elfSegmentData seg)
           updateData s d = s { elfSegmentData = d }
           newSeg :: f (Maybe (ElfSegment w))
-          newSeg = fn =<< (fmap (updateData seg) inner)
+          newSeg = (fn . updateData seg) =<< inner
       in fmap ElfDataSegment <$> newSeg
     impl d = pure (Just d)
 
@@ -74,7 +74,7 @@ updateDataRegions fn = elfFileData (updateSeq impl)
     impl (ElfDataSegment seg) =
       let inner = updateSeq impl (elfSegmentData seg)
           updateData s d = s { elfSegmentData = d }
-      in fmap (updateData seg) inner >>= (fn . ElfDataSegment)
+      in (fn . ElfDataSegment . updateData seg) =<< inner
     impl d = fn d
 
 -- | Traverse all data regions including nested.
@@ -416,7 +416,7 @@ gnuRelroPhdr r foff =
 
 addRelroToLayout :: ElfLayout w -> GnuRelroRegion w -> ElfLayout w
 addRelroToLayout l r
-  | otherwise = elfClassInstances (elfLayoutClass l) $ do
+  = elfClassInstances (elfLayoutClass l) $ do
       let refIdx = relroRefSegmentIndex r
       case Map.lookup refIdx (l^.phdrs) of
         Nothing -> error $ "Error segment index " ++ show refIdx ++ " could not be found."
@@ -470,7 +470,7 @@ buildRegions l o ((reg,inLoad):rest) = do
         <> doRest (fromIntegral (ehdrSize cl))
     ElfDataSegmentHeaders
       | not (isAligned o (phdrTableAlign cl)) ->
-          error $ "internal error: buildRegions phdr alignment check failed; Fix layoutRegion."
+          error "internal error: buildRegions phdr alignment check failed; Fix layoutRegion."
       | otherwise ->
           let phdrSize = fromIntegral (phnum l) * fromIntegral (phdrEntrySize cl)
            in encodePhdrTable cl d (allPhdrs l)
@@ -618,7 +618,7 @@ layoutRegion inLoad l reg = do
             l2 & phdrs %~ Map.insert idx phdr
     ElfDataSectionHeaders
       | inLoad ->
-          error $ "Section headers should not be within a segment."
+          error "Section headers should not be within a segment."
       | otherwise -> addSectionHeadersToLayout l
     ElfDataSectionNameTable idx ->
       let l' = l & shstrndx .~ idx

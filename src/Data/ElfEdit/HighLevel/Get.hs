@@ -116,7 +116,7 @@ transShdr file strtab idx shdr = do
           , elfSectionEntSize   = shdrEntSize shdr
           , elfSectionData      = slice (shdrFileRange shdr) file
           }
-  seq s $ pure $ (shdrFileRange shdr, s)
+  seq s $ pure (shdrFileRange shdr, s)
 
 -- | Get list of sections from Elf parse info.
 -- This includes the initial section
@@ -176,7 +176,7 @@ errorPair c =
 
 -- | Add a warning to get result
 warn :: ElfParseError -> GetResult ()
-warn e = seq e $ GetResult $ MTL.modify' $ (e:)
+warn e = seq e $ GetResult $ MTL.modify' (e:)
 
 ------------------------------------------------------------------------
 -- CollectedRegion
@@ -185,7 +185,7 @@ warn e = seq e $ GetResult $ MTL.modify' $ (e:)
 data CollectedRegion w
    = AtomicRegion !B.ByteString !(FileOffset (ElfWordType w)) !(FileOffset (ElfWordType w)) !(ElfDataRegion w)
      -- ^ A region with the name, start offset, one past the end, and contents.
-   | SegmentRegion !(Phdr w) !([CollectedRegion w])
+   | SegmentRegion !(Phdr w) ![CollectedRegion w]
      -- ^ A Program header and additional regions.
 
 -- | Return the starting offset of the region
@@ -582,8 +582,8 @@ getElf ehi = elfClassInstances (headerClass (header ehi)) $ errorPair $ do
 -- parseElf
 
 data ElfGetResult
-   = Elf32Res !([ElfParseError]) (Elf 32)
-   | Elf64Res !([ElfParseError]) (Elf 64)
+   = Elf32Res ![ElfParseError] (Elf 32)
+   | Elf64Res ![ElfParseError] (Elf 64)
    | ElfHeaderError !Get.ByteOffset !String
      -- ^ Attempt to parse header failed.
      --
