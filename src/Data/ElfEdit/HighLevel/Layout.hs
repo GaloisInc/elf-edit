@@ -3,8 +3,8 @@
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wwarn #-}
+
 module Data.ElfEdit.HighLevel.Layout
   ( renderElf
   , elfSections
@@ -42,8 +42,6 @@ updateSeq f l0 =
     h Seq.:< l -> compose <$> f h <*> updateSeq f l
       where compose Nothing  r = r
             compose (Just e) r = e Seq.<| r
-
-$(pure [])
 
 -- | Traverse segments in an ELF file and modify or delete them
 updateSegments :: forall w f
@@ -86,8 +84,6 @@ traverseElfDataRegions :: Monad f
                        -> f (Elf w)
 traverseElfDataRegions f = updateDataRegions (fmap Just . f)
 
-$(pure [])
-
 -- | Return name of all elf sections.
 elfSectionNames :: forall w . Elf w -> [B.ByteString]
 elfSectionNames e = concatMap regionNames (toList (e^.elfFileData))
@@ -100,8 +96,6 @@ elfSectionNames e = concatMap regionNames (toList (e^.elfFileData))
         regionNames (ElfDataSymtab _ _)         = [".symtab"]
         regionNames (ElfDataSection s)          = [elfSectionName s]
         regionNames _                           = []
-
-$(pure [])
 
 ------------------------------------------------------------------------
 -- elfSectionAsGOT
@@ -163,13 +157,9 @@ updateSections fn0 e0 = elfClassInstances (elfClass e0) $ elfFileData (updateSeq
         impl fn (ElfDataSection s) = fmap norm <$> fn s
         impl _  d = pure (Just d)
 
-$(pure [])
-
 -- | Traverse elf sections
 elfSections :: Simple Traversal (Elf w) (ElfSection (ElfWordType w))
 elfSections f = updateSections (fmap Just . f)
-
-$(pure [])
 
 ------------------------------------------------------------------------
 -- Utilities

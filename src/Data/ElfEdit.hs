@@ -19,10 +19,10 @@ and the operations on the 'Elf' datatype.  To generate an Elf file from
 The low level interface is described in 'Data.ElfEdit.Prim'.
 -}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
+
 module Data.ElfEdit
   ( -- * High-level Elf type
     -- ** Main type
