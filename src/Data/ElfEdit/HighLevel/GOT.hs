@@ -59,16 +59,16 @@ elfSectionAsGOT :: (Bits w, Num w)
 elfSectionAsGOT s = do
   -- TODO: Perform checks
   when (elfSectionType s /= SHT_PROGBITS) $ do
-    Left "Unexpected type"
+    Left "Unexpected .got section type (expected PROGBITS)"
   when (elfSectionFlags s /= elfGotSectionFlags) $ do
-    Left "Unexpected type"
+    Left "Unexpected .got section flags (expected write/alloc)"
   let d = elfSectionData s
   when (elfSectionSize s /= fromIntegral (B.length d)) $ do
-    Left "Section size does not match data length."
+    Left ".got section size does not match data length."
   when (elfSectionLink s /= 0) $ do
-    Left "Unexpected section length"
+    Left "Unexpected .got section length"
   when (elfSectionInfo s /= 0) $ do
-    Left "Unexpected section info"
+    Left "Unexpected .got section info"
   return ElfGOT { elfGotIndex = elfSectionIndex s
                 , elfGotName  = elfSectionName s
                 , elfGotAddr  = elfSectionAddr s
