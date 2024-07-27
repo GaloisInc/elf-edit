@@ -1,4 +1,4 @@
-all: simple.elf simple.static.elf libsymbol_versions.2.so fmax.elf ppc32-relocs.elf ppc64-relocs.elf
+all: simple.elf simple.static.elf libsymbol_versions.2.so fmax.elf ppc32-relocs.elf ppc64-relocs.elf riscv32-relocs.elf riscv64-relocs.elf
 
 simple.elf: Makefile simple.c
 	gcc simple.c -o simple.elf
@@ -17,3 +17,9 @@ ppc32-relocs.elf: ppc32-relocs.c
 
 ppc64-relocs.elf: ppc64-relocs.c
 	powerpc64-linux-musl-gcc $< -o $@
+
+riscv32-relocs.elf: riscv-relocs.c
+	riscv32-linux-musl-gcc $< -o $@
+
+riscv64-relocs.elf: riscv-relocs.c
+	riscv64-linux-musl-gcc $< -o $@

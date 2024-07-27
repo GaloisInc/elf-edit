@@ -51,6 +51,7 @@ library
     Data.ElfEdit.Relocations.I386
     Data.ElfEdit.Relocations.PPC32
     Data.ElfEdit.Relocations.PPC64
+    Data.ElfEdit.Relocations.RISCV
     Data.ElfEdit.Relocations.X86_64
     Data.ElfEdit.Prim.Ehdr
     Data.ElfEdit.Prim.File
