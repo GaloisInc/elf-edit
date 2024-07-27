@@ -28,6 +28,8 @@ module Data.ElfEdit.Prim
   , module Data.ElfEdit.Relocations.PPC32
     -- ** PPC64 relocations
   , module Data.ElfEdit.Relocations.PPC64
+    -- ** RISC-V relocations
+  , module Data.ElfEdit.Relocations.RISCV
     -- ** Android-specific
   , module Data.ElfEdit.Relocations.Android
   ) where
@@ -47,4 +49,5 @@ import Data.ElfEdit.Relocations.Common
 import Data.ElfEdit.Relocations.I386
 import Data.ElfEdit.Relocations.PPC32
 import Data.ElfEdit.Relocations.PPC64
+import Data.ElfEdit.Relocations.RISCV
 import Data.ElfEdit.Relocations.X86_64

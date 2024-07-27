@@ -331,6 +331,40 @@ tests = T.testGroup "ELF Tests"
             -- , (0x0000000000020028, Elf.R_PPC64_JMP_SLOT)
             , (0x0000000000020030, Elf.R_PPC64_RELATIVE)
             ]
+      , T.testCase "RISC-V (32-bit) relocations" $
+          testRelocEntries
+            (Proxy @(Elf.RISCV_RelocationType 32))
+            "./tests/riscv32-relocs.elf"
+            [ (0x00001f18, Elf.R_RISCV_RELATIVE)
+            , (0x00001f1c, Elf.R_RISCV_RELATIVE)
+            , (0x00002000, Elf.R_RISCV_RELATIVE)
+            , (0x0000200c, Elf.R_RISCV_JUMP_SLOT)
+            , (0x00002014, Elf.R_RISCV_32)
+            , (0x00002018, Elf.R_RISCV_32)
+            , (0x0000201c, Elf.R_RISCV_32)
+            , (0x00002020, Elf.R_RISCV_32)
+            , (0x00002024, Elf.R_RISCV_32)
+            , (0x00002028, Elf.R_RISCV_RELATIVE)
+            , (0x0000202c, Elf.R_RISCV_32)
+            , (0x00002030, Elf.R_RISCV_32)
+            ]
+      , T.testCase "RISC-V (64-bit) relocations" $
+          testRelocEntries
+            (Proxy @(Elf.RISCV_RelocationType 64))
+            "./tests/riscv64-relocs.elf"
+            [ (0x0000000000001e30, Elf.R_RISCV_RELATIVE)
+            , (0x0000000000001e38, Elf.R_RISCV_RELATIVE)
+            , (0x0000000000002000, Elf.R_RISCV_RELATIVE)
+            , (0x0000000000002018, Elf.R_RISCV_JUMP_SLOT)
+            , (0x0000000000002028, Elf.R_RISCV_64)
+            , (0x0000000000002030, Elf.R_RISCV_64)
+            , (0x0000000000002038, Elf.R_RISCV_64)
+            , (0x0000000000002040, Elf.R_RISCV_64)
+            , (0x0000000000002048, Elf.R_RISCV_64)
+            , (0x0000000000002050, Elf.R_RISCV_RELATIVE)
+            , (0x0000000000002058, Elf.R_RISCV_64)
+            , (0x0000000000002060, Elf.R_RISCV_64)
+            ]
       ]
     ]
 
