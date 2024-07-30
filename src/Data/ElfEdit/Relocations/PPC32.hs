@@ -191,7 +191,7 @@ ppc32Reloc tp nm c = (tp, (nm, c))
 -- These values are derived from Figure 4-1 (Relocation Fields) of
 -- http://refspecs.linux-foundation.org/elf/elfspec_ppc.pdf.
 --
--- Note that the treatment of `low24` and `low14` here is not correct. See
+-- Note that some of these values are not currently supported. See
 -- https://github.com/GaloisInc/elf-edit/issues/39 for more information.
 
 none :: Int
@@ -204,10 +204,10 @@ word30 :: Int
 word30 = 30
 
 low24 :: Int
-low24 = 24
+low24 = error "low24 relocation entries not currently supported"
 
 low14 :: Int
-low14 = 14
+low14 = error "low14 relocation entries not currently supported"
 
 half16 :: Int
 half16 = 16
