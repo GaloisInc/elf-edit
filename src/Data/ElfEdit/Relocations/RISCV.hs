@@ -303,32 +303,32 @@ word64 = 64
 -- 16-bit RVC instruction formats) of
 -- https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf.
 --
--- Note that the treatment of these variables is not correct. See
+-- Note that these values are not currently supported. See
 -- https://github.com/GaloisInc/elf-edit/issues/39 for more information.
 
 bType :: Int
-bType = 32
+bType = error "B-Type fields not currently supported"
 
 cbType :: Int
-cbType = 16
+cbType = error "CB-Type fields not currently supported"
 
 cjType :: Int
-cjType = 16
+cjType = error "CJ-Type fields not currently supported"
 
 iType :: Int
-iType = 32
+iType = error "I-Type fields not currently supported"
 
 sType :: Int
-sType = 32
+sType = error "S-Type fields not currently supported"
 
 uType :: Int
-uType = 32
+uType = error "U-Type fields not currently supported"
 
 jType :: Int
-jType = 32
+jType = error "J-Type fields not currently supported"
 
 uiType :: Int
-uiType = 32
+uiType = error "U+I-Type fields not currently supported"
 
 -- This is a variable-length encoding, and it's unclear how to support this at
 -- the moment.
