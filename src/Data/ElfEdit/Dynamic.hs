@@ -907,7 +907,14 @@ dynamicEntries d cl dynamic = elfClassInstances cl $ runDynamicParser d cl $ do
 -- | Returns 'True' if the supplied 'ElfHeaderInfo' describes a
 -- position-independent executable (PIE). The approach used here is adapted from
 -- the source code for the @file@ binutils program, which was in turn summarized
--- here: https://unix.stackexchange.com/a/435038
+-- here: https://unix.stackexchange.com/a/435038. In brief:
+--
+-- * A dynamically linked executable is a PIE if it contains a certain value in
+--   its DT_FLAGS_1 dynamic section entry, or (if it lacks the certain value)
+--   the file has executable permissions. The file permission fallback is why
+--   this function requires 'Permissions' as an argument.
+--
+-- * Non-dynamically-linked executables are not PIEs.
 elfIsPie :: forall w. Permissions -> ElfHeaderInfo w -> Bool
 elfIsPie perms ehi =
   case headerType hdr of
