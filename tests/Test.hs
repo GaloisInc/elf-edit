@@ -21,6 +21,7 @@ import           Data.Proxy
 import           Data.String
 import qualified Data.Vector as V
 import           Data.Word ( Word32 )
+import qualified System.Directory as Dir
 import qualified System.IO as IO
 import qualified Test.Tasty as T
 import qualified Test.Tasty.HUnit as T
@@ -250,6 +251,24 @@ testRelocEntries _ fp expectedEntries = do
         expectedEntries
         actualEntries
 
+-- | Test whether an ELF executable is position-independent or not.
+testPie ::
+     FilePath
+     -- ^ The path to the ELF executable.
+  -> Bool
+     -- ^ 'True' if the executable is expected to be position-independent.
+     --   'False' otherwise.
+  -> T.Assertion
+testPie fp expectedPie = do
+  perms <- Dir.getPermissions fp
+  bs <- B.readFile fp
+  withElfHeader bs $ \e -> do
+    let actualPie = Elf.elfIsPie perms e
+    T.assertEqual
+      "Testing position independence"
+      expectedPie
+      actualPie
+
 tests :: T.TestTree
 tests = T.testGroup "ELF Tests"
     [ T.testCase "Empty ELF" testEmptyElf
@@ -365,6 +384,15 @@ tests = T.testGroup "ELF Tests"
             , (0x0000000000002058, Elf.R_RISCV_64)
             , (0x0000000000002060, Elf.R_RISCV_64)
             ]
+      ]
+
+    , T.testGroup "Position independence"
+      [ T.testCase "Dynamically linked executable that is position-independent" $
+          testPie "./tests/fmax.elf" True
+      , T.testCase "Dynamically linked executable that is not position-independent" $
+          testPie "./tests/simple.elf" False
+      , T.testCase "Statically linked executable is not position-independent" $
+          testPie "./tests/simple.static.elf" False
       ]
     ]
 

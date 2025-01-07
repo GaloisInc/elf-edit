@@ -27,6 +27,7 @@ module Data.ElfEdit.Dynamic
   , PLTEntries(..)
   , dynPLTRel
   , dynamicEntries
+  , elfIsPie
   , DynamicMap
   , parseDynamicMap
   , DynamicError(..)
@@ -65,11 +66,13 @@ import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import           Data.Word
 import           Numeric (showHex)
+import           System.Directory (Permissions, executable)
 
 import           Data.ElfEdit.ByteString
 import           Data.ElfEdit.Dynamic.Tag
 import           Data.ElfEdit.Prim.Ehdr
 import           Data.ElfEdit.Prim.File
+import           Data.ElfEdit.Prim.HeaderInfo
 import           Data.ElfEdit.Prim.Phdr
 import           Data.ElfEdit.Prim.StringTable
 import           Data.ElfEdit.Prim.SymbolTable
@@ -900,3 +903,55 @@ dynamicEntries d cl dynamic = elfClassInstances cl $ runDynamicParser d cl $ do
                       , dynPLTAddr = pltAddr
                       , dynDebug = mdebug
                       }
+
+-- | Returns 'True' if the supplied 'ElfHeaderInfo' describes a
+-- position-independent executable (PIE). The approach used here is adapted from
+-- the source code for the @file@ binutils program, which was in turn summarized
+-- here: https://unix.stackexchange.com/a/435038
+elfIsPie :: forall w. Permissions -> ElfHeaderInfo w -> Bool
+elfIsPie perms ehi =
+  case headerType hdr of
+    -- If the executable is dynamic, check to see if it has a DT_FLAGS_1 dynamic
+    -- section entry present.
+    ET_DYN ->
+      elfClassInstances cl $
+      case dtFlags1Maybe of
+        -- If a DT_FLAGS_1 dynamic section entry is present, then the executable
+        -- is PIE if the DF_1_PIE bit is set in the DT_FLAGS_1 entry's value.
+        Just dtFlags1 ->
+          -- The value of DF_1_PIE is taken from here:
+          -- https://github.com/llvm/llvm-project/blob/0517772b4ac20c5d3a0de0d4703354a179833248/llvm/include/llvm/BinaryFormat/ELF.h#L1613
+          let df1Pie = 0x08000000 in
+          -- Really, there should only be a single DT_FLAGS_1 entry, but the
+          -- elf-edit API gives us a list due to the possibility of there being
+          -- multiple dynamic entries with the same tag. As such, we use `any`
+          -- below.
+          List.any (\flag -> (flag .&. df1Pie) /= 0) dtFlags1
+        -- If a DT_FLAGS_1 dynamic section entry is not present, then we fall
+        -- back on checking the file permissions. If the file has executable
+        -- permissions, then we conclude that it is PIE.
+        Nothing ->
+          executable perms
+    -- All other header types (e.g., ET_EXEC) are non-PIE.
+    _ -> False
+  where
+    hdr = header ehi
+    d = headerData hdr
+    cl = headerClass hdr
+    ph = headerPhdrs ehi
+    contents = headerFileContents ehi
+
+    -- If there is a DT_FLAGS_1 dynamic section entry present, return its
+    -- corresponding values in a Just. Otherwise, return Nothing.
+    dtFlags1Maybe :: Integral (ElfWordType w) => Maybe [ElfWordType w]
+    dtFlags1Maybe = do
+      dynPhdr <-
+        case List.filter (\p -> phdrSegmentType p == PT_DYNAMIC) ph of
+          [r] -> Just r
+          _ -> Nothing
+      let dynContents = slice (phdrFileRange dynPhdr) contents
+      dynSection <-
+        case dynamicEntries d cl dynContents of
+          Right section -> Just section
+          Left _ -> Nothing
+      Map.lookup DT_FLAGS_1 (dynMap dynSection)
