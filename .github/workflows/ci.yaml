@@ -21,14 +21,14 @@ jobs:
       run: |
         cp cabal.project.werror cabal.project.local
         cp cabal.project.freeze.ghc-${{ matrix.ghc-ver }} cabal.project.freeze
-    - uses: haskell/actions/setup@v1
+    - uses: haskell-actions/setup@v2
       id: setup-haskell
       name: Setup Haskell
       with:
         ghc-version: ${{ matrix.ghc-ver }}
         cabal-version: ${{ matrix.cabal }}
     - name: Cache
-      uses: actions/cache@v1
+      uses: actions/cache@v4
       with:
         path: /home/runner/.cabal/store/ghc-${{ matrix.ghc-ver }}
         # Prefer previous SHA hash if it is still cached
