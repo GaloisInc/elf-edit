@@ -1,6 +1,3 @@
-/.stack-work
-/TAGS
-/stack.yaml
 /dist-newstyle
 /cabal.project.freeze
 /cabal.project.local
