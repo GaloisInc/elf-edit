@@ -7,7 +7,7 @@ jobs:
     strategy:
       matrix:
         cabal: ["3.14.2.0"]
-        ghc: ["9.4.5", "9.6.2", "9.8.4"]
+        ghc: ["9.6.2", "9.8.4", "9.10.1"]
         os: ["ubuntu-24.04"]
       fail-fast: false
     name: GHC v${{ matrix.ghc }}

@@ -10,7 +10,7 @@ module Data.ElfEdit.Dynamic.Tag
   ( module Data.ElfEdit.Dynamic.Tag
   ) where
 
-import           Data.Foldable
+import qualified Data.Foldable as Foldable
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32)
@@ -236,7 +236,7 @@ instance Show ElfDynamicTag where
       merge new old = old ++ "|" ++ new
       ins m (k,v) = Map.insertWith merge k v m
       elfDynamicTagNameMap :: Map ElfDynamicTag String
-      elfDynamicTagNameMap = foldl' ins Map.empty
+      elfDynamicTagNameMap = Foldable.foldl' ins Map.empty
         [ (,) DT_NULL            "DT_NULL"
         , (,) DT_NEEDED          "DT_NEEDED"
         , (,) DT_PLTRELSZ        "DT_PLTRELSZ"

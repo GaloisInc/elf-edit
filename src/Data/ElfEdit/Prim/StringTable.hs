@@ -12,7 +12,7 @@ module Data.ElfEdit.Prim.StringTable
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as Bld
 import qualified Data.ByteString.Lazy as L
-import           Data.Foldable
+import qualified Data.Foldable as Foldable
 import           Data.List (sort)
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -84,7 +84,7 @@ encodeStringTable strings = (res, stringMap)
         -- We insert strings in order so that they will appear in sorted
         -- order in the bytestring.  This is likely not essential, but
         -- corresponds to ld's behavior.
-        (m,_,b) = foldl' insertString empty_table entries
+        (m,_,b) = Foldable.foldl' insertString empty_table entries
 
         myFind bs =
           case Map.lookup bs m of
