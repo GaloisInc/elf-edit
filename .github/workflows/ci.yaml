@@ -3,43 +3,23 @@ on:
   push:
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
+  build:
     strategy:
       matrix:
-        ghc-ver: ["9.2.8", "9.4.5", "9.6.2"]
-        cabal: ["3.10.1.0"]
-      # complete all jobs
+        cabal: ["3.14.2.0"]
+        ghc: ["9.2.8", "9.4.5", "9.6.2"]
+        os: ["ubuntu-24.04"]
       fail-fast: false
-    name: GHC v${{ matrix.ghc-ver }}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        submodules: true
-    - name: Copy cabal project files
-      run: |
-        cp cabal.project.werror cabal.project.local
-        cp cabal.project.freeze.ghc-${{ matrix.ghc-ver }} cabal.project.freeze
-    - uses: haskell-actions/setup@v2
-      id: setup-haskell
-      name: Setup Haskell
-      with:
-        ghc-version: ${{ matrix.ghc-ver }}
-        cabal-version: ${{ matrix.cabal }}
-    - name: Cache
-      uses: actions/cache@v4
-      with:
-        path: /home/runner/.cabal/store/ghc-${{ matrix.ghc-ver }}
-        # Prefer previous SHA hash if it is still cached
-        key: linux-${{ matrix.ghc-ver }}-${{ hashFiles('cabal.project.freeze') }}-${{ github.sha }}
-        # otherwise just use most recent build.
-        restore-keys: linux-${{ matrix.ghc-ver }}-${{ hashFiles('cabal.project.freeze') }}
-    - name: Cabal update
-      run: cabal update
-      # Build macaw-base dependencies and crucible separately just so later
-      # steps are less verbose and major dependency failures are separate.
-    - name: Build
-      run: cabal build
-    - name: Test
-      run: cabal test
+    name: GHC v${{ matrix.ghc }}
+    uses: GaloisInc/.github/.github/workflows/haskell-ci.yml@v1.4
+    with:
+      cabal: ${{ matrix.cabal }}
+      check: false
+      # See Note [Parallelism] in the `haskell-ci` action for why `-j`.
+      configure-flags: --enable-tests --ghc-options='-Wall -Werror -j'
+      ghc: ${{ matrix.ghc }}
+      os: ${{ matrix.os }}
+      pre-hook: |
+        mv cabal.project.freeze.ghc-${{ matrix.ghc }} cabal.project.freeze
+      # Test binaries are not currently included in the sdist
+      sdist: false
