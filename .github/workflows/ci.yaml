@@ -11,12 +11,13 @@ jobs:
         os: ["ubuntu-24.04"]
       fail-fast: false
     name: GHC v${{ matrix.ghc }}
-    uses: GaloisInc/.github/.github/workflows/haskell-ci.yml@v1.4
+    uses: GaloisInc/.github/.github/workflows/haskell-ci.yml@v1
     with:
       cabal: ${{ matrix.cabal }}
       check: false
-      # See Note [Parallelism] in the `haskell-ci` action for why `-j`.
-      configure-flags: --enable-tests --ghc-options='-Wall -Werror -j'
+      # See Note [Parallelism] in `haskell-ci.yml` for why `--ghc-options='-j'`
+      # and `--semaphore`.
+      configure-flags: --enable-tests --ghc-options='-Wall -Werror -j' --semaphore
       ghc: ${{ matrix.ghc }}
       os: ${{ matrix.os }}
       pre-hook: |
