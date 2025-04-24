@@ -7,7 +7,11 @@ jobs:
     strategy:
       matrix:
         cabal: ["3.14.2.0"]
-        ghc: ["9.8.4", "9.10.1", "9.12.2"]
+        # We do not yet have a definitive GHC version support policy (see #58).
+        # Our current practice is to support at least the three most recent
+        # versions of GHC. We keep old versions in CI as long as doing so causes
+        # no undue burden.
+        ghc: ["9.6.7", "9.8.4", "9.10.1", "9.12.2"]
         os: ["ubuntu-24.04"]
       fail-fast: false
     name: GHC v${{ matrix.ghc }}
