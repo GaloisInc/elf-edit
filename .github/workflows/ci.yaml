@@ -21,6 +21,6 @@ jobs:
       ghc: ${{ matrix.ghc }}
       os: ${{ matrix.os }}
       pre-hook: |
-        mv cabal.project.freeze.ghc-${{ matrix.ghc }} cabal.project.freeze
+        mv cabal.ghc-${{ matrix.ghc }}.config cabal.project.freeze
       # Test binaries are not currently included in the sdist
       sdist: false
