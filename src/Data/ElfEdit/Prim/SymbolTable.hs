@@ -291,18 +291,16 @@ ppSymbolTableEntries l = fixTableColumns (snd <$> cols) (fmap fst cols : entries
 
 -- | Error from parsing a symbol table
 data SymtabError
-   = InvalidName !Word32 !LookupStringError
+   = InvalidSymtabShdrName !Word16 !LookupStringError
+     -- ^ The name of the section header (which points to a symbol table) at the
+     -- given index could not be obtained.
+   | InvalidName !Word32 !LookupStringError
      -- ^ The name of the symbol at the given index could not be obtained.
    | IllegalSymbolIndex !Word32
      -- ^ The index above exceeds the size of the symbol table.
    | InvalidLink !Word32
      -- ^ The link attribute of the section did not refer to a valid
      -- symbol table.
-   | MultipleSymtabs
-     -- ^ Multiple symbol tables in binary.
-     --
-     -- Raised in `Data.ElfEdit.Prim.decodeHeaderSymtab` and
-     -- `Data.ElfEdit.Prim.decodeHeaderDynsym`
    | InvalidSymtabFileRange
      -- ^ Invalid symbol table link
      --
@@ -328,10 +326,10 @@ data SymtabError
      -- `Data.ElfEdit.Prim.decodeHeaderDynsym`
 
 instance Show SymtabError where
+  show (InvalidSymtabShdrName idx msg) = "Error parsing symbol table section header " ++ show idx ++ " name: " ++ show msg
   show (InvalidName idx msg) = "Error parsing symbol " ++ show idx ++ " name: " ++ show msg
   show (IllegalSymbolIndex idx) = "Index " ++ show idx ++ " exceeds number of entries."
   show (InvalidLink lnk) = "The link index " ++ show lnk ++ " was invalid."
-  show MultipleSymtabs = "Multiple symbol tables defined."
   show InvalidSymtabFileRange = "Symbol table header file offset and size is out of range."
   show InvalidSymtabLink = "Symbol table header had invalid link to string table."
   show InvalidSymtabLocalCount = "Symbol table header had invalid number of local symbols."

@@ -139,10 +139,9 @@ testDynSymTable fp expectedSymInfo = do
     Elf.EM_X86_64 <- pure mach
 
     -- Test decodeHeaderDynsym
-    dynSymtab <- maybe (T.assertFailure "No dynamic symbol table found") pure $
+    dynSymtab <- either (T.assertFailure . show) pure $
                  Elf.decodeHeaderDynsym e
-    syms1 <- either (T.assertFailure . show) (pure . V.toList . Elf.symtabEntries)
-             dynSymtab
+    let syms1 = V.toList $ Elf.symtabEntries dynSymtab
     T.assertEqual "Testing decodeHeaderDynsym"
                   (Elf.steName <$> syms1)
                   (fst <$> expectedSymInfo)
