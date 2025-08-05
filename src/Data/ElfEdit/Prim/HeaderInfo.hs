@@ -1,7 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Data.ElfEdit.Prim.HeaderInfo
   ( -- * EhfHeaderInfo
@@ -32,10 +35,16 @@ module Data.ElfEdit.Prim.HeaderInfo
   , Symtab(..)
   , symtabSize
   , decodeHeaderSymtab
+  , decodeHeaderSymtabLenient
+  , decodeHeaderSymtabs
   , decodeHeaderDynsym
+  , decodeHeaderDynsymLenient
+  , decodeHeaderDynsyms
+  , SymtabLookupError(..)
   ) where
 
 import Control.Monad
+import           Data.Bifunctor (first)
 import           Data.Binary
 import           Data.Binary.Get
 import qualified Data.ByteString as B
@@ -209,12 +218,28 @@ headerNamedShdrs :: ElfHeaderInfo w
                  -> Either (Word16, LookupStringError) (V.Vector (Shdr B.ByteString (ElfWordType w)))
 headerNamedShdrs ehi = V.generateM cnt go
   where cnt = fromIntegral (shdrCount ehi)
-        (_, shstrtabBuf) = shstrtabRangeAndData ehi
         go idx =
           let shdr = shdrByIndex ehi (fromIntegral idx)
-           in case lookupString (shdrName shdr) shstrtabBuf of
-                Left e -> Left (fromIntegral idx, e)
-                Right nm -> Right (shdr { shdrName = nm })
+           in headerNamedShdr ehi idx shdr
+
+-- | Helper, not exported
+--
+-- Determine the name of a section header as a 'B.ByteString'.
+--
+-- This returns the error and index of the section if any name lookup fails.
+headerNamedShdr ::
+  ElfHeaderInfo w ->
+  -- | The index of the section header in the ELF file.
+  Int ->
+  -- | The section header header to determine the name for.
+  Shdr Word32 (ElfWordType w) ->
+  Either (Word16, LookupStringError) (Shdr B.ByteString (ElfWordType w))
+headerNamedShdr ehi idx shdr =
+  case lookupString (shdrName shdr) shstrtabBuf of
+    Left e -> Left (fromIntegral @Int @Word16 idx, e)
+    Right nm -> Right (shdr { shdrName = nm })
+  where
+    (_, shstrtabBuf) = shstrtabRangeAndData ehi
 
 -- | Return contents associated with header in elf file.
 shdrData :: ElfHeaderInfo w ->  Shdr nm (ElfWordType w) -> B.ByteString
@@ -254,17 +279,39 @@ deriving instance Show (ElfWordType w) => Show (Symtab w)
 
 -- | Decodes the static symbol table using elf header info.
 --
--- If no symbol table is present then @Nothing@ is returned.
-decodeHeaderSymtab :: ElfHeaderInfo w -> Maybe (Either SymtabError (Symtab w))
-decodeHeaderSymtab elf = elfClassInstances (headerClass (header elf)) $ do
-  let shdrs = headerShdrs elf
-  let symtabs = V.filter (\s -> shdrType s == SHT_SYMTAB) shdrs
-  when (V.length symtabs == 0) Nothing
-  Just $ decodeSymbolTable elf symtabs
+-- This checks that there is exactly one static symbol table. If no symbol table
+-- or multiple symbol tables are present, or if there is an error when decoding
+-- the symbol table, then an error (i.e., @Left@) is returned. For versions of
+-- this function that permit multiple symbol tables, see
+-- 'decodeHeaderSymtabLenient' and 'decodeHeaderSymtabs'.
+decodeHeaderSymtab :: ElfHeaderInfo w -> Either SymtabLookupError (Symtab w)
+decodeHeaderSymtab = decodeHeaderSymbolTable SHT_SYMTAB
+
+-- | Decodes the static symbol table using ELF header info. This is like
+-- 'decodeHeaderSymtab', except that this permits ELF files with multiple static
+-- symbol tables. (For instance, this can happen in ELF core files.)
+--
+-- In the event that there are multiple static symbol tables, this function
+-- tries to find a symbol table associated with a section header named
+-- @.symtab@.
+decodeHeaderSymtabLenient ::
+  ElfHeaderInfo w -> Either SymtabError (Maybe (Symtab w))
+decodeHeaderSymtabLenient = decodeHeaderSymbolTableLenient SHT_SYMTAB ".symtab"
+
+-- | Decodes the static symbol tables using ELF header info. This is like
+-- 'decodeHeaderSymtab', except that this permits ELF files with multiple static
+-- symbol tables. (For instance, this can happen in ELF core files.)
+decodeHeaderSymtabs ::
+  ElfHeaderInfo w -> Either SymtabError (V.Vector (Symtab w))
+decodeHeaderSymtabs = decodeHeaderSymbolTables SHT_SYMTAB
 
 -- | Decodes the dynamic symbol table using ELF header info.
 --
--- If no dynamic symbol table is present then @Nothing@ is returned.
+-- This checks that there is exactly one static symbol table. If no symbol table
+-- or multiple symbol tables are present, or if there is an error when decoding
+-- the symbol table, then an error (i.e., @Left@) is returned. For versions of
+-- this function that permit multiple symbol tables, see
+-- 'decodeHeaderDynsymLenient' and 'decodeHeaderDynsyms'.
 --
 -- The functionality of 'decodeHeaderDynsym' largely overlaps with what the
 -- @dynamicEntries@ and @dynSymEntry@ functions provide, but with some minor
@@ -275,28 +322,115 @@ decodeHeaderSymtab elf = elfClassInstances (headerClass (header elf)) $ do
 --
 -- * Unlike @dynSymEntry@, 'decodeHeaderDynsym' does not compute symbol version
 --   information.
-decodeHeaderDynsym :: ElfHeaderInfo w -> Maybe (Either SymtabError (Symtab w))
-decodeHeaderDynsym elf = elfClassInstances (headerClass (header elf)) $ do
-  let shdrs = headerShdrs elf
-  let dynSymtabs = V.filter (\s -> shdrType s == SHT_DYNSYM) shdrs
-  when (V.length dynSymtabs == 0) Nothing
-  Just $ decodeSymbolTable elf dynSymtabs
+decodeHeaderDynsym :: ElfHeaderInfo w -> Either SymtabLookupError (Symtab w)
+decodeHeaderDynsym = decodeHeaderSymbolTable SHT_DYNSYM
 
--- | Decodes the symbol table from the section headers using the given ELF
--- header info. This assumes the invariant that there is at least one section
--- header of the appropriate type.
+-- | Decodes the dynamic symbol table using ELF header info. This is like
+-- 'decodeHeaderDynsym', except that this permits ELF files with multiple
+-- dynamic symbol tables. (For instance, this can happen in ELF core files.)
+--
+-- In the event that there are multiple dynamic symbol tables, this function
+-- tries to find a symbol table associated with a section header named
+-- @.dynsym@.
+decodeHeaderDynsymLenient ::
+  ElfHeaderInfo w -> Either SymtabError (Maybe (Symtab w))
+decodeHeaderDynsymLenient = decodeHeaderSymbolTableLenient SHT_DYNSYM ".dynsym"
+
+-- | Decodes the dynamic symbol tables using ELF header info. This is like
+-- 'decodeHeaderDynsym', except that this permits ELF files with multiple
+-- dynamic symbol tables. (For instance, this can happen in ELF core files.)
+decodeHeaderDynsyms ::
+  ElfHeaderInfo w -> Either SymtabError (V.Vector (Symtab w))
+decodeHeaderDynsyms = decodeHeaderSymbolTables SHT_DYNSYM
+
+-- | An error that arose when looking up and decoding a symbol table.
+data SymtabLookupError
+  = NoSymtabs
+    -- ^ No symbol tables in binary.
+  | MultipleSymtabs
+    -- ^ Multiple symbol tables in binary.
+  | InvalidSymtab !SymtabError
+    -- ^ A symbol table is in the binary, but decoding the symbol table failed.
+
+instance Show SymtabLookupError where
+  show NoSymtabs = "No symbol tables defined."
+  show MultipleSymtabs = "Multiple symbol tables defined."
+  show (InvalidSymtab err) = show err
+
+-- | Helper, not exported
+--
+-- The workhorse for 'decodeHeaderSymtab' and 'decodeHeaderDynsym'.
+decodeHeaderSymbolTable ::
+  -- | The section type ('SHT_SYMTAB' or 'SHT_DYNSYM').
+  ElfSectionType ->
+  ElfHeaderInfo w ->
+  Either SymtabLookupError (Symtab w)
+decodeHeaderSymbolTable shdrTy elf = elfClassInstances (headerClass (header elf)) $ do
+  let shdrs = headerShdrs elf
+  let symtabs = V.filter (\s -> shdrType s == shdrTy) shdrs
+  let numSymtabs = V.length symtabs
+  if | numSymtabs == 0 ->
+       Left NoSymtabs
+     | numSymtabs > 1 ->
+       Left MultipleSymtabs
+     | otherwise ->
+       first InvalidSymtab $ decodeSymbolTable elf (symtabs V.! 0)
+
+-- | Helper, not exported
+--
+-- The workhorse for 'decodeHeaderSymtabLenient' and 'decodeHaderDynsymLenient'.
+decodeHeaderSymbolTableLenient ::
+  -- | The section type ('SHT_SYMTAB' or 'SHT_DYNSYM').
+  ElfSectionType ->
+  -- | The section name (@.symtab@ or @.dynsym@).
+  B.ByteString ->
+  ElfHeaderInfo w ->
+  Either SymtabError (Maybe (Symtab w))
+decodeHeaderSymbolTableLenient shdrTy shdrNm elf = elfClassInstances (headerClass (header elf)) $ do
+  let shdrsAndIdxs = V.indexed $ headerShdrs elf
+  -- First, filter the section headers of the appropriate type. We do this first
+  -- to avoid needing to decode any other section headers, which might have
+  -- unrelated issues that arise during decoding.
+  let symtabShdrsAndIdxs =
+        V.filter (\(_idx, s) -> shdrType s == shdrTy) shdrsAndIdxs
+  let symtabNamedShdrsRes =
+        traverse (\(idx, s) -> headerNamedShdr elf idx s) symtabShdrsAndIdxs
+  symtabNamedShdrs <-
+    case symtabNamedShdrsRes of
+      Left (idx, e) -> Left $ InvalidSymtabShdrName idx e
+      Right shdrs -> Right shdrs
+  let mbSymtabNamedShdr
+        | V.length symtabNamedShdrs == 1 =
+          Just (symtabNamedShdrs V.! 0)
+        | otherwise =
+          V.find (\tab -> shdrName tab == shdrNm) symtabNamedShdrs
+  traverse @Maybe (decodeSymbolTable elf) mbSymtabNamedShdr
+
+-- | Helper, not exported
+--
+-- The workhorse for 'decodeHeaderSymtabs' and 'decodeHeaderDynsyms'.
+decodeHeaderSymbolTables ::
+  -- | The section type ('SHT_SYMTAB' or 'SHT_DYNSYM').
+  ElfSectionType ->
+  ElfHeaderInfo w ->
+  Either SymtabError (V.Vector (Symtab w))
+decodeHeaderSymbolTables shdrTy elf = elfClassInstances (headerClass (header elf)) $ do
+  let shdrs = headerShdrs elf
+  let symtabs = V.filter (\s -> shdrType s == shdrTy) shdrs
+  traverse (decodeSymbolTable elf) symtabs
+
+-- | Decodes a symbol table from the section headers using the given ELF
+-- header info.
 decodeSymbolTable :: Integral (ElfWordType w)
                   => ElfHeaderInfo w
-                  -> V.Vector (Shdr Word32 (ElfWordType w))
+                  -> Shdr nm (ElfWordType w)
                   -> Either SymtabError (Symtab w)
-decodeSymbolTable elf symtabs = do
+decodeSymbolTable elf symtabShdr = do
   let hdr = header elf
   let contents = headerFileContents elf
   let cl = headerClass hdr
   let dta = headerData hdr
   let shdrs = headerShdrs elf
-  when (V.length symtabs > 1) $ Left MultipleSymtabs
-  let symtabShdr = symtabs V.! 0
   unless (isValidFileRange (shdrFileRange symtabShdr) contents) $ do
     Left InvalidSymtabFileRange
   let symtabBuffer = slice (shdrFileRange symtabShdr) contents
