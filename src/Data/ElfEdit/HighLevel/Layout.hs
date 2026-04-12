@@ -14,7 +14,6 @@ module Data.ElfEdit.HighLevel.Layout
   , elfRegionFileSize
   ) where
 
-import           Control.Lens hiding (enum)
 import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as Bld
@@ -27,6 +26,7 @@ import           Data.Maybe
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as V
 import           Data.Word
+import           Lens.Micro
 import           Numeric
 
 import           Data.ElfEdit.HighLevel.GOT
@@ -158,7 +158,7 @@ updateSections fn0 e0 = elfClassInstances (elfClass e0) $ elfFileData (updateSeq
         impl _  d = pure (Just d)
 
 -- | Traverse elf sections
-elfSections :: Simple Traversal (Elf w) (ElfSection (ElfWordType w))
+elfSections :: Traversal' (Elf w) (ElfSection (ElfWordType w))
 elfSections f = updateSections (fmap Just . f)
 
 ------------------------------------------------------------------------
@@ -298,7 +298,7 @@ elfLayoutData :: ElfLayout w -> ElfData
 elfLayoutData = headerData . elfLayoutHeader
 
 -- | Lens containing size of sections processed so far in layout.
-elfOutputSize :: Simple Lens (ElfLayout w) (FileOffset (ElfWordType w))
+elfOutputSize :: Lens' (ElfLayout w) (FileOffset (ElfWordType w))
 elfOutputSize = lens _elfOutputSize (\s v -> s { _elfOutputSize = v })
 
 -- | Get ehdr from elf layout
@@ -311,19 +311,19 @@ layoutEhdr l = Ehdr { ehdrHeader   = elfLayoutHeader l
                     , ehdrShstrndx = l^.shstrndx
                     }
 
-phdrTableOffset :: Simple Lens (ElfLayout w) (FileOffset (ElfWordType w))
+phdrTableOffset :: Lens' (ElfLayout w) (FileOffset (ElfWordType w))
 phdrTableOffset = lens _phdrTableOffset (\s v -> s { _phdrTableOffset = v })
 
-phdrs :: Simple Lens (ElfLayout w) (Map Word16 (Phdr w))
+phdrs :: Lens' (ElfLayout w) (Map Word16 (Phdr w))
 phdrs = lens _phdrs (\s v -> s { _phdrs = v })
 
-shdrTableOffset :: Simple Lens (ElfLayout w) (FileOffset (ElfWordType w))
+shdrTableOffset :: Lens' (ElfLayout w) (FileOffset (ElfWordType w))
 shdrTableOffset = lens _shdrTableOffset (\s v -> s { _shdrTableOffset = v })
 
-shstrndx :: Simple Lens (ElfLayout w) Word16
+shstrndx :: Lens' (ElfLayout w) Word16
 shstrndx = lens _shstrndx (\s v -> s { _shstrndx = v })
 
-shdrs :: Simple Lens (ElfLayout w) (Map Word16 (Shdr Word32 (ElfWordType w)))
+shdrs :: Lens' (ElfLayout w) (Map Word16 (Shdr Word32 (ElfWordType w)))
 shdrs = lens _shdrs (\s v -> s { _shdrs = v })
 
 allPhdrs :: ElfLayout w -> [Phdr w]

@@ -30,13 +30,13 @@ module Data.ElfEdit.HighLevel.Types
   ) where
 
 import           Control.Applicative
-import           Control.Lens hiding (enum)
 import           Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
 import           Data.Word
 import           GHC.TypeLits
+import           Lens.Micro
 import           Prettyprinter
 
 import           Data.ElfEdit.Prim
@@ -331,5 +331,5 @@ elfHeader e = ElfHeader { headerData       = elfData e
                         }
 
 -- | Lens to access top-level regions in Elf file.
-elfFileData :: Simple Lens (Elf w) (Seq.Seq (ElfDataRegion w))
+elfFileData :: Lens' (Elf w) (Seq.Seq (ElfDataRegion w))
 elfFileData = lens _elfFileData (\s v -> s { _elfFileData = v })

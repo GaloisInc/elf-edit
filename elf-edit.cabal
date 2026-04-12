@@ -26,7 +26,7 @@ library
     bytestring,
     containers,
     directory,
-    lens,
+    microlens,
     mtl,
     prettyprinter >= 1.7.0,
     utf8-string,

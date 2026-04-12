@@ -74,7 +74,6 @@ module Data.ElfEdit
   , stringTable
   ) where
 
-import           Control.Lens ((^.), (^..), filtered, over)
 import qualified Control.Monad.Fail as Fail
 import qualified Data.ByteString as B
 import qualified Data.ByteString.UTF8 as B (toString)
@@ -82,6 +81,7 @@ import qualified Data.Foldable as F
 import           Data.Map.Strict (Map)
 import           Data.Maybe (isJust)
 import           Data.Word
+import           Lens.Micro ((^.), (^..), filtered, over)
 
 import           Data.ElfEdit.HighLevel.GOT
 import           Data.ElfEdit.HighLevel.Get
