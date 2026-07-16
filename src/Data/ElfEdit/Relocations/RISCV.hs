@@ -274,8 +274,13 @@ pattern R_RISCV_TLSDESC_CALL = RISCV_RelocationType 65
 riscvReloc :: RISCV_RelocationType w
            -> String
            -> Int
-           -> (RISCV_RelocationType w, (String,Int))
-riscvReloc tp nm c = (tp, (nm, c))
+           -> (RISCV_RelocationType w, (String,Maybe Int))
+riscvReloc tp nm c = (tp, (nm, Just c))
+
+riscvUnsupportedReloc :: RISCV_RelocationType w
+                      -> String
+                      -> (RISCV_RelocationType w, (String,Maybe Int))
+riscvUnsupportedReloc tp nm = (tp, (nm, Nothing))
 
 -- These values are derived from Table 5 (Variables used in relocation fields) of
 -- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#relocations.
@@ -298,47 +303,24 @@ word32 = 32
 word64 :: Int
 word64 = 64
 
--- The following variable types are described in Figure 2.3 (RISC-V base
+-- The following relocation field encodings are described in Figure 2.3 (RISC-V base
 -- instruction formats showing immediate variants) and Table 12.1 (Compressed
 -- 16-bit RVC instruction formats) of
 -- https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf.
 --
--- Note that these values are not currently supported. See
+-- Note that these encodings are not currently supported. See
 -- https://github.com/GaloisInc/elf-edit/issues/39 for more information.
-
-bType :: Int
-bType = error "B-Type fields not currently supported"
-
-cbType :: Int
-cbType = error "CB-Type fields not currently supported"
-
-cjType :: Int
-cjType = error "CJ-Type fields not currently supported"
-
-iType :: Int
-iType = error "I-Type fields not currently supported"
-
-sType :: Int
-sType = error "S-Type fields not currently supported"
-
-uType :: Int
-uType = error "U-Type fields not currently supported"
-
-jType :: Int
-jType = error "J-Type fields not currently supported"
-
-uiType :: Int
-uiType = error "U+I-Type fields not currently supported"
-
--- This is a variable-length encoding, and it's unclear how to support this at
--- the moment.
-uleb128 :: Int
-uleb128 = error "ULEB128-encoded variables not yet supported"
-
--- See https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#tls-descriptors.
--- It's unclear how to support this at the moment.
-tlsDescriptor :: Int
-tlsDescriptor = error "TLS descriptor values not yet supported"
+--
+-- They are not contiguous low-bit fields, so the corresponding relocation
+-- types are represented as 'Nothing' by 'relocTargetBits'.
+--
+-- ULEB128 is a variable-length encoding, and it's unclear how to support it at
+-- the moment, so its relocation types are likewise represented as 'Nothing'.
+--
+-- TLS descriptor values are described at
+-- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#tls-descriptors.
+-- It's unclear how to support this at the moment, so they are likewise
+-- represented as 'Nothing'.
 
 -- This map is derived from Table 3 (Relocation types) of
 -- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#relocations.
@@ -346,7 +328,7 @@ tlsDescriptor = error "TLS descriptor values not yet supported"
 riscv_RelocationTypes ::
   forall w.
   (ElfWidthConstraints w, KnownNat w) =>
-  Map.Map (RISCV_RelocationType w) (String, Int)
+  Map.Map (RISCV_RelocationType w) (String, Maybe Int)
 riscv_RelocationTypes = Map.fromList
   [ riscvReloc R_RISCV_NONE "R_RISCV_NONE" none
   , riscvReloc R_RISCV_32 "R_RISCV_32" word32
@@ -360,23 +342,23 @@ riscv_RelocationTypes = Map.fromList
   , riscvReloc R_RISCV_TLS_DTPREL64 "R_RISCV_TLS_DTPREL64" word64
   , riscvReloc R_RISCV_TLS_TPREL32 "R_RISCV_TLS_TPREL32" word32
   , riscvReloc R_RISCV_TLS_TPREL64 "R_RISCV_TLS_TPREL64" word64
-  , riscvReloc R_RISCV_TLSDESC "R_RISCV_TLSDESC" tlsDescriptor
-  , riscvReloc R_RISCV_BRANCH "R_RISCV_BRANCH" bType
-  , riscvReloc R_RISCV_JAL "R_RISCV_JAL" jType
-  , riscvReloc R_RISCV_CALL "R_RISCV_CALL" uiType
-  , riscvReloc R_RISCV_CALL_PLT "R_RISCV_CALL_PLT" uiType
-  , riscvReloc R_RISCV_GOT_HI20 "R_RISCV_GOT_HI20" uType
-  , riscvReloc R_RISCV_TLS_GOT_HI20 "R_RISCV_TLS_GOT_HI20" uType
-  , riscvReloc R_RISCV_TLS_GD_HI20 "R_RISCV_TLS_GD_HI20" uType
-  , riscvReloc R_RISCV_PCREL_HI20 "R_RISCV_PCREL_HI20" uType
-  , riscvReloc R_RISCV_PCREL_LO12_I "R_RISCV_PCREL_LO12_I" iType
-  , riscvReloc R_RISCV_PCREL_LO12_S "R_RISCV_PCREL_LO12_S" sType
-  , riscvReloc R_RISCV_HI20 "R_RISCV_HI20" uType
-  , riscvReloc R_RISCV_LO12_I "R_RISCV_LO12_I" iType
-  , riscvReloc R_RISCV_LO12_S "R_RISCV_LO12_S" sType
-  , riscvReloc R_RISCV_TPREL_HI20 "R_RISCV_TPREL_HI20" uType
-  , riscvReloc R_RISCV_TPREL_LO12_I "R_RISCV_TPREL_LO12_I" iType
-  , riscvReloc R_RISCV_TPREL_LO12_S "R_RISCV_TPREL_LO12_S" sType
+  , riscvUnsupportedReloc R_RISCV_TLSDESC "R_RISCV_TLSDESC"
+  , riscvUnsupportedReloc R_RISCV_BRANCH "R_RISCV_BRANCH" -- B-Type
+  , riscvUnsupportedReloc R_RISCV_JAL "R_RISCV_JAL" -- J-Type
+  , riscvUnsupportedReloc R_RISCV_CALL "R_RISCV_CALL" -- U+I-Type
+  , riscvUnsupportedReloc R_RISCV_CALL_PLT "R_RISCV_CALL_PLT" -- U+I-Type
+  , riscvUnsupportedReloc R_RISCV_GOT_HI20 "R_RISCV_GOT_HI20" -- U-Type
+  , riscvUnsupportedReloc R_RISCV_TLS_GOT_HI20 "R_RISCV_TLS_GOT_HI20" -- U-Type
+  , riscvUnsupportedReloc R_RISCV_TLS_GD_HI20 "R_RISCV_TLS_GD_HI20" -- U-Type
+  , riscvUnsupportedReloc R_RISCV_PCREL_HI20 "R_RISCV_PCREL_HI20" -- U-Type
+  , riscvUnsupportedReloc R_RISCV_PCREL_LO12_I "R_RISCV_PCREL_LO12_I" -- I-Type
+  , riscvUnsupportedReloc R_RISCV_PCREL_LO12_S "R_RISCV_PCREL_LO12_S" -- S-Type
+  , riscvUnsupportedReloc R_RISCV_HI20 "R_RISCV_HI20" -- U-Type
+  , riscvUnsupportedReloc R_RISCV_LO12_I "R_RISCV_LO12_I" -- I-Type
+  , riscvUnsupportedReloc R_RISCV_LO12_S "R_RISCV_LO12_S" -- S-Type
+  , riscvUnsupportedReloc R_RISCV_TPREL_HI20 "R_RISCV_TPREL_HI20" -- U-Type
+  , riscvUnsupportedReloc R_RISCV_TPREL_LO12_I "R_RISCV_TPREL_LO12_I" -- I-Type
+  , riscvUnsupportedReloc R_RISCV_TPREL_LO12_S "R_RISCV_TPREL_LO12_S" -- S-Type
   , riscvReloc R_RISCV_TPREL_ADD "R_RISCV_TPREL_ADD" none
   , riscvReloc R_RISCV_ADD8 "R_RISCV_ADD8" word8
   , riscvReloc R_RISCV_ADD16 "R_RISCV_ADD16" word16
@@ -388,8 +370,8 @@ riscv_RelocationTypes = Map.fromList
   , riscvReloc R_RISCV_SUB64 "R_RISCV_SUB64" word64
   , riscvReloc R_RISCV_GOT32_PCREL "R_RISCV_GOT32_PCREL" word32
   , riscvReloc R_RISCV_ALIGN "R_RISCV_ALIGN" none
-  , riscvReloc R_RISCV_RVC_BRANCH "R_RISCV_RVC_BRANCH" cbType
-  , riscvReloc R_RISCV_RVC_JUMP "R_RISCV_RVC_JUMP" cjType
+  , riscvUnsupportedReloc R_RISCV_RVC_BRANCH "R_RISCV_RVC_BRANCH" -- CB-Type
+  , riscvUnsupportedReloc R_RISCV_RVC_JUMP "R_RISCV_RVC_JUMP" -- CJ-Type
   , riscvReloc R_RISCV_RELAX "R_RISCV_RELAX" none
   , riscvReloc R_RISCV_SUB6 "R_RISCV_SUB6" word6
   , riscvReloc R_RISCV_SET6 "R_RISCV_SET6" word6
@@ -399,11 +381,11 @@ riscv_RelocationTypes = Map.fromList
   , riscvReloc R_RISCV_32_PCREL "R_RISCV_32_PCREL" word32
   , riscvReloc R_RISCV_IRELATIVE "R_RISCV_IRELATIVE" wordclass
   , riscvReloc R_RISCV_PLT32 "R_RISCV_PLT32" word32
-  , riscvReloc R_RISCV_SET_ULEB128 "R_RISCV_SET_ULEB128" uleb128
-  , riscvReloc R_RISCV_SUB_ULEB128 "R_RISCV_SUB_ULEB128" uleb128
-  , riscvReloc R_RISCV_TLSDESC_HI20 "R_RISCV_TLSDESC_HI20" uType
-  , riscvReloc R_RISCV_TLSDESC_LOAD_LO12 "R_RISCV_TLSDESC_LOAD_LO12" iType
-  , riscvReloc R_RISCV_TLSDESC_ADD_LO12 "R_RISCV_TLSDESC_ADD_LO12" iType
+  , riscvUnsupportedReloc R_RISCV_SET_ULEB128 "R_RISCV_SET_ULEB128"
+  , riscvUnsupportedReloc R_RISCV_SUB_ULEB128 "R_RISCV_SUB_ULEB128"
+  , riscvUnsupportedReloc R_RISCV_TLSDESC_HI20 "R_RISCV_TLSDESC_HI20" -- U-Type
+  , riscvUnsupportedReloc R_RISCV_TLSDESC_LOAD_LO12 "R_RISCV_TLSDESC_LOAD_LO12" -- I-Type
+  , riscvUnsupportedReloc R_RISCV_TLSDESC_ADD_LO12 "R_RISCV_TLSDESC_ADD_LO12" -- I-Type
   , riscvReloc R_RISCV_TLSDESC_CALL "R_RISCV_TLSDESC_CALL" none
   ]
   where
@@ -429,7 +411,7 @@ instance (ElfWidthConstraints w, KnownNat w) => IsRelocationType (RISCV_Relocati
   relocTargetBits tp =
     case Map.lookup tp riscv_RelocationTypes of
       Just (_,w) -> w
-      Nothing -> fromInteger $ natVal $ Proxy @w
+      Nothing -> Just (fromInteger $ natVal $ Proxy @w)
 
 -- We only support 32-bit and 64-bit RISC-V. This is a helper function for
 -- dispatching on the RISC-V word size, with each continuation having type-level

@@ -455,7 +455,7 @@ instance IsRelocationType ARM32_RelocationType where
   relaWidth _ = ELFCLASS32
 
   relocTargetBits tp =
-    case tp of
+    Just $ case tp of
       R_ARM_ABS16 -> 16
       R_ARM_ABS8  -> 8
       R_ARM_PREL31 -> 31

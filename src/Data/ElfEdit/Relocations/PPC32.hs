@@ -185,14 +185,8 @@ pattern R_PPC_ADDR30 = PPC32_RelocationType 37 -- (S + A - P) >> 2
 ppc32Reloc :: PPC32_RelocationType
            -> String
            -> Int
-           -> (PPC32_RelocationType, (String,Int))
-ppc32Reloc tp nm c = (tp, (nm, c))
-
--- These values are derived from Figure 4-1 (Relocation Fields) of
--- http://refspecs.linux-foundation.org/elf/elfspec_ppc.pdf.
---
--- Note that some of these values are not currently supported. See
--- https://github.com/GaloisInc/elf-edit/issues/39 for more information.
+           -> (PPC32_RelocationType, (String,Maybe Int))
+ppc32Reloc tp nm c = (tp, (nm, Just c))
 
 none :: Int
 none = 0
@@ -203,44 +197,51 @@ word32 = 32
 word30 :: Int
 word30 = 30
 
-low24 :: Int
-low24 = error "low24 relocation entries not currently supported"
-
-low14 :: Int
-low14 = error "low14 relocation entries not currently supported"
-
 half16 :: Int
 half16 = 16
 
+-- Branch relocation fields are not contiguous low-bit fields, so they are
+-- represented as 'Nothing' by 'relocTargetBits'.
+ppc32UnsupportedReloc :: PPC32_RelocationType
+                     -> String
+                     -> (PPC32_RelocationType, (String,Maybe Int))
+ppc32UnsupportedReloc tp nm = (tp, (nm, Nothing))
+
+-- These values are derived from Figure 4-1 (Relocation Fields) of
+-- http://refspecs.linux-foundation.org/elf/elfspec_ppc.pdf.
+--
+-- Note that some of these values are not currently supported. See
+-- https://github.com/GaloisInc/elf-edit/issues/39 for more information.
+--
 -- This map is derived from Table 4-8 (Relocation Types) of
 -- http://refspecs.linux-foundation.org/elf/elfspec_ppc.pdf.
 
-ppc32_RelocationTypes :: Map.Map PPC32_RelocationType (String, Int)
+ppc32_RelocationTypes :: Map.Map PPC32_RelocationType (String, Maybe Int)
 ppc32_RelocationTypes = Map.fromList
   [ ppc32Reloc R_PPC_NONE "R_PPC_NONE" none
   , ppc32Reloc R_PPC_ADDR32 "R_PPC_ADDR32" word32
-  , ppc32Reloc R_PPC_ADDR24 "R_PPC_ADDR24" low24
+  , ppc32UnsupportedReloc R_PPC_ADDR24 "R_PPC_ADDR24"
   , ppc32Reloc R_PPC_ADDR16 "R_PPC_ADDR16" half16
   , ppc32Reloc R_PPC_ADDR16_LO "R_PPC_ADDR16_LO" half16
   , ppc32Reloc R_PPC_ADDR16_HI "R_PPC_ADDR16_HI" half16
   , ppc32Reloc R_PPC_ADDR16_HA "R_PPC_ADDR16_HA" half16
-  , ppc32Reloc R_PPC_ADDR14 "R_PPC_ADDR14" low14
-  , ppc32Reloc R_PPC_ADDR14_BRTAKEN "R_PPC_ADDR14_BRTAKEN" low14
-  , ppc32Reloc R_PPC_ADDR14_BRNTAKEN "R_PPC_ADDR14_BRNTAKEN" low14
-  , ppc32Reloc R_PPC_REL24 "R_PPC_REL24" low24
-  , ppc32Reloc R_PPC_REL14 "R_PPC_REL14" low14
-  , ppc32Reloc R_PPC_REL14_BRTAKEN "R_PPC_REL14_BRTAKEN" low14
-  , ppc32Reloc R_PPC_REL14_BRNTAKEN "R_PPC_REL14_BRNTAKEN" low14
+  , ppc32UnsupportedReloc R_PPC_ADDR14 "R_PPC_ADDR14"
+  , ppc32UnsupportedReloc R_PPC_ADDR14_BRTAKEN "R_PPC_ADDR14_BRTAKEN"
+  , ppc32UnsupportedReloc R_PPC_ADDR14_BRNTAKEN "R_PPC_ADDR14_BRNTAKEN"
+  , ppc32UnsupportedReloc R_PPC_REL24 "R_PPC_REL24"
+  , ppc32UnsupportedReloc R_PPC_REL14 "R_PPC_REL14"
+  , ppc32UnsupportedReloc R_PPC_REL14_BRTAKEN "R_PPC_REL14_BRTAKEN"
+  , ppc32UnsupportedReloc R_PPC_REL14_BRNTAKEN "R_PPC_REL14_BRNTAKEN"
   , ppc32Reloc R_PPC_GOT16 "R_PPC_GOT16" half16
   , ppc32Reloc R_PPC_GOT16_LO "R_PPC_GOT16_LO" half16
   , ppc32Reloc R_PPC_GOT16_HI "R_PPC_GOT16_HI" half16
   , ppc32Reloc R_PPC_GOT16_HA "R_PPC_GOT16_HA" half16
-  , ppc32Reloc R_PPC_PLTREL24 "R_PPC_PLTREL24" low24
+  , ppc32UnsupportedReloc R_PPC_PLTREL24 "R_PPC_PLTREL24"
   , ppc32Reloc R_PPC_COPY "R_PPC_COPY" none
   , ppc32Reloc R_PPC_GLOB_DAT "R_PPC_GLOB_DAT" word32
   , ppc32Reloc R_PPC_JMP_SLOT "R_PPC_JMP_SLOT" none
   , ppc32Reloc R_PPC_RELATIVE "R_PPC_RELATIVE" word32
-  , ppc32Reloc R_PPC_LOCAL24PC "R_PPC_LOCAL24PC" low24
+  , ppc32UnsupportedReloc R_PPC_LOCAL24PC "R_PPC_LOCAL24PC"
   , ppc32Reloc R_PPC_UADDR32 "R_PPC_UADDR32" word32
   , ppc32Reloc R_PPC_UADDR16 "R_PPC_UADDR16" half16
   , ppc32Reloc R_PPC_REL32 "R_PPC_REL32" word32
@@ -276,4 +277,4 @@ instance IsRelocationType PPC32_RelocationType where
   relocTargetBits tp =
     case Map.lookup tp ppc32_RelocationTypes of
       Just (_,w) -> w
-      Nothing -> 32
+      Nothing -> Just 32

@@ -69,7 +69,7 @@ instance IsRelocationType AArch64_RelocationType where
 
   relaWidth _ = ELFCLASS64
 
-  relocTargetBits _tp = 64
+  relocTargetBits _tp = Just 64
   toRelocType = AArch64_RelocationType . fromIntegral
 
   isRelative _tp = False
