@@ -102,6 +102,21 @@ stringTableConsistencyProp strings =
   where
     (bytes, tab) = Elf.encodeStringTable (map unwrapAsciiString strings)
 
+testRelocTargetBits :: T.Assertion
+testRelocTargetBits = do
+  T.assertEqual "PPC32 direct target" (Just 32)
+    (Elf.relocTargetBits Elf.R_PPC_ADDR32)
+  T.assertEqual "PPC32 instruction target" Nothing
+    (Elf.relocTargetBits Elf.R_PPC_ADDR24)
+  T.assertEqual "PPC64 instruction target" Nothing
+    (Elf.relocTargetBits Elf.R_PPC64_REL24)
+  T.assertEqual "RISC-V instruction target" Nothing
+    (Elf.relocTargetBits
+      (Elf.R_RISCV_BRANCH :: Elf.RISCV_RelocationType 32))
+  T.assertEqual "RISC-V variable target" Nothing
+    (Elf.relocTargetBits
+      (Elf.R_RISCV_SET_ULEB128 :: Elf.RISCV_RelocationType 64))
+
 checkStringTableEntry :: C8.ByteString -> (B.ByteString, Word32) -> Bool
 checkStringTableEntry bytes (str, off) = str == bstr
   where
@@ -301,7 +316,8 @@ tests = T.testGroup "ELF Tests"
       ]
 
     , T.testGroup "Relocation entries"
-      [ T.testCase "PPC32 relocations" $
+      [ T.testCase "relocation target bits" testRelocTargetBits
+      , T.testCase "PPC32 relocations" $
           testRelocEntries
             (Proxy @Elf.PPC32_RelocationType)
             "./tests/ppc32-relocs.elf"

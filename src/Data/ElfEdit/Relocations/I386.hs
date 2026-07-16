@@ -78,7 +78,7 @@ instance IsRelocationType I386_RelocationType where
   isRelative R_386_RELATIVE = True
   isRelative _ = False
   relocTargetBits tp =
-    case tp of
+    Just $ case tp of
       R_386_NONE ->  0
       R_386_COPY ->  0
 --      R_386_16   -> 16

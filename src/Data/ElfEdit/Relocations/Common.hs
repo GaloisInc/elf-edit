@@ -94,8 +94,10 @@ class (Show tp, Show (RelocationWord tp)) => IsRelocationType tp where
   -- relocation types.  This is used for rel entries, where to compute
   -- the addend the next @ceiling (bits/8)@ bytes is read out of memory
   -- as a list of bytes and the low @bits@ are interpreted as a signed
-  -- integer (where low uses the elf's endianness) and sign extended.
-  relocTargetBits :: tp -> Int
+  -- integer (where low uses the elf's endianness) and sign extended.  A value
+  -- of 'Nothing' means that this information is unsupported by this API.
+  -- Callers that require it should treat the relocation as unsupported.
+  relocTargetBits :: tp -> Maybe Int
 
   -- | Convert a word from a relocation entry to the type.
   toRelocType :: Word32 -> tp

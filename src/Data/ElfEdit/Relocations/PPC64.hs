@@ -449,14 +449,8 @@ pattern R_PPC64_DTPREL16_HIGHESTA = PPC64_RelocationType 106 -- #highesta(@dtpre
 ppc64Reloc :: PPC64_RelocationType
            -> String
            -> Int
-           -> (PPC64_RelocationType, (String,Int))
-ppc64Reloc tp nm c = (tp, (nm, c))
-
--- These values are derived from Section 4.5.1 (Relocation Types) of
--- https://refspecs.linuxfoundation.org/ELF/ppc64/PPC-elf64abi-1.9.pdf.
---
--- Note that some of these values are not currently supported. See
--- https://github.com/GaloisInc/elf-edit/issues/39 for more information.
+           -> (PPC64_RelocationType, (String,Maybe Int))
+ppc64Reloc tp nm c = (tp, (nm, Just c))
 
 none :: Int
 none = 0
@@ -470,37 +464,44 @@ word32 = 32
 word30 :: Int
 word30 = 30
 
-low24 :: Int
-low24 = error "low24 relocation entries not currently supported"
-
-low14 :: Int
-low14 = error "low14 relocation entries not currently supported"
-
 half16 :: Int
 half16 = 16
 
 half16ds :: Int
 half16ds = 14
 
+-- Branch relocation fields are not contiguous low-bit fields, so they are
+-- represented as 'Nothing' by 'relocTargetBits'.
+ppc64UnsupportedReloc :: PPC64_RelocationType
+                     -> String
+                     -> (PPC64_RelocationType, (String,Maybe Int))
+ppc64UnsupportedReloc tp nm = (tp, (nm, Nothing))
+
+-- These values are derived from Section 4.5.1 (Relocation Types) of
+-- https://refspecs.linuxfoundation.org/ELF/ppc64/PPC-elf64abi-1.9.pdf.
+--
+-- Note that some of these values are not currently supported. See
+-- https://github.com/GaloisInc/elf-edit/issues/39 for more information.
+--
 -- This map is derived from Figure 4-1 (Relocation Types) of
 -- https://refspecs.linuxfoundation.org/ELF/ppc64/PPC-elf64abi-1.9.pdf.
 
-ppc64_RelocationTypes :: Map.Map PPC64_RelocationType (String, Int)
+ppc64_RelocationTypes :: Map.Map PPC64_RelocationType (String, Maybe Int)
 ppc64_RelocationTypes = Map.fromList
   [ ppc64Reloc R_PPC64_NONE "R_PPC64_NONE" none
   , ppc64Reloc R_PPC64_ADDR32 "R_PPC64_ADDR32" word32
-  , ppc64Reloc R_PPC64_ADDR24 "R_PPC64_ADDR24" low24
+  , ppc64UnsupportedReloc R_PPC64_ADDR24 "R_PPC64_ADDR24"
   , ppc64Reloc R_PPC64_ADDR16 "R_PPC64_ADDR16" half16
   , ppc64Reloc R_PPC64_ADDR16_LO "R_PPC64_ADDR16_LO" half16
   , ppc64Reloc R_PPC64_ADDR16_HI "R_PPC64_ADDR16_HI" half16
   , ppc64Reloc R_PPC64_ADDR16_HA "R_PPC64_ADDR16_HA" half16
-  , ppc64Reloc R_PPC64_ADDR14 "R_PPC64_ADDR14" low14
-  , ppc64Reloc R_PPC64_ADDR14_BRTAKEN "R_PPC64_ADDR14_BRTAKEN" low14
-  , ppc64Reloc R_PPC64_ADDR14_BRNTAKEN "R_PPC64_ADDR14_BRNTAKEN" low14
-  , ppc64Reloc R_PPC64_REL24 "R_PPC64_REL24" low24
-  , ppc64Reloc R_PPC64_REL14 "R_PPC64_REL14" low14
-  , ppc64Reloc R_PPC64_REL14_BRTAKEN "R_PPC64_REL14_BRTAKEN" low14
-  , ppc64Reloc R_PPC64_REL14_BRNTAKEN "R_PPC64_REL14_BRNTAKEN" low14
+  , ppc64UnsupportedReloc R_PPC64_ADDR14 "R_PPC64_ADDR14"
+  , ppc64UnsupportedReloc R_PPC64_ADDR14_BRTAKEN "R_PPC64_ADDR14_BRTAKEN"
+  , ppc64UnsupportedReloc R_PPC64_ADDR14_BRNTAKEN "R_PPC64_ADDR14_BRNTAKEN"
+  , ppc64UnsupportedReloc R_PPC64_REL24 "R_PPC64_REL24"
+  , ppc64UnsupportedReloc R_PPC64_REL14 "R_PPC64_REL14"
+  , ppc64UnsupportedReloc R_PPC64_REL14_BRTAKEN "R_PPC64_REL14_BRTAKEN"
+  , ppc64UnsupportedReloc R_PPC64_REL14_BRNTAKEN "R_PPC64_REL14_BRNTAKEN"
   , ppc64Reloc R_PPC64_GOT16 "R_PPC64_GOT16" half16
   , ppc64Reloc R_PPC64_GOT16_LO "R_PPC64_GOT16_LO" half16
   , ppc64Reloc R_PPC64_GOT16_HI "R_PPC64_GOT16_HI" half16
@@ -612,4 +613,4 @@ instance IsRelocationType PPC64_RelocationType where
   relocTargetBits tp =
     case Map.lookup tp ppc64_RelocationTypes of
       Just (_,w) -> w
-      Nothing -> 64
+      Nothing -> Just 64

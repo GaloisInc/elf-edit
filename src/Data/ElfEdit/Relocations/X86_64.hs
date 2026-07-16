@@ -212,6 +212,6 @@ instance IsRelocationType X86_64_RelocationType where
   isRelative _ = False
 
   relocTargetBits tp =
-    case Map.lookup tp x86_64_RelocationTypes of
+    Just $ case Map.lookup tp x86_64_RelocationTypes of
       Just (_,w) -> w
       Nothing -> 64
