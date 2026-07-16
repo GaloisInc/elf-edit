@@ -336,7 +336,7 @@ pattern R_PPC64_TPREL16 :: PPC64_RelocationType
 pattern R_PPC64_TPREL16 = PPC64_RelocationType 69 -- @tprel
 
 pattern R_PPC64_TPREL16_LO :: PPC64_RelocationType
-pattern R_PPC64_TPREL16_LO = PPC64_RelocationType 60 -- #lo(@tprel)
+pattern R_PPC64_TPREL16_LO = PPC64_RelocationType 70 -- #lo(@tprel)
 
 pattern R_PPC64_TPREL16_HI :: PPC64_RelocationType
 pattern R_PPC64_TPREL16_HI = PPC64_RelocationType 71 -- #hi(@tprel)

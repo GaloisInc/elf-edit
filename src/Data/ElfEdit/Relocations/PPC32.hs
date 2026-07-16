@@ -40,7 +40,7 @@ module Data.ElfEdit.Relocations.PPC32
   , pattern R_PPC_PLT32
   , pattern R_PPC_PLTREL32
   , pattern R_PPC_PLT16_LO
-  , pattern R_PPL_PLT16_HI
+  , pattern R_PPC_PLT16_HI
   , pattern R_PPC_PLT16_HA
   , pattern R_PPC_SDAREL16
   , pattern R_PPC_SECTOFF
@@ -158,8 +158,8 @@ pattern R_PPC_PLTREL32 = PPC32_RelocationType 28 -- L + A - P
 pattern R_PPC_PLT16_LO :: PPC32_RelocationType
 pattern R_PPC_PLT16_LO = PPC32_RelocationType 29 -- #lo(L + A)
 
-pattern R_PPL_PLT16_HI :: PPC32_RelocationType
-pattern R_PPL_PLT16_HI = PPC32_RelocationType 30 -- #hi(L + A)
+pattern R_PPC_PLT16_HI :: PPC32_RelocationType
+pattern R_PPC_PLT16_HI = PPC32_RelocationType 30 -- #hi(L + A)
 
 pattern R_PPC_PLT16_HA :: PPC32_RelocationType
 pattern R_PPC_PLT16_HA = PPC32_RelocationType 31 -- #ha(L + A)
@@ -248,7 +248,7 @@ ppc32_RelocationTypes = Map.fromList
   , ppc32Reloc R_PPC_PLT32 "R_PPC_PLT32" word32
   , ppc32Reloc R_PPC_PLTREL32 "R_PPC_PLTREL32" word32
   , ppc32Reloc R_PPC_PLT16_LO "R_PPC_PLT16_LO" half16
-  , ppc32Reloc R_PPL_PLT16_HI "R_PPL_PLT16_HI" half16
+  , ppc32Reloc R_PPC_PLT16_HI "R_PPC_PLT16_HI" half16
   , ppc32Reloc R_PPC_PLT16_HA "R_PPC_PLT16_HA" half16
   , ppc32Reloc R_PPC_SDAREL16 "R_PPC_SDAREL16" half16
   , ppc32Reloc R_PPC_SECTOFF "R_PPC_SECTOFF" half16
