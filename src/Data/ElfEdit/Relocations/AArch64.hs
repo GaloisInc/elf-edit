@@ -12,6 +12,8 @@ module Data.ElfEdit.Relocations.AArch64
   , pattern R_AARCH64_JUMP_SLOT
   , pattern R_AARCH64_RELATIVE
   , pattern R_AARCH64_TLS_DTPMOD64
+  , pattern R_AARCH64_TLS_DTPREL64
+  , pattern R_AARCH64_TLS_TPREL64
   , aarch64RelocationTypeNameMap
   ) where
 
@@ -46,7 +48,13 @@ pattern R_AARCH64_RELATIVE :: AArch64_RelocationType
 pattern R_AARCH64_RELATIVE = AArch64_RelocationType 1027
 
 pattern R_AARCH64_TLS_DTPMOD64 :: AArch64_RelocationType
-pattern R_AARCH64_TLS_DTPMOD64 = AArch64_RelocationType 1029
+pattern R_AARCH64_TLS_DTPMOD64 = AArch64_RelocationType 1028
+
+pattern R_AARCH64_TLS_DTPREL64 :: AArch64_RelocationType
+pattern R_AARCH64_TLS_DTPREL64 = AArch64_RelocationType 1029
+
+pattern R_AARCH64_TLS_TPREL64 :: AArch64_RelocationType
+pattern R_AARCH64_TLS_TPREL64 = AArch64_RelocationType 1030
 
 -- | Maps known AArch64 relocation types to their string representation.
 aarch64RelocationTypeNameMap :: Map.Map AArch64_RelocationType String
@@ -56,6 +64,8 @@ aarch64RelocationTypeNameMap = Map.fromList
   , (,) R_AARCH64_JUMP_SLOT    "R_AARCH64_JUMP_SLOT"
   , (,) R_AARCH64_RELATIVE     "R_AARCH64_RELATIVE"
   , (,) R_AARCH64_TLS_DTPMOD64 "R_AARCH64_TLS_DTPMOD64"
+  , (,) R_AARCH64_TLS_DTPREL64 "R_AARCH64_TLS_DTPREL64"
+  , (,) R_AARCH64_TLS_TPREL64  "R_AARCH64_TLS_TPREL64"
   ]
 
 instance Show AArch64_RelocationType where
