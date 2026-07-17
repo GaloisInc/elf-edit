@@ -14,6 +14,26 @@ Data-Files:    tests/empty.elf tests/Test.hs
 
 extra-source-files:
   ChangeLog.md
+  tests/Makefile
+  tests/relocs/Makefile
+  tests/relocs/aarch64/relocs.o
+  tests/relocs/aarch64/relocs.o.relocs
+  tests/relocs/aarch64/relocs.s
+  tests/relocs/arm32/relocs.o
+  tests/relocs/arm32/relocs.o.relocs
+  tests/relocs/arm32/relocs.s
+  tests/relocs/ppc32/relocs.o
+  tests/relocs/ppc32/relocs.o.relocs
+  tests/relocs/ppc32/relocs.s
+  tests/relocs/ppc64/relocs.o
+  tests/relocs/ppc64/relocs.o.relocs
+  tests/relocs/ppc64/relocs.s
+  tests/relocs/riscv/relocs-rv32gc.o
+  tests/relocs/riscv/relocs-rv64gc.o
+  tests/relocs/riscv/relocs.s
+  tests/relocs/x86_64/relocs.o
+  tests/relocs/x86_64/relocs.o.relocs
+  tests/relocs/x86_64/relocs.s
 
 source-repository head
   type: git
@@ -66,6 +86,8 @@ library
 test-suite test-elf
   type: exitcode-stdio-1.0
   main-is: Test.hs
+  other-modules:
+    Relocations
   ghc-options: -Wall
   hs-source-dirs: tests
   build-depends:
@@ -75,6 +97,7 @@ test-suite test-elf
     directory,
     elf-edit,
     tasty,
+    tasty-golden,
     tasty-hunit >= 0.10,
     tasty-quickcheck,
     vector
