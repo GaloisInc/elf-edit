@@ -4,7 +4,7 @@ Maintainer       : Ryan Scott <rscott@galois.com>
 
 RISC-V relocation types. The list of relocation types is taken from Table 3
 (Relocation types) of
-<https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#relocations>.
+<https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/e03d44ae2f0e1144f9498c2896b5ae25b0449398/riscv-elf.adoc#relocations>.
 -}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -76,6 +76,7 @@ module Data.ElfEdit.Relocations.RISCV
   , pattern R_RISCV_TLSDESC_LOAD_LO12
   , pattern R_RISCV_TLSDESC_ADD_LO12
   , pattern R_RISCV_TLSDESC_CALL
+  , pattern R_RISCV_VENDOR
   , riscv_RelocationTypes
   ) where
 
@@ -98,7 +99,7 @@ deriving instance Eq  (ElfWordType w) => Eq  (RISCV_RelocationType w)
 deriving instance Ord (ElfWordType w) => Ord (RISCV_RelocationType w)
 
 -- These values are derived from Table 3 (Relocation types) of
--- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#relocations.
+-- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/e03d44ae2f0e1144f9498c2896b5ae25b0449398/riscv-elf.adoc#relocations.
 
 pattern R_RISCV_NONE :: (Eq (ElfWordType w), Num (ElfWordType w)) => RISCV_RelocationType w
 pattern R_RISCV_NONE = RISCV_RelocationType 0
@@ -271,6 +272,9 @@ pattern R_RISCV_TLSDESC_ADD_LO12 = RISCV_RelocationType 64 -- S - P
 pattern R_RISCV_TLSDESC_CALL :: (Eq (ElfWordType w), Num (ElfWordType w)) => RISCV_RelocationType w
 pattern R_RISCV_TLSDESC_CALL = RISCV_RelocationType 65
 
+pattern R_RISCV_VENDOR :: (Eq (ElfWordType w), Num (ElfWordType w)) => RISCV_RelocationType w
+pattern R_RISCV_VENDOR = RISCV_RelocationType 191
+
 riscvReloc :: RISCV_RelocationType w
            -> String
            -> Int
@@ -283,7 +287,7 @@ riscvUnsupportedReloc :: RISCV_RelocationType w
 riscvUnsupportedReloc tp nm = (tp, (nm, Nothing))
 
 -- These values are derived from Table 5 (Variables used in relocation fields) of
--- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#relocations.
+-- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/e03d44ae2f0e1144f9498c2896b5ae25b0449398/riscv-elf.adoc#relocations.
 
 none :: Int
 none = 0
@@ -318,12 +322,12 @@ word64 = 64
 -- the moment, so its relocation types are likewise represented as 'Nothing'.
 --
 -- TLS descriptor values are described at
--- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#tls-descriptors.
+-- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/e03d44ae2f0e1144f9498c2896b5ae25b0449398/riscv-elf.adoc#tls-descriptors.
 -- It's unclear how to support this at the moment, so they are likewise
 -- represented as 'Nothing'.
 
 -- This map is derived from Table 3 (Relocation types) of
--- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/17038f12910bf6e0bc8bb12d3a2d09dce3f9152a/riscv-elf.adoc#relocations.
+-- https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/e03d44ae2f0e1144f9498c2896b5ae25b0449398/riscv-elf.adoc#relocations.
 
 riscv_RelocationTypes ::
   forall w.
@@ -387,6 +391,7 @@ riscv_RelocationTypes = Map.fromList
   , riscvUnsupportedReloc R_RISCV_TLSDESC_LOAD_LO12 "R_RISCV_TLSDESC_LOAD_LO12" -- I-Type
   , riscvUnsupportedReloc R_RISCV_TLSDESC_ADD_LO12 "R_RISCV_TLSDESC_ADD_LO12" -- I-Type
   , riscvReloc R_RISCV_TLSDESC_CALL "R_RISCV_TLSDESC_CALL" none
+  , riscvReloc R_RISCV_VENDOR "R_RISCV_VENDOR" none
   ]
   where
     wordclass :: Int
