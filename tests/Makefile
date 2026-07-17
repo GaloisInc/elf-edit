@@ -1,4 +1,9 @@
+.PHONY: relocs
+
 all: simple.elf simple.static.elf libsymbol_versions.2.so fmax.elf ppc32-relocs.elf ppc64-relocs.elf riscv32-relocs.elf riscv64-relocs.elf
+
+relocs:
+	$(MAKE) -C relocs
 
 simple.elf: Makefile simple.c
 	gcc simple.c -o simple.elf
