@@ -28,7 +28,6 @@ extra-source-files:
   tests/relocs/riscv/relocs-rv64gc.o
   tests/relocs/riscv/relocs.s
   tests/relocs/x86_64/relocs.o
-  tests/relocs/x86_64/relocs.o.relocs
   tests/relocs/x86_64/relocs.s
 
 source-repository head

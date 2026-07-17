@@ -1,3 +1,8 @@
+{-
+I386 relocation types. The list of relocation types is taken from Table 4-1
+(Relocation Types) of
+<https://refspecs.linuxfoundation.org/elf/abi386-4.pdf>.
+-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -23,7 +28,7 @@ import           Numeric (showHex)
 import           Data.ElfEdit.Prim.Ehdr
 import           Data.ElfEdit.Relocations.Common
 
--- | Relocation types for 64-bit x86 code.
+-- | Relocation types for 32-bit x86 code.
 newtype I386_RelocationType = I386_RelocationType { fromI386_RelocationType :: Word8 }
   deriving (Eq,Ord)
 

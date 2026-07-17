@@ -2,7 +2,8 @@
 Copyright        : (c) Galois, Inc 2016
 Maintainer       : Joe Hendrix <jhendrix@galois.com>
 
-X86_64 relocation type.
+X86_64 relocation types. The list of relocation types is taken from
+<https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/e1ce098331da5dbd66e1ffc74162380bcc213236/x86-64-ABI/object-files.tex>.
 -}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -36,12 +37,28 @@ module Data.ElfEdit.Relocations.X86_64
   , pattern R_X86_64_PC64
   , pattern R_X86_64_GOTOFF64
   , pattern R_X86_64_GOTPC32
+  , pattern R_X86_64_GOT64
+  , pattern R_X86_64_GOTPCREL64
+  , pattern R_X86_64_GOTPC64
+  , pattern R_X86_64_PLTOFF64
   , pattern R_X86_64_SIZE32
   , pattern R_X86_64_SIZE64
   , pattern R_X86_64_GOTPC32_TLSDESC
   , pattern R_X86_64_TLSDESC_CALL
   , pattern R_X86_64_TLSDESC
   , pattern R_X86_64_IRELATIVE
+  , pattern R_X86_64_RELATIVE64
+  , pattern R_X86_64_GOTPCRELX
+  , pattern R_X86_64_REX_GOTPCRELX
+  , pattern R_X86_64_CODE_4_GOTPCRELX
+  , pattern R_X86_64_CODE_4_GOTTPOFF
+  , pattern R_X86_64_CODE_4_GOTPC32_TLSDESC
+  , pattern R_X86_64_CODE_5_GOTPCRELX
+  , pattern R_X86_64_CODE_5_GOTTPOFF
+  , pattern R_X86_64_CODE_5_GOTPC32_TLSDESC
+  , pattern R_X86_64_CODE_6_GOTPCRELX
+  , pattern R_X86_64_CODE_6_GOTTPOFF
+  , pattern R_X86_64_CODE_6_GOTPC32_TLSDESC
   ) where
 
 import qualified Data.Map.Strict as Map
@@ -130,6 +147,17 @@ pattern R_X86_64_GOTOFF64        = X86_64_RelocationType 25
 pattern R_X86_64_GOTPC32 :: X86_64_RelocationType
 pattern R_X86_64_GOTPC32         = X86_64_RelocationType 26
 
+-- These large-model relocation types are specified separately in the x86-64
+-- psABI relocation tables.
+pattern R_X86_64_GOT64 :: X86_64_RelocationType
+pattern R_X86_64_GOT64            = X86_64_RelocationType 27
+pattern R_X86_64_GOTPCREL64 :: X86_64_RelocationType
+pattern R_X86_64_GOTPCREL64       = X86_64_RelocationType 28
+pattern R_X86_64_GOTPC64 :: X86_64_RelocationType
+pattern R_X86_64_GOTPC64          = X86_64_RelocationType 29
+pattern R_X86_64_PLTOFF64 :: X86_64_RelocationType
+pattern R_X86_64_PLTOFF64         = X86_64_RelocationType 31
+
 pattern R_X86_64_SIZE32 :: X86_64_RelocationType
 pattern R_X86_64_SIZE32          = X86_64_RelocationType 32
 pattern R_X86_64_SIZE64 :: X86_64_RelocationType
@@ -142,6 +170,30 @@ pattern R_X86_64_TLSDESC :: X86_64_RelocationType
 pattern R_X86_64_TLSDESC         = X86_64_RelocationType 36
 pattern R_X86_64_IRELATIVE :: X86_64_RelocationType
 pattern R_X86_64_IRELATIVE       = X86_64_RelocationType 37
+pattern R_X86_64_RELATIVE64 :: X86_64_RelocationType
+pattern R_X86_64_RELATIVE64      = X86_64_RelocationType 38
+pattern R_X86_64_GOTPCRELX :: X86_64_RelocationType
+pattern R_X86_64_GOTPCRELX       = X86_64_RelocationType 41
+pattern R_X86_64_REX_GOTPCRELX :: X86_64_RelocationType
+pattern R_X86_64_REX_GOTPCRELX   = X86_64_RelocationType 42
+pattern R_X86_64_CODE_4_GOTPCRELX :: X86_64_RelocationType
+pattern R_X86_64_CODE_4_GOTPCRELX = X86_64_RelocationType 43
+pattern R_X86_64_CODE_4_GOTTPOFF :: X86_64_RelocationType
+pattern R_X86_64_CODE_4_GOTTPOFF = X86_64_RelocationType 44
+pattern R_X86_64_CODE_4_GOTPC32_TLSDESC :: X86_64_RelocationType
+pattern R_X86_64_CODE_4_GOTPC32_TLSDESC = X86_64_RelocationType 45
+pattern R_X86_64_CODE_5_GOTPCRELX :: X86_64_RelocationType
+pattern R_X86_64_CODE_5_GOTPCRELX = X86_64_RelocationType 46
+pattern R_X86_64_CODE_5_GOTTPOFF :: X86_64_RelocationType
+pattern R_X86_64_CODE_5_GOTTPOFF = X86_64_RelocationType 47
+pattern R_X86_64_CODE_5_GOTPC32_TLSDESC :: X86_64_RelocationType
+pattern R_X86_64_CODE_5_GOTPC32_TLSDESC = X86_64_RelocationType 48
+pattern R_X86_64_CODE_6_GOTPCRELX :: X86_64_RelocationType
+pattern R_X86_64_CODE_6_GOTPCRELX = X86_64_RelocationType 49
+pattern R_X86_64_CODE_6_GOTTPOFF :: X86_64_RelocationType
+pattern R_X86_64_CODE_6_GOTTPOFF = X86_64_RelocationType 50
+pattern R_X86_64_CODE_6_GOTPC32_TLSDESC :: X86_64_RelocationType
+pattern R_X86_64_CODE_6_GOTPC32_TLSDESC = X86_64_RelocationType 51
 
 x86Reloc :: X86_64_RelocationType
          -> String
@@ -188,12 +240,28 @@ x86_64_RelocationTypes = Map.fromList
   , x86Reloc R_X86_64_PC64            "R_X86_64_PC64"      64
   , x86Reloc R_X86_64_GOTOFF64        "R_X86_64_GOTOFF64"  64
   , x86Reloc R_X86_64_GOTPC32         "R_X86_64_GOTPC32"   32
+  , x86Reloc R_X86_64_GOT64           "R_X86_64_GOT64"     64
+  , x86Reloc R_X86_64_GOTPCREL64      "R_X86_64_GOTPCREL64" 64
+  , x86Reloc R_X86_64_GOTPC64         "R_X86_64_GOTPC64"   64
+  , x86Reloc R_X86_64_PLTOFF64        "R_X86_64_PLTOFF64"  64
   , x86Reloc R_X86_64_SIZE32          "R_X86_64_SIZE32"    32
   , x86Reloc R_X86_64_SIZE64          "R_X86_64_SIZE64"    64
   , x86Reloc R_X86_64_GOTPC32_TLSDESC "R_X86_64_GOTPC32_TLSDESC" 32
   , x86Reloc R_X86_64_TLSDESC_CALL    "R_X86_64_TLSDESC_CALL"     0
   , x86Reloc R_X86_64_TLSDESC         "R_X86_64_TLSDESC"        128
   , x86Reloc R_X86_64_IRELATIVE       "R_X86_64_IRELATIVE" wordclass
+  , x86Reloc R_X86_64_RELATIVE64      "R_X86_64_RELATIVE64" 64
+  , x86Reloc R_X86_64_GOTPCRELX       "R_X86_64_GOTPCRELX" 32
+  , x86Reloc R_X86_64_REX_GOTPCRELX   "R_X86_64_REX_GOTPCRELX" 32
+  , x86Reloc R_X86_64_CODE_4_GOTPCRELX "R_X86_64_CODE_4_GOTPCRELX" 32
+  , x86Reloc R_X86_64_CODE_4_GOTTPOFF "R_X86_64_CODE_4_GOTTPOFF" 32
+  , x86Reloc R_X86_64_CODE_4_GOTPC32_TLSDESC "R_X86_64_CODE_4_GOTPC32_TLSDESC" 32
+  , x86Reloc R_X86_64_CODE_5_GOTPCRELX "R_X86_64_CODE_5_GOTPCRELX" 32
+  , x86Reloc R_X86_64_CODE_5_GOTTPOFF "R_X86_64_CODE_5_GOTTPOFF" 32
+  , x86Reloc R_X86_64_CODE_5_GOTPC32_TLSDESC "R_X86_64_CODE_5_GOTPC32_TLSDESC" 32
+  , x86Reloc R_X86_64_CODE_6_GOTPCRELX "R_X86_64_CODE_6_GOTPCRELX" 32
+  , x86Reloc R_X86_64_CODE_6_GOTTPOFF "R_X86_64_CODE_6_GOTTPOFF" 32
+  , x86Reloc R_X86_64_CODE_6_GOTPC32_TLSDESC "R_X86_64_CODE_6_GOTPC32_TLSDESC" 32
   ]
 
 instance Show X86_64_RelocationType where
@@ -209,6 +277,7 @@ instance IsRelocationType X86_64_RelocationType where
   toRelocType = X86_64_RelocationType . fromIntegral
 
   isRelative R_X86_64_RELATIVE = True
+  isRelative R_X86_64_RELATIVE64 = True
   isRelative _ = False
 
   relocTargetBits tp =
