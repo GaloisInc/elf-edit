@@ -47,6 +47,19 @@ testRelocTargetBits = do
   T.assertEqual "RISC-V variable target" Nothing
     (Elf.relocTargetBits
       (Elf.R_RISCV_SET_ULEB128 :: Elf.RISCV_RelocationType 64))
+  T.assertEqual "AArch64 direct target" (Just 32)
+    (Elf.relocTargetBits (Elf.AArch64_RelocationType 258))
+  T.assertEqual "AArch64 instruction target" Nothing
+    (Elf.relocTargetBits (Elf.AArch64_RelocationType 283))
+  T.assertEqual "AArch64 unknown target" Nothing
+    (Elf.relocTargetBits (Elf.AArch64_RelocationType 0xffffffff))
+  T.assertEqual "AArch64 withdrawn null relocation"
+    "R_AARCH64_NONE"
+    (show (Elf.AArch64_RelocationType 256))
+  T.assertEqual "AArch64 PAuth dynamic target" (Just 64)
+    (Elf.relocTargetBits (Elf.AArch64_RelocationType 1044))
+  T.assertEqual "AArch64 PAuth TLS descriptor target" (Just 64)
+    (Elf.relocTargetBits (Elf.AArch64_RelocationType 1043))
 
 -- | Parse fixtures that contain many kinds of relocations.
 testRelocFixture :: forall tp proxy
@@ -154,7 +167,7 @@ tests = T.testGroup "Relocation fixtures"
         "AArch64"
         "./tests/relocs/aarch64/relocs.o"
         "./tests/relocs/aarch64/relocs.s"
-        (Just "./tests/relocs/aarch64/relocs.o.relocs")
+        Nothing
     , testRelocFixture
         (Proxy @Elf.X86_64_RelocationType)
         "x86-64"

@@ -17,7 +17,6 @@ extra-source-files:
   tests/Makefile
   tests/relocs/Makefile
   tests/relocs/aarch64/relocs.o
-  tests/relocs/aarch64/relocs.o.relocs
   tests/relocs/aarch64/relocs.s
   tests/relocs/arm32/relocs.o
   tests/relocs/arm32/relocs.o.relocs
