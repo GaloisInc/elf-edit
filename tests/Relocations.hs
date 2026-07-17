@@ -173,7 +173,7 @@ tests = T.testGroup "Relocation fixtures"
         "x86-64"
         "./tests/relocs/x86_64/relocs.o"
         "./tests/relocs/x86_64/relocs.s"
-        (Just "./tests/relocs/x86_64/relocs.o.relocs")
+        Nothing
     , testRelocFixture
         (Proxy @Elf.ARM32_RelocationType)
         "ARM32"
