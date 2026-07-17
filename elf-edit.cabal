@@ -23,7 +23,6 @@ extra-source-files:
   tests/relocs/ppc32/relocs.o
   tests/relocs/ppc32/relocs.s
   tests/relocs/ppc64/relocs.o
-  tests/relocs/ppc64/relocs.o.relocs
   tests/relocs/ppc64/relocs.s
   tests/relocs/riscv/relocs-rv32gc.o
   tests/relocs/riscv/relocs-rv64gc.o

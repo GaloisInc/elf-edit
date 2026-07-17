@@ -2,8 +2,10 @@
 Copyright        : (c) Galois, Inc 2023
 Maintainer       : Ryan Scott <rscott@galois.com>
 
-PPC64 relocation types. The list of relocation types is taken from Section 4.5
+PPC64 relocation types. The ELFv1 relocation types are taken from Section 4.5
 (Relocation) of <https://refspecs.linuxfoundation.org/ELF/ppc64/PPC-elf64abi-1.9.pdf>.
+Additional ELFv2 relocation types are taken from
+<https://github.com/OpenPOWERFoundation/ELFv2-ABI/blob/2c052b1ec5a5e2c51989eb109f8559a9df6d8202/specification/ch_3.xml>.
 -}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -44,6 +46,7 @@ module Data.ElfEdit.Relocations.PPC64
   , pattern R_PPC64_SECTOFF_LO
   , pattern R_PPC64_SECTOFF_HI
   , pattern R_PPC64_SECTOFF_HA
+  , pattern R_PPC64_REL30
   , pattern R_PPC64_ADDR30
   , pattern R_PPC64_ADDR64
   , pattern R_PPC64_ADDR16_HIGHER
@@ -114,6 +117,61 @@ module Data.ElfEdit.Relocations.PPC64
   , pattern R_PPC64_DTPREL16_HIGHERA
   , pattern R_PPC64_DTPREL16_HIGHEST
   , pattern R_PPC64_DTPREL16_HIGHESTA
+  , pattern R_PPC64_TLSGD
+  , pattern R_PPC64_TLSLD
+  , pattern R_PPC64_TOCSAVE
+  , pattern R_PPC64_ADDR16_HIGH
+  , pattern R_PPC64_ADDR16_HIGHA
+  , pattern R_PPC64_TPREL16_HIGH
+  , pattern R_PPC64_TPREL16_HIGHA
+  , pattern R_PPC64_DTPREL16_HIGH
+  , pattern R_PPC64_DTPREL16_HIGHA
+  , pattern R_PPC64_REL24_NOTOC
+  , pattern R_PPC64_ADDR64_LOCAL
+  , pattern R_PPC64_ENTRY
+  , pattern R_PPC64_PLTSEQ
+  , pattern R_PPC64_PLTCALL
+  , pattern R_PPC64_PLTSEQ_NOTOC
+  , pattern R_PPC64_PLTCALL_NOTOC
+  , pattern R_PPC64_PCREL_OPT
+  , pattern R_PPC64_D34
+  , pattern R_PPC64_D34_LO
+  , pattern R_PPC64_D34_HI30
+  , pattern R_PPC64_D34_HA30
+  , pattern R_PPC64_PCREL34
+  , pattern R_PPC64_GOT_PCREL34
+  , pattern R_PPC64_PLT_PCREL34
+  , pattern R_PPC64_PLT_PCREL34_NOTOC
+  , pattern R_PPC64_ADDR16_HIGHER34
+  , pattern R_PPC64_ADDR16_HIGHERA34
+  , pattern R_PPC64_ADDR16_HIGHEST34
+  , pattern R_PPC64_ADDR16_HIGHESTA34
+  , pattern R_PPC64_REL16_HIGHER34
+  , pattern R_PPC64_REL16_HIGHERA34
+  , pattern R_PPC64_REL16_HIGHEST34
+  , pattern R_PPC64_REL16_HIGHESTA34
+  , pattern R_PPC64_D28
+  , pattern R_PPC64_PCREL28
+  , pattern R_PPC64_TPREL34
+  , pattern R_PPC64_DTPREL34
+  , pattern R_PPC64_GOT_TLSGD_PCREL34
+  , pattern R_PPC64_GOT_TLSLD_PCREL34
+  , pattern R_PPC64_GOT_TPREL_PCREL34
+  , pattern R_PPC64_GOT_DTPREL_PCREL34
+  , pattern R_PPC64_REL16_HIGH
+  , pattern R_PPC64_REL16_HIGHA
+  , pattern R_PPC64_REL16_HIGHER
+  , pattern R_PPC64_REL16_HIGHERA
+  , pattern R_PPC64_REL16_HIGHEST
+  , pattern R_PPC64_REL16_HIGHESTA
+  , pattern R_PPC64_REL16DX_HA
+  , pattern R_PPC64_IRELATIVE
+  , pattern R_PPC64_REL16
+  , pattern R_PPC64_REL16_LO
+  , pattern R_PPC64_REL16_HI
+  , pattern R_PPC64_REL16_HA
+  , pattern R_PPC64_GNU_VTINHERIT
+  , pattern R_PPC64_GNU_VTENTRY
   , ppc64_RelocationTypes
   ) where
 
@@ -131,7 +189,7 @@ import           Data.ElfEdit.Utils (ppHex)
 newtype PPC64_RelocationType = PPC64_RelocationType { fromPPC64_RelocationType :: Word32 }
   deriving (Eq,Ord)
 
--- These values are derived from Figure 4-1 (Relocation Types) of
+-- The ELFv1 values are derived from Figure 4-1 (Relocation Types) of
 -- https://refspecs.linuxfoundation.org/ELF/ppc64/PPC-elf64abi-1.9.pdf.
 
 pattern R_PPC64_NONE :: PPC64_RelocationType
@@ -236,8 +294,13 @@ pattern R_PPC64_SECTOFF_HI = PPC64_RelocationType 35 -- #hi(R + A)
 pattern R_PPC64_SECTOFF_HA :: PPC64_RelocationType
 pattern R_PPC64_SECTOFF_HA = PPC64_RelocationType 36 -- #ha(R + A)
 
+-- ELFv2 uses the canonical name 'R_PPC64_REL30'.  Keep the ELFv1 spelling as
+-- a pattern synonym for source compatibility.
+pattern R_PPC64_REL30 :: PPC64_RelocationType
+pattern R_PPC64_REL30 = PPC64_RelocationType 37 -- (S + A - P) >> 2
+
 pattern R_PPC64_ADDR30 :: PPC64_RelocationType
-pattern R_PPC64_ADDR30 = PPC64_RelocationType 37 -- (S + A - P) >> 2
+pattern R_PPC64_ADDR30 = R_PPC64_REL30
 
 pattern R_PPC64_ADDR64 :: PPC64_RelocationType
 pattern R_PPC64_ADDR64 = PPC64_RelocationType 38 -- S + A
@@ -446,6 +509,120 @@ pattern R_PPC64_DTPREL16_HIGHEST = PPC64_RelocationType 105 -- #highest(@dtprel)
 pattern R_PPC64_DTPREL16_HIGHESTA :: PPC64_RelocationType
 pattern R_PPC64_DTPREL16_HIGHESTA = PPC64_RelocationType 106 -- #highesta(@dtprel)
 
+-- These values are derived from the ELFv2 relocation-types table:
+-- https://github.com/OpenPOWERFoundation/ELFv2-ABI/blob/2c052b1ec5a5e2c51989eb109f8559a9df6d8202/specification/ch_3.xml.
+
+pattern R_PPC64_TLSGD :: PPC64_RelocationType
+pattern R_PPC64_TLSGD = PPC64_RelocationType 107
+pattern R_PPC64_TLSLD :: PPC64_RelocationType
+pattern R_PPC64_TLSLD = PPC64_RelocationType 108
+pattern R_PPC64_TOCSAVE :: PPC64_RelocationType
+pattern R_PPC64_TOCSAVE = PPC64_RelocationType 109
+pattern R_PPC64_ADDR16_HIGH :: PPC64_RelocationType
+pattern R_PPC64_ADDR16_HIGH = PPC64_RelocationType 110
+pattern R_PPC64_ADDR16_HIGHA :: PPC64_RelocationType
+pattern R_PPC64_ADDR16_HIGHA = PPC64_RelocationType 111
+pattern R_PPC64_TPREL16_HIGH :: PPC64_RelocationType
+pattern R_PPC64_TPREL16_HIGH = PPC64_RelocationType 112
+pattern R_PPC64_TPREL16_HIGHA :: PPC64_RelocationType
+pattern R_PPC64_TPREL16_HIGHA = PPC64_RelocationType 113
+pattern R_PPC64_DTPREL16_HIGH :: PPC64_RelocationType
+pattern R_PPC64_DTPREL16_HIGH = PPC64_RelocationType 114
+pattern R_PPC64_DTPREL16_HIGHA :: PPC64_RelocationType
+pattern R_PPC64_DTPREL16_HIGHA = PPC64_RelocationType 115
+pattern R_PPC64_REL24_NOTOC :: PPC64_RelocationType
+pattern R_PPC64_REL24_NOTOC = PPC64_RelocationType 116
+pattern R_PPC64_ADDR64_LOCAL :: PPC64_RelocationType
+pattern R_PPC64_ADDR64_LOCAL = PPC64_RelocationType 117
+pattern R_PPC64_ENTRY :: PPC64_RelocationType
+pattern R_PPC64_ENTRY = PPC64_RelocationType 118
+pattern R_PPC64_PLTSEQ :: PPC64_RelocationType
+pattern R_PPC64_PLTSEQ = PPC64_RelocationType 119
+pattern R_PPC64_PLTCALL :: PPC64_RelocationType
+pattern R_PPC64_PLTCALL = PPC64_RelocationType 120
+pattern R_PPC64_PLTSEQ_NOTOC :: PPC64_RelocationType
+pattern R_PPC64_PLTSEQ_NOTOC = PPC64_RelocationType 121
+pattern R_PPC64_PLTCALL_NOTOC :: PPC64_RelocationType
+pattern R_PPC64_PLTCALL_NOTOC = PPC64_RelocationType 122
+pattern R_PPC64_PCREL_OPT :: PPC64_RelocationType
+pattern R_PPC64_PCREL_OPT = PPC64_RelocationType 123
+pattern R_PPC64_D34 :: PPC64_RelocationType
+pattern R_PPC64_D34 = PPC64_RelocationType 128
+pattern R_PPC64_D34_LO :: PPC64_RelocationType
+pattern R_PPC64_D34_LO = PPC64_RelocationType 129
+pattern R_PPC64_D34_HI30 :: PPC64_RelocationType
+pattern R_PPC64_D34_HI30 = PPC64_RelocationType 130
+pattern R_PPC64_D34_HA30 :: PPC64_RelocationType
+pattern R_PPC64_D34_HA30 = PPC64_RelocationType 131
+pattern R_PPC64_PCREL34 :: PPC64_RelocationType
+pattern R_PPC64_PCREL34 = PPC64_RelocationType 132
+pattern R_PPC64_GOT_PCREL34 :: PPC64_RelocationType
+pattern R_PPC64_GOT_PCREL34 = PPC64_RelocationType 133
+pattern R_PPC64_PLT_PCREL34 :: PPC64_RelocationType
+pattern R_PPC64_PLT_PCREL34 = PPC64_RelocationType 134
+pattern R_PPC64_PLT_PCREL34_NOTOC :: PPC64_RelocationType
+pattern R_PPC64_PLT_PCREL34_NOTOC = PPC64_RelocationType 135
+pattern R_PPC64_ADDR16_HIGHER34 :: PPC64_RelocationType
+pattern R_PPC64_ADDR16_HIGHER34 = PPC64_RelocationType 136
+pattern R_PPC64_ADDR16_HIGHERA34 :: PPC64_RelocationType
+pattern R_PPC64_ADDR16_HIGHERA34 = PPC64_RelocationType 137
+pattern R_PPC64_ADDR16_HIGHEST34 :: PPC64_RelocationType
+pattern R_PPC64_ADDR16_HIGHEST34 = PPC64_RelocationType 138
+pattern R_PPC64_ADDR16_HIGHESTA34 :: PPC64_RelocationType
+pattern R_PPC64_ADDR16_HIGHESTA34 = PPC64_RelocationType 139
+pattern R_PPC64_REL16_HIGHER34 :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHER34 = PPC64_RelocationType 140
+pattern R_PPC64_REL16_HIGHERA34 :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHERA34 = PPC64_RelocationType 141
+pattern R_PPC64_REL16_HIGHEST34 :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHEST34 = PPC64_RelocationType 142
+pattern R_PPC64_REL16_HIGHESTA34 :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHESTA34 = PPC64_RelocationType 143
+pattern R_PPC64_D28 :: PPC64_RelocationType
+pattern R_PPC64_D28 = PPC64_RelocationType 144
+pattern R_PPC64_PCREL28 :: PPC64_RelocationType
+pattern R_PPC64_PCREL28 = PPC64_RelocationType 145
+pattern R_PPC64_TPREL34 :: PPC64_RelocationType
+pattern R_PPC64_TPREL34 = PPC64_RelocationType 146
+pattern R_PPC64_DTPREL34 :: PPC64_RelocationType
+pattern R_PPC64_DTPREL34 = PPC64_RelocationType 147
+pattern R_PPC64_GOT_TLSGD_PCREL34 :: PPC64_RelocationType
+pattern R_PPC64_GOT_TLSGD_PCREL34 = PPC64_RelocationType 148
+pattern R_PPC64_GOT_TLSLD_PCREL34 :: PPC64_RelocationType
+pattern R_PPC64_GOT_TLSLD_PCREL34 = PPC64_RelocationType 149
+pattern R_PPC64_GOT_TPREL_PCREL34 :: PPC64_RelocationType
+pattern R_PPC64_GOT_TPREL_PCREL34 = PPC64_RelocationType 150
+pattern R_PPC64_GOT_DTPREL_PCREL34 :: PPC64_RelocationType
+pattern R_PPC64_GOT_DTPREL_PCREL34 = PPC64_RelocationType 151
+pattern R_PPC64_REL16_HIGH :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGH = PPC64_RelocationType 240
+pattern R_PPC64_REL16_HIGHA :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHA = PPC64_RelocationType 241
+pattern R_PPC64_REL16_HIGHER :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHER = PPC64_RelocationType 242
+pattern R_PPC64_REL16_HIGHERA :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHERA = PPC64_RelocationType 243
+pattern R_PPC64_REL16_HIGHEST :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHEST = PPC64_RelocationType 244
+pattern R_PPC64_REL16_HIGHESTA :: PPC64_RelocationType
+pattern R_PPC64_REL16_HIGHESTA = PPC64_RelocationType 245
+pattern R_PPC64_REL16DX_HA :: PPC64_RelocationType
+pattern R_PPC64_REL16DX_HA = PPC64_RelocationType 246
+pattern R_PPC64_IRELATIVE :: PPC64_RelocationType
+pattern R_PPC64_IRELATIVE = PPC64_RelocationType 248
+pattern R_PPC64_REL16 :: PPC64_RelocationType
+pattern R_PPC64_REL16 = PPC64_RelocationType 249
+pattern R_PPC64_REL16_LO :: PPC64_RelocationType
+pattern R_PPC64_REL16_LO = PPC64_RelocationType 250
+pattern R_PPC64_REL16_HI :: PPC64_RelocationType
+pattern R_PPC64_REL16_HI = PPC64_RelocationType 251
+pattern R_PPC64_REL16_HA :: PPC64_RelocationType
+pattern R_PPC64_REL16_HA = PPC64_RelocationType 252
+pattern R_PPC64_GNU_VTINHERIT :: PPC64_RelocationType
+pattern R_PPC64_GNU_VTINHERIT = PPC64_RelocationType 253
+pattern R_PPC64_GNU_VTENTRY :: PPC64_RelocationType
+pattern R_PPC64_GNU_VTENTRY = PPC64_RelocationType 254
+
 ppc64Reloc :: PPC64_RelocationType
            -> String
            -> Int
@@ -461,9 +638,6 @@ doubleword64 = 64
 word32 :: Int
 word32 = 32
 
-word30 :: Int
-word30 = 30
-
 half16 :: Int
 half16 = 16
 
@@ -477,14 +651,16 @@ ppc64UnsupportedReloc :: PPC64_RelocationType
                      -> (PPC64_RelocationType, (String,Maybe Int))
 ppc64UnsupportedReloc tp nm = (tp, (nm, Nothing))
 
--- These values are derived from Section 4.5.1 (Relocation Types) of
+-- The ELFv1 values are derived from Section 4.5.1 (Relocation Types) of
 -- https://refspecs.linuxfoundation.org/ELF/ppc64/PPC-elf64abi-1.9.pdf.
 --
 -- Note that some of these values are not currently supported. See
 -- https://github.com/GaloisInc/elf-edit/issues/39 for more information.
 --
--- This map is derived from Figure 4-1 (Relocation Types) of
+-- The ELFv1 portion of this map is derived from Figure 4-1 (Relocation Types) of
 -- https://refspecs.linuxfoundation.org/ELF/ppc64/PPC-elf64abi-1.9.pdf.
+-- The additional ELFv2 values are derived from
+-- https://github.com/OpenPOWERFoundation/ELFv2-ABI/blob/2c052b1ec5a5e2c51989eb109f8559a9df6d8202/specification/ch_3.xml.
 
 ppc64_RelocationTypes :: Map.Map PPC64_RelocationType (String, Maybe Int)
 ppc64_RelocationTypes = Map.fromList
@@ -508,7 +684,7 @@ ppc64_RelocationTypes = Map.fromList
   , ppc64Reloc R_PPC64_GOT16_HA "R_PPC64_GOT16_HA" half16
   , ppc64Reloc R_PPC64_COPY "R_PPC64_COPY" none
   , ppc64Reloc R_PPC64_GLOB_DAT "R_PPC64_GLOB_DAT" doubleword64
-  , ppc64Reloc R_PPC64_JMP_SLOT "R_PPC64_JMP_SLOT" none
+  , ppc64Reloc R_PPC64_JMP_SLOT "R_PPC64_JMP_SLOT" doubleword64
   , ppc64Reloc R_PPC64_RELATIVE "R_PPC64_RELATIVE" doubleword64
   , ppc64Reloc R_PPC64_UADDR32 "R_PPC64_UADDR32" word32
   , ppc64Reloc R_PPC64_UADDR16 "R_PPC64_UADDR16" half16
@@ -522,7 +698,7 @@ ppc64_RelocationTypes = Map.fromList
   , ppc64Reloc R_PPC64_SECTOFF_LO "R_PPC64_SECTOFF_LO" half16
   , ppc64Reloc R_PPC64_SECTOFF_HI "R_PPC64_SECTOFF_HI" half16
   , ppc64Reloc R_PPC64_SECTOFF_HA "R_PPC64_SECTOFF_HA" half16
-  , ppc64Reloc R_PPC64_ADDR30 "R_PPC64_ADDR30" word30
+  , ppc64UnsupportedReloc R_PPC64_REL30 "R_PPC64_REL30"
   , ppc64Reloc R_PPC64_ADDR64 "R_PPC64_ADDR64" doubleword64
   , ppc64Reloc R_PPC64_ADDR16_HIGHER "R_PPC64_ADDR16_HIGHER" half16
   , ppc64Reloc R_PPC64_ADDR16_HIGHERA "R_PPC64_ADDR16_HIGHERA" half16
@@ -592,6 +768,61 @@ ppc64_RelocationTypes = Map.fromList
   , ppc64Reloc R_PPC64_DTPREL16_HIGHERA "R_PPC64_DTPREL16_HIGHERA" half16
   , ppc64Reloc R_PPC64_DTPREL16_HIGHEST "R_PPC64_DTPREL16_HIGHEST" half16
   , ppc64Reloc R_PPC64_DTPREL16_HIGHESTA "R_PPC64_DTPREL16_HIGHESTA" half16
+  , ppc64Reloc R_PPC64_TLSGD "R_PPC64_TLSGD" none
+  , ppc64Reloc R_PPC64_TLSLD "R_PPC64_TLSLD" none
+  , ppc64Reloc R_PPC64_TOCSAVE "R_PPC64_TOCSAVE" none
+  , ppc64Reloc R_PPC64_ADDR16_HIGH "R_PPC64_ADDR16_HIGH" half16
+  , ppc64Reloc R_PPC64_ADDR16_HIGHA "R_PPC64_ADDR16_HIGHA" half16
+  , ppc64Reloc R_PPC64_TPREL16_HIGH "R_PPC64_TPREL16_HIGH" half16
+  , ppc64Reloc R_PPC64_TPREL16_HIGHA "R_PPC64_TPREL16_HIGHA" half16
+  , ppc64Reloc R_PPC64_DTPREL16_HIGH "R_PPC64_DTPREL16_HIGH" half16
+  , ppc64Reloc R_PPC64_DTPREL16_HIGHA "R_PPC64_DTPREL16_HIGHA" half16
+  , ppc64UnsupportedReloc R_PPC64_REL24_NOTOC "R_PPC64_REL24_NOTOC"
+  , ppc64Reloc R_PPC64_ADDR64_LOCAL "R_PPC64_ADDR64_LOCAL" doubleword64
+  , ppc64Reloc R_PPC64_ENTRY "R_PPC64_ENTRY" none
+  , ppc64Reloc R_PPC64_PLTSEQ "R_PPC64_PLTSEQ" none
+  , ppc64Reloc R_PPC64_PLTCALL "R_PPC64_PLTCALL" none
+  , ppc64Reloc R_PPC64_PLTSEQ_NOTOC "R_PPC64_PLTSEQ_NOTOC" none
+  , ppc64Reloc R_PPC64_PLTCALL_NOTOC "R_PPC64_PLTCALL_NOTOC" none
+  , ppc64Reloc R_PPC64_PCREL_OPT "R_PPC64_PCREL_OPT" none
+  , ppc64UnsupportedReloc R_PPC64_D34 "R_PPC64_D34"
+  , ppc64UnsupportedReloc R_PPC64_D34_LO "R_PPC64_D34_LO"
+  , ppc64UnsupportedReloc R_PPC64_D34_HI30 "R_PPC64_D34_HI30"
+  , ppc64UnsupportedReloc R_PPC64_D34_HA30 "R_PPC64_D34_HA30"
+  , ppc64UnsupportedReloc R_PPC64_PCREL34 "R_PPC64_PCREL34"
+  , ppc64UnsupportedReloc R_PPC64_GOT_PCREL34 "R_PPC64_GOT_PCREL34"
+  , ppc64UnsupportedReloc R_PPC64_PLT_PCREL34 "R_PPC64_PLT_PCREL34"
+  , ppc64UnsupportedReloc R_PPC64_PLT_PCREL34_NOTOC "R_PPC64_PLT_PCREL34_NOTOC"
+  , ppc64Reloc R_PPC64_ADDR16_HIGHER34 "R_PPC64_ADDR16_HIGHER34" half16
+  , ppc64Reloc R_PPC64_ADDR16_HIGHERA34 "R_PPC64_ADDR16_HIGHERA34" half16
+  , ppc64Reloc R_PPC64_ADDR16_HIGHEST34 "R_PPC64_ADDR16_HIGHEST34" half16
+  , ppc64Reloc R_PPC64_ADDR16_HIGHESTA34 "R_PPC64_ADDR16_HIGHESTA34" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHER34 "R_PPC64_REL16_HIGHER34" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHERA34 "R_PPC64_REL16_HIGHERA34" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHEST34 "R_PPC64_REL16_HIGHEST34" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHESTA34 "R_PPC64_REL16_HIGHESTA34" half16
+  , ppc64UnsupportedReloc R_PPC64_D28 "R_PPC64_D28"
+  , ppc64UnsupportedReloc R_PPC64_PCREL28 "R_PPC64_PCREL28"
+  , ppc64UnsupportedReloc R_PPC64_TPREL34 "R_PPC64_TPREL34"
+  , ppc64UnsupportedReloc R_PPC64_DTPREL34 "R_PPC64_DTPREL34"
+  , ppc64UnsupportedReloc R_PPC64_GOT_TLSGD_PCREL34 "R_PPC64_GOT_TLSGD_PCREL34"
+  , ppc64UnsupportedReloc R_PPC64_GOT_TLSLD_PCREL34 "R_PPC64_GOT_TLSLD_PCREL34"
+  , ppc64UnsupportedReloc R_PPC64_GOT_TPREL_PCREL34 "R_PPC64_GOT_TPREL_PCREL34"
+  , ppc64UnsupportedReloc R_PPC64_GOT_DTPREL_PCREL34 "R_PPC64_GOT_DTPREL_PCREL34"
+  , ppc64Reloc R_PPC64_REL16_HIGH "R_PPC64_REL16_HIGH" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHA "R_PPC64_REL16_HIGHA" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHER "R_PPC64_REL16_HIGHER" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHERA "R_PPC64_REL16_HIGHERA" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHEST "R_PPC64_REL16_HIGHEST" half16
+  , ppc64Reloc R_PPC64_REL16_HIGHESTA "R_PPC64_REL16_HIGHESTA" half16
+  , ppc64UnsupportedReloc R_PPC64_REL16DX_HA "R_PPC64_REL16DX_HA"
+  , ppc64Reloc R_PPC64_IRELATIVE "R_PPC64_IRELATIVE" doubleword64
+  , ppc64Reloc R_PPC64_REL16 "R_PPC64_REL16" half16
+  , ppc64Reloc R_PPC64_REL16_LO "R_PPC64_REL16_LO" half16
+  , ppc64Reloc R_PPC64_REL16_HI "R_PPC64_REL16_HI" half16
+  , ppc64Reloc R_PPC64_REL16_HA "R_PPC64_REL16_HA" half16
+  , ppc64Reloc R_PPC64_GNU_VTINHERIT "R_PPC64_GNU_VTINHERIT" none
+  , ppc64Reloc R_PPC64_GNU_VTENTRY "R_PPC64_GNU_VTENTRY" none
   ]
 
 instance Show PPC64_RelocationType where
