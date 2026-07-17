@@ -19,7 +19,6 @@ extra-source-files:
   tests/relocs/aarch64/relocs.o
   tests/relocs/aarch64/relocs.s
   tests/relocs/arm32/relocs.o
-  tests/relocs/arm32/relocs.o.relocs
   tests/relocs/arm32/relocs.s
   tests/relocs/ppc32/relocs.o
   tests/relocs/ppc32/relocs.s

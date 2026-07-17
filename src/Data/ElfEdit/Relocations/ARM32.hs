@@ -2,7 +2,8 @@
 Copyright        : (c) Galois, Inc 2017
 Maintainer       : Ben Davis <ben@galois.com>
 
-ARM32 relocation types.
+ARM32 relocation types. The list of relocation types is taken from
+<https://github.com/ARM-software/abi-aa/blob/ee4b3c12d57c8424ff60c2ae56e10690d0604ab6/aaelf32/aaelf32.rst>.
 -}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -24,6 +25,9 @@ import           Data.ElfEdit.Utils (ppHex)
 -- | Relocation types for ARM32 code.
 newtype ARM32_RelocationType = ARM32_RelocationType { fromARM32_RelocationType :: Word8 }
   deriving (Eq,Ord)
+
+-- These values are derived from the relocation-types table in AAELF32:
+-- https://github.com/ARM-software/abi-aa/blob/ee4b3c12d57c8424ff60c2ae56e10690d0604ab6/aaelf32/aaelf32.rst.
 
 pattern R_ARM_NONE :: ARM32_RelocationType
 pattern R_ARM_NONE               = ARM32_RelocationType 0   -- Static Miscellaneous
@@ -297,8 +301,46 @@ pattern R_ARM_THM_ALU_ABS_G2_NC :: ARM32_RelocationType
 pattern R_ARM_THM_ALU_ABS_G2_NC  = ARM32_RelocationType 134 -- Static Thumb16 S + A
 pattern R_ARM_THM_ALU_ABS_G3 :: ARM32_RelocationType
 pattern R_ARM_THM_ALU_ABS_G3     = ARM32_RelocationType 135 -- Static Thumb16 S + A
+pattern R_ARM_THM_BF16 :: ARM32_RelocationType
+pattern R_ARM_THM_BF16           = ARM32_RelocationType 136 -- Static Arm ((S + A) | T) - P
+pattern R_ARM_THM_BF12 :: ARM32_RelocationType
+pattern R_ARM_THM_BF12           = ARM32_RelocationType 137 -- Static Arm ((S + A) | T) - P
+pattern R_ARM_THM_BF18 :: ARM32_RelocationType
+pattern R_ARM_THM_BF18           = ARM32_RelocationType 138 -- Static Arm ((S + A) | T) - P
 pattern R_ARM_IRELATIVE :: ARM32_RelocationType
 pattern R_ARM_IRELATIVE          = ARM32_RelocationType 160 -- Dynamic Reserved for future functionality
+pattern R_ARM_PRIVATE_16 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_16         = ARM32_RelocationType 161 -- Private
+pattern R_ARM_PRIVATE_17 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_17         = ARM32_RelocationType 162 -- Private
+pattern R_ARM_PRIVATE_18 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_18         = ARM32_RelocationType 163 -- Private
+pattern R_ARM_PRIVATE_19 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_19         = ARM32_RelocationType 164 -- Private
+pattern R_ARM_PRIVATE_20 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_20         = ARM32_RelocationType 165 -- Private
+pattern R_ARM_PRIVATE_21 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_21         = ARM32_RelocationType 166 -- Private
+pattern R_ARM_PRIVATE_22 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_22         = ARM32_RelocationType 167 -- Private
+pattern R_ARM_PRIVATE_23 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_23         = ARM32_RelocationType 168 -- Private
+pattern R_ARM_PRIVATE_24 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_24         = ARM32_RelocationType 169 -- Private
+pattern R_ARM_PRIVATE_25 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_25         = ARM32_RelocationType 170 -- Private
+pattern R_ARM_PRIVATE_26 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_26         = ARM32_RelocationType 171 -- Private
+pattern R_ARM_PRIVATE_27 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_27         = ARM32_RelocationType 172 -- Private
+pattern R_ARM_PRIVATE_28 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_28         = ARM32_RelocationType 173 -- Private
+pattern R_ARM_PRIVATE_29 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_29         = ARM32_RelocationType 174 -- Private
+pattern R_ARM_PRIVATE_30 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_30         = ARM32_RelocationType 175 -- Private
+pattern R_ARM_PRIVATE_31 :: ARM32_RelocationType
+pattern R_ARM_PRIVATE_31         = ARM32_RelocationType 176 -- Private
 
 -- ARM_RELOC builds a relocation entry for arm_RelocationTypes
 
@@ -440,7 +482,26 @@ arm_RelocationTypes = Map.fromList
   , (,) R_ARM_THM_ALU_ABS_G1_NC  "R_ARM_THM_ALU_ABS_G1_NC"
   , (,) R_ARM_THM_ALU_ABS_G2_NC  "R_ARM_THM_ALU_ABS_G2_NC"
   , (,) R_ARM_THM_ALU_ABS_G3     "R_ARM_THM_ALU_ABS_G3"
+  , (,) R_ARM_THM_BF16           "R_ARM_THM_BF16"
+  , (,) R_ARM_THM_BF12           "R_ARM_THM_BF12"
+  , (,) R_ARM_THM_BF18           "R_ARM_THM_BF18"
   , (,) R_ARM_IRELATIVE          "R_ARM_IRELATIVE"
+  , (,) R_ARM_PRIVATE_16         "R_ARM_PRIVATE_16"
+  , (,) R_ARM_PRIVATE_17         "R_ARM_PRIVATE_17"
+  , (,) R_ARM_PRIVATE_18         "R_ARM_PRIVATE_18"
+  , (,) R_ARM_PRIVATE_19         "R_ARM_PRIVATE_19"
+  , (,) R_ARM_PRIVATE_20         "R_ARM_PRIVATE_20"
+  , (,) R_ARM_PRIVATE_21         "R_ARM_PRIVATE_21"
+  , (,) R_ARM_PRIVATE_22         "R_ARM_PRIVATE_22"
+  , (,) R_ARM_PRIVATE_23         "R_ARM_PRIVATE_23"
+  , (,) R_ARM_PRIVATE_24         "R_ARM_PRIVATE_24"
+  , (,) R_ARM_PRIVATE_25         "R_ARM_PRIVATE_25"
+  , (,) R_ARM_PRIVATE_26         "R_ARM_PRIVATE_26"
+  , (,) R_ARM_PRIVATE_27         "R_ARM_PRIVATE_27"
+  , (,) R_ARM_PRIVATE_28         "R_ARM_PRIVATE_28"
+  , (,) R_ARM_PRIVATE_29         "R_ARM_PRIVATE_29"
+  , (,) R_ARM_PRIVATE_30         "R_ARM_PRIVATE_30"
+  , (,) R_ARM_PRIVATE_31         "R_ARM_PRIVATE_31"
   ]
 
 instance Show ARM32_RelocationType where
@@ -455,11 +516,20 @@ instance IsRelocationType ARM32_RelocationType where
   relaWidth _ = ELFCLASS32
 
   relocTargetBits tp =
-    Just $ case tp of
-      R_ARM_ABS16 -> 16
-      R_ARM_ABS8  -> 8
-      R_ARM_PREL31 -> 31
-      _ -> 32
+    case tp of
+      -- Private relocation semantics depend on EI_OSABI, and the Branch
+      -- Future relocations write discontiguous instruction fields.
+      ARM32_RelocationType n
+        | 112 <= n && n <= 127 -> Nothing
+        | 161 <= n && n <= 176 -> Nothing
+      R_ARM_THM_BF16 -> Nothing
+      R_ARM_THM_BF12 -> Nothing
+      R_ARM_THM_BF18 -> Nothing
+      _ -> Just $ case tp of
+        R_ARM_ABS16 -> 16
+        R_ARM_ABS8  -> 8
+        R_ARM_PREL31 -> 31
+        _ -> 32
   toRelocType = ARM32_RelocationType . fromIntegral
 
 
